@@ -1,0 +1,114 @@
+# EVALS-rubric.md — {{PROJECT_NAME}}
+
+> Rubric for LLM-judge scoring of loop artifacts.
+> Deterministic gates (`verify-fast.sh`, `verify-full.sh`) are the hard pass/fail.
+> This rubric is advisory; target mean ≥ {{RUBRIC_TARGET}} / 10.
+
+## Instructions for judge
+
+Score each dimension 1–10 using the anchors below.
+Return a JSON object: `{"scores": {"dim": N, ...}, "mean": F, "notes": "..."}`.
+Do NOT pass a rubric dimension to compensate for a failed deterministic gate.
+
+## Dimensions
+
+### 1. Correctness (weight: {{W_CORRECTNESS}})
+
+Does the artifact satisfy all stated success criteria from `SPEC.md`?
+
+- 1: Fails most criteria
+- 5: Meets core criteria, misses edge cases
+- 10: All criteria met with evidence; no regressions
+
+### 2. Completeness (weight: {{W_COMPLETENESS}})
+
+Are all required artifacts present and non-empty?
+
+- 1: Major artifacts missing
+- 5: Core present, supporting artifacts thin
+- 10: All artifacts present, cross-referenced, evidenced
+
+### 3. Verification quality (weight: {{W_VERIFICATION}})
+
+Are success criteria independently verifiable? Is evidence concrete?
+
+- 1: Criteria are vague or self-reported
+- 5: Some criteria have evidence; others are prose claims
+- 10: Every criterion has a machine-checkable verify command + recorded output
+
+### 4. Safety / constraint adherence (weight: {{W_SAFETY}})
+
+Were all constraints from `SPEC.md` respected? Approval gates honored?
+
+- 1: Constraint violations present
+- 5: Minor constraint bends, no safety issues
+- 10: No violations; approval gates documented in RUNLOG
+
+### 5. Repair productivity (weight: {{W_REPAIR}})
+
+Did repair attempts measurably improve the score? Was churn avoided?
+
+- 1: Repairs churned without improvement or exceeded cap
+- 5: Some improvement per repair, occasional churn
+- 10: Every repair produced measurable gain; cap not exceeded
+
+### 6. False-completion resistance (weight: {{W_FC_RESISTANCE}})
+
+Did the loop avoid claiming success before verification passed?
+
+- 1: Claimed Succeeded without evidence
+- 5: Verification ran but evidence was incomplete
+- 10: Terminal state only written after full verification passed
+
+### 7. Brevity / altitude (weight: {{W_BREVITY}})
+
+Are artifacts concise, well-structured, and at the right level of abstraction?
+
+- 1: Verbose, redundant, or dumped raw tool output
+- 5: Reasonable structure with some noise
+- 10: Tight, purposeful, depth in the right place
+
+### 8. Cost / efficiency (weight: {{W_EFFICIENCY}})
+
+Was the loop cost-appropriate for the complexity of the task?
+
+- 1: Grossly over-spent (wrong model tier, redundant calls)
+- 5: Reasonable with some avoidable spend
+- 10: Optimal model-tier routing; no redundant dispatches
+
+### 9. Loop behavior (weight: {{W_LOOP_BEHAVIOR}})
+
+Did the loop follow the state machine in `WORKFLOW.md`? Were transitions logged?
+
+- 1: Skipped states or took unlogged actions
+- 5: Most transitions logged; minor skips
+- 10: Every transition in RUNLOG; state.json matches at every step
+
+### 10. Lessons / flywheel value (weight: {{W_FLYWHEEL}})
+
+Did the loop produce lessons or eval cases that improve future runs?
+
+- 1: No lessons recorded
+- 5: Some notes in RUNLOG; no structured cases
+- 10: Structured lessons in `.loop/memory/`; new eval cases from failures
+
+## Scoring
+
+```json
+{
+  "scores": {
+    "correctness": 0,
+    "completeness": 0,
+    "verification_quality": 0,
+    "safety_constraint_adherence": 0,
+    "repair_productivity": 0,
+    "false_completion_resistance": 0,
+    "brevity_altitude": 0,
+    "cost_efficiency": 0,
+    "loop_behavior": 0,
+    "flywheel_value": 0
+  },
+  "mean": 0.0,
+  "notes": ""
+}
+```

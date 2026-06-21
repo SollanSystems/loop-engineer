@@ -1,0 +1,64 @@
+{
+  "_comment": "Expected structural facts for self_eval.py check inputs. Update this file when the suite changes (e.g., a new skill or template is added). The self_eval checks compare live repo state against these values.",
+  "skill_names": [
+    "loop-engineer",
+    "loop-architect",
+    "loop-contract",
+    "loop-run",
+    "loop-repair",
+    "loop-evals",
+    "loop-flywheel"
+  ],
+  "reference_filenames": [
+    "architecture-matrix.md",
+    "loop-patterns.md",
+    "repo-os-contract.md",
+    "prompt-templates.md",
+    "eval-suite.md",
+    "safety-and-approvals.md",
+    "platform-map.md"
+  ],
+  "terminal_states": [
+    "Succeeded",
+    "FailedUnverifiable",
+    "FailedBlocked",
+    "FailedBudget",
+    "FailedSafety",
+    "FailedSpecGap",
+    "AbortedByHuman"
+  ],
+  "repair_record_fields": [
+    "failure_mode",
+    "hypothesis",
+    "repair_action",
+    "verification_before",
+    "verification_after"
+  ],
+  "template_filenames": [
+    "AGENTS.md.tmpl",
+    "SPEC.md.tmpl",
+    "WORKFLOW.md.tmpl",
+    "TASKS.json.tmpl",
+    "RUNLOG.md.tmpl",
+    "state.json.tmpl",
+    "terminal_state.json.tmpl",
+    "verify-fast.sh",
+    "verify-full.sh",
+    "EVALS-rubric.md.tmpl"
+  ],
+  "eval_layer_names": [
+    "deterministic-correctness",
+    "artifact-quality",
+    "human-calibration",
+    "loop-behavior",
+    "security/governance",
+    "regression-resistance",
+    "cost/efficiency"
+  ],
+  "first_class_metrics": [
+    "false-completion-rate",
+    "repair-productivity"
+  ],
+  "rubric_target_mean": 9.5,
+  "repair_cap_default": 2
+}

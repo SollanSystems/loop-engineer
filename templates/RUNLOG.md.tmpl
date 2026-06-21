@@ -1,0 +1,42 @@
+# RUNLOG.md — {{PROJECT_NAME}}
+
+> Human-readable iteration history. Append-only — one entry per loop iteration.
+> Machine state lives in `.loop/state.json`; this is the audit trail.
+
+---
+
+## Iteration {{ITERATION_ID}} — {{ITERATION_DATE}}
+
+**State entered:** `{{STATE_NAME}}`
+**Active task:** `{{ACTIVE_TASK_ID}}` — {{TASK_TITLE}}
+**Plan version:** {{PLAN_VERSION}}
+
+### Actions taken
+
+- {{ACTION_1}}
+- {{ACTION_2}}
+
+### Verification result
+
+- **Gate:** `{{VERIFY_GATE}}` — {{VERIFY_OUTCOME}} (`{{VERIFY_CMD}}`)
+- **Score before:** {{SCORE_BEFORE}}
+- **Score after:** {{SCORE_AFTER}}
+
+### Outcome
+
+`{{ITERATION_OUTCOME}}` — one of: `task_passed`, `task_failed`, `repair_triggered`, `approval_requested`, `replanned`, `terminal`
+
+### Repair record (if repair triggered)
+
+- **Failure mode:** {{FAILURE_MODE}}
+- **Repair action:** {{REPAIR_ACTION}}
+- **Attempt:** {{REPAIR_ATTEMPT}} of {{REPAIR_CAP}}
+- **Measurable improvement:** {{IMPROVEMENT_FLAG}}
+
+### Notes
+
+{{ITERATION_NOTES}}
+
+---
+
+<!-- Add new iterations above this line. Do not edit past entries. -->

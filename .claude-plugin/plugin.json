@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "loop-engineer",
+  "version": "0.1.0",
+  "description": "Design, launch, verify, repair, and improve agent loops. A Claude-Code-native architect+operator for long-running, verifiable, self-improving agentic-coding systems.",
+  "author": { "name": "Sollan Systems", "url": "https://github.com/SollanSystems" },
+  "license": "MIT"
+}

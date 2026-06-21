@@ -1,0 +1,67 @@
+# AGENTS.md — {{PROJECT_NAME}} Loop Operating Rules
+
+> Stable rules for agents working in this loop workspace.
+> Do NOT edit during a run. Update between runs only.
+
+## Workspace
+
+- **Goal:** See `SPEC.md`
+- **Loop policy:** See `WORKFLOW.md`
+- **Task queue:** `TASKS.json`
+- **Run history:** `RUNLOG.md`
+- **Live state:** `.loop/state.json`
+- **Terminal state:** `.loop/terminal_state.json` (written once, on termination)
+
+## Tool boundaries
+
+| Tier | Allowed |
+|---|---|
+| read-only | Any file read, grep, search |
+| workspace-write | Files under `{{WORKSPACE_PATH}}` only |
+| network | {{NETWORK_POLICY}} |
+| external-side-effects | Requires approval gate (see `WORKFLOW.md`) |
+| production-mutation | Hard-blocked unless `approval_policy: strict` gate passed |
+
+## Dispatch model routing (HARD CONTRACT)
+
+Every agent dispatch names an explicit `model:`:
+- read / explore / search → `model: haiku`
+- reason / design / review → `model: sonnet`
+- write / fix / produce artifacts → `model: opus`
+- main-loop orchestration → main session only
+
+Never omit `model:`. Inherited-model dispatch is a broken call.
+
+## Approval gates
+
+Pause and request human approval before:
+1. Any destructive command (delete, overwrite outside workspace)
+2. Access to secrets or credentials
+3. Production system changes
+4. Financial or policy-sensitive outputs
+
+Approval suspends the run; resume continues from the same `state.json` checkpoint.
+Never re-start a fresh untracked attempt after an approval gate.
+
+## Failure and repair
+
+- Max repair attempts per task: **{{REPAIR_CAP}}** (default 2)
+- On exceeding cap: replan or escalate — do not silently retry
+- On repeated failure without measurable improvement: replan
+- On detected verifier-gaming: hard-terminate (`FailedSafety`) + log
+
+## Resume rule
+
+If `.loop/state.json` exists with `terminal_state: null`:
+- Skip intake
+- Read `active_task` and `iteration_id`
+- Continue from the first incomplete state
+
+## Cross-references
+
+- `SPEC.md` — success criteria, constraints, evidence rules
+- `WORKFLOW.md` — loop policy, budgets, terminal states, approval policy
+- `TASKS.json` — machine-readable task ledger
+- `RUNLOG.md` — human-readable iteration history
+- `scripts/verify-fast.sh` — quick deterministic gate
+- `scripts/verify-full.sh` — full verification suite

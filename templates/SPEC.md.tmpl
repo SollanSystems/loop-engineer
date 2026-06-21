@@ -1,0 +1,61 @@
+# SPEC.md — {{PROJECT_NAME}}
+
+> Intent layer. Describes WHAT success looks like, not HOW to achieve it.
+> Written once; amended only when the goal itself changes.
+
+## Goal
+
+{{GOAL_DESCRIPTION}}
+
+## Success criteria
+
+Each criterion must be independently verifiable. Vague criteria → `FailedSpecGap`.
+
+1. {{CRITERION_1}}
+2. {{CRITERION_2}}
+3. {{CRITERION_3}}
+
+## Constraints
+
+Things the loop must NOT do, regardless of outcome:
+
+- {{CONSTRAINT_1}}
+- {{CONSTRAINT_2}}
+
+## Non-goals
+
+Explicitly out of scope for this loop:
+
+- {{NON_GOAL_1}}
+- {{NON_GOAL_2}}
+
+## Evidence rules
+
+What counts as proof that each success criterion is met:
+
+| Criterion | Evidence | Verification command |
+|---|---|---|
+| {{CRITERION_1}} | {{EVIDENCE_1}} | `{{VERIFY_CMD_1}}` |
+| {{CRITERION_2}} | {{EVIDENCE_2}} | `{{VERIFY_CMD_2}}` |
+
+## Underspecified-criteria rule
+
+If any success criterion cannot be reduced to a concrete, checkable evidence rule,
+treat the loop as `FailedSpecGap` rather than proceeding. Do not infer unstated criteria.
+
+## Risk profile
+
+`{{RISK_PROFILE}}` — one of: `low`, `med`, `high`
+
+- `low`: workspace-write only, no external services, fully reversible
+- `med`: network or shared-state access, partially reversible
+- `high`: production, financial, or policy-sensitive; requires `approval_policy: strict`
+
+## Inputs
+
+- `goal`: {{GOAL_DESCRIPTION}}
+- `workspace_path`: `{{WORKSPACE_PATH}}`
+- `allowed_tools`: [{{ALLOWED_TOOLS}}]
+- `time_budget`: {{TIME_BUDGET}}
+- `cost_budget`: {{COST_BUDGET}}
+- `approval_policy`: `{{APPROVAL_POLICY}}`

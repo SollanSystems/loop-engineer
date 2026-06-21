@@ -1,0 +1,14 @@
+{
+  "schema": "loop-engineer/state@1",
+  "project": "pricing-coverage-and-validation",
+  "iteration_id": 2,
+  "state": "terminal",
+  "plan_version": 1,
+  "active_task": "T2",
+  "best_score": 0.83,
+  "failure_mode": null,
+  "pending_approval": null,
+  "budget_remaining": { "time": "11m", "cost": "0.58usd" },
+  "checkpoint_path": ".loop/checkpoints/iter2-good.json",
+  "terminal_state": "Succeeded"
+}
