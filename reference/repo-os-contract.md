@@ -39,7 +39,9 @@ in `loop-patterns.md`; the safety/terminal semantics live in `safety-and-approva
     checkpoints/      # point-in-time snapshots of best-known-good state
     artifacts/        # intermediate work products (drafts, generated files)
     approvals/        # one file per approval request + its resolution
-    memory/           # short-term compaction summary + long-term lessons
+    memory/
+      session-summary.md   # short-term: continue-this-run compaction summary (disposable at terminal)
+      lessons.md           # long-term: durable lessons that improve future runs
 ```
 
 Every artifact has exactly one owner concern (see §9). The split is deliberate: a turn that
@@ -223,7 +225,7 @@ Python-FSM realization is chosen, it points to Harmony's existing `engine/cli.py
   "plan_version": 1,
   "active_task": "T2",
   "best_score": 0.74,
-  "failure_mode": "coverage_below_threshold",
+  "failure_mode": "deterministic-fail",
   "pending_approval": null,
   "budget_remaining": { "time": "18m", "cost": "0.62usd" },
   "checkpoint_path": ".loop/checkpoints/iter1-good.json",
@@ -379,7 +381,7 @@ architecture decision record that `[[loop-architect]]` emits.
 ---
 
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
-Anthropic "Effective harnesses for long-running agents," OpenAI Agents/Codex guidance, Google
+Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents
 Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), and Code as Agent Harness
 (2605.18747).

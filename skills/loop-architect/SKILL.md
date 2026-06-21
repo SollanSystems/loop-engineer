@@ -94,8 +94,8 @@ Output a structured architecture decision record:
   "loop_patterns": ["preflect (policy A)", "milestone-loop", "patch-and-repair"],
   "risk_profile": "med",
   "approval_policy": "on_side_effects",
-  "terminal_state_plan": ["Succeeded", "FailedUnverifiable", "FailedBudget",
-                          "FailedBlocked", "FailedSafety", "FailedSpecGap", "AbortedByHuman"],
+  "terminal_state_plan": ["Succeeded", "FailedUnverifiable", "FailedBlocked",
+                          "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"],
   "next_spokes": ["loop-contract", "loop-run", "loop-evals", "loop-repair"],
   "rationale": "<why this shape over the cheaper one; which overload signal justified climbing>"
 }
@@ -117,5 +117,15 @@ Once the ADR is emitted, run [[loop-contract]] to scaffold the chosen shape into
 repo-OS operating contract, then [[loop-run]] to execute it. The ADR is the durable
 input both consume.
 
+If the realization must survive an engine switch (the cross-engine / portable-spine
+row), map the chosen realization onto the target surface using
+`reference/platform-map.md` — it translates each repo-OS contract element (read files /
+run scripts / write state / dispatch with an explicit `model:`) onto Claude, Codex,
+Hermes, and Google, keeping the ADR's realization a runner swap rather than a rebuild.
+
 Deep dives: `reference/architecture-matrix.md` (5-candidate ratings + realization
 picker), `reference/loop-patterns.md` (the 6-pattern library).
+
+---
+
+Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682 — long-horizon success rates motivating the verifiable-success bar), PreFlect (arXiv 2602.07187 — the pre-execution reflection policy), Plan Compliance (arXiv 2604.12147 — the scenario→architecture decision table), and Anthropic guidance on long-running agent harnesses (anthropic.com, 2025).

@@ -1,0 +1,8 @@
+{
+  "task": "T2",
+  "verify": "scripts/verify-full",
+  "outcome": "PASS",
+  "score": 0.83,
+  "criteria": { "1": true },
+  "detail": "coverage 0.83 >= 0.80; both validation branches green after repair"
+}

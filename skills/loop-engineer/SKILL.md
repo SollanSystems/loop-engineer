@@ -1,6 +1,6 @@
 ---
 name: loop-engineer
-description: "Router for designing, launching, verifying, repairing, and improving agent loops. Use for broad agent-loop intent — design an agent loop, build a verification harness, set up a repair loop, optimize my agent system, run a long-running goal, create an agent harness, make my agentic coding more robust. Points to the right spoke (loop-architect, loop-contract, loop-run, loop-repair, loop-evals, loop-flywheel) and defers to existing verification/execution assets."
+description: "Router for designing, launching, verifying, repairing, and improving agent loops. Use for broad agent-loop intent — design an agent loop, build a verification harness, set up a repair loop, optimize my agent system, run a long-running goal, create an agent harness, create an agent loop, make my agentic coding more robust. Points to the right spoke (loop-architect, loop-contract, loop-run, loop-repair, loop-evals, loop-flywheel) and defers to existing verification/execution assets."
 ---
 
 # loop-engineer
@@ -15,16 +15,20 @@ This skill is the **router**. It maps broad intent onto six focused spokes. Read
 
 Reach here for broad agent-loop intent: "design an agent loop", "build a verification harness", "set up a repair loop", "optimize my agent system", "long-running goal", "agent harness", "make my agentic coding more robust." If you already know the phase (architecting vs running vs repairing vs measuring vs improving), skip straight to that spoke below.
 
+The router's only job is to send you to the right spoke — it does **not** design, scaffold, run, or repair a loop itself; the spokes do. Two signals say you are in the right place: the work is about the *loop* (its shape, contract, execution, verification, or improvement) rather than the end task the loop performs, and the request is broad enough that the phase is not yet obvious. If the actual work is the domain task — writing the feature, doing the UI, running the migration — this is the wrong entry point; route to the matching domain skill and let the loop wrap it.
+
 ## The 6-spoke decision map
 
-| Spoke | Reach for it when… |
-|---|---|
-| **[[loop-architect]]** | You have a raw objective and need to decide the loop's shape — one agent or many, which architecture, which physical realization (Workflow / markdown-supervisor / Harmony Python-spine / delegate). The brain: classifies the scenario and emits an **architecture decision record**. Read-only/advisory. |
-| **[[loop-contract]]** | The architecture is chosen and you need to scaffold the **repo-OS operating contract** — `SPEC.md`, `WORKFLOW.md`, `TASKS.json`, `RUNLOG.md`, `.loop/state.json`, `verify-*` skeletons — plus the pre-execution reflection record. |
-| **[[loop-run]]** | The contract exists and you need to **operate the loop** — run the state machine (intake→plan→critique→queue→execute→verify→repair/replan/approval→terminal), honor the 7 terminal states, pause/resume on approval, dispatch with explicit `model:`, and call the acceptance gate. |
-| **[[loop-repair]]** | Verification failed and you need to **patch and rerun** — classify the failure mode, make the smallest bounded repair, emit a structured repair record, and cap attempts (default N=2) before replan/revert/approve/terminate. |
-| **[[loop-evals]]** | You need to **measure the loop** — design the 7-layer eval suite and the two first-class metrics (**false-completion-rate**, **repair-productivity**), with deterministic gates before rubric judges. |
-| **[[loop-flywheel]]** | You want the loop to **get better over time** — mine traces/RUNLOG into new eval cases, propose harness changes, and compact memory (short-term continue-run summary vs long-term lessons). |
+Each spoke owns one phase of the loop lifecycle; pick by where you are, not by what you hope to produce. The phases run in order for a new loop and are re-entered out of order as a run hits failures, approval boundaries, or improvement opportunities.
+
+| Spoke | Reach for it when… | Why this spoke |
+|---|---|---|
+| **[[loop-architect]]** | You have a raw objective and need to decide the loop's shape — one agent or many, which architecture, which physical realization (Workflow / markdown-supervisor / Harmony Python-spine / delegate). The brain: classifies the scenario and emits an **architecture decision record**. Read-only/advisory. | The cheapest reliable loop is the smallest one that still verifies, so the shape decision comes first and on evidence — picking a multi-agent fan-out for a job one agent can verify wastes budget and adds failure surface. |
+| **[[loop-contract]]** | The architecture is chosen and you need to scaffold the **repo-OS operating contract** — `SPEC.md`, `WORKFLOW.md`, `TASKS.json`, `RUNLOG.md`, `.loop/state.json`, `verify-*` skeletons — plus the pre-execution reflection record. | Externalizing success criteria, the task ledger, and the FSM cursor to files is what lets the loop survive compaction and cross-session handoff; a loop with no on-disk contract cannot honestly resume. |
+| **[[loop-run]]** | The contract exists and you need to **operate the loop** — run the state machine (intake→plan→critique→queue→execute→verify→repair/replan/approval→terminal), honor the 7 terminal states, pause/resume on approval, dispatch with explicit `model:`, and call the acceptance gate. | One transition per turn with `state` serialized after each keeps the run inspectable and resumable, and routing every action through an independent gate is the core defense against false completion. |
+| **[[loop-repair]]** | Verification failed and you need to **patch and rerun** — classify the failure mode, make the smallest bounded repair, emit a structured repair record, and cap attempts (default N=2) before replan/revert/approve/terminate. | Bounded, recorded, capped repair is what makes a loop converge instead of thrash; unbounded retrying is itself a failure mode and the most common precursor to an agent editing the goalposts. |
+| **[[loop-evals]]** | You need to **measure the loop** — design the 7-layer eval suite and the two first-class metrics (**false-completion-rate**, **repair-productivity**), with deterministic gates before rubric judges. | A loop is only as trustworthy as the checks that gate it, so the deterministic blocking gate is designed before the advisory rubric judge — a model score alone can never clear a deterministic failure. |
+| **[[loop-flywheel]]** | You want the loop to **get better over time** — mine traces/RUNLOG into new eval cases, propose harness changes, and compact memory (short-term continue-run summary vs long-term lessons). | Every real failure should compound into a permanent regression case rather than recur, and separating short-term continue-run memory from long-term lessons keeps both the current run lean and the harness improving. |
 
 ## Quickstart — pick a path
 
@@ -32,21 +36,42 @@ Reach here for broad agent-loop intent: "design an agent loop", "build a verific
 - **A loop is failing:** [[loop-repair]] — diagnose the failure mode, make a bounded fix, rerun the gate, escalate at the attempt cap.
 - **Measuring a loop:** [[loop-evals]] — stand up the eval layers and the two missed metrics; deterministic checks block, rubric judges advise.
 - **Improving a loop:** [[loop-flywheel]] — turn failures and traces into regression cases and harness upgrades; compact memory.
+- **Must survive an engine switch:** start at [[loop-architect]] and ask for the cross-engine realization — the repo-OS contract stays engine-neutral so the same run resumes under Codex or Hermes via a runner swap, not a rebuild (`reference/platform-map.md`).
 
 The canonical seven terminal states every loop declares (no silent "completed"): `Succeeded`, `FailedUnverifiable`, `FailedBlocked`, `FailedBudget`, `FailedSafety`, `FailedSpecGap`, `AbortedByHuman`.
 
-## Reuse — this suite integrates, it does not duplicate
+Three anti-patterns this router exists to prevent: calling the next completion "done" without an independent check (the `FailedSpecGap`/false-completion guard), climbing to a multi-agent shape before a single agent has actually overloaded, and rebuilding a verifier, state machine, or dispatcher that the workspace already provides. If you catch yourself doing any of the three, stop and re-route through the matching spoke.
 
-It composes existing assets rather than rebuilding them. Defers to:
+## How the suite connects to existing assets
+
+This suite is **orchestration over composition** — it owns the loop lifecycle (architect → contract → run → repair → evals → flywheel) and delegates every capability that already exists in the workspace rather than reimplementing it. The split is deliberate, and it is what keeps the plugin small:
+
+- **The spokes decide** *when* and *in what order* a capability runs, and persist the contract that makes the decision durable.
+- **The existing assets do the work** — the actual acceptance verification, state-machine execution, dispatch routing, and planning discipline.
+- **The only net-new code** this plugin ships is the two deterministic structural gates (`validate_frontmatter.py`, `self_eval.py`); everything else is a reference to a proven asset.
+- **The payoff:** a loop built here inherits the maturity of `/verify-slice`'s fix-loop, the model-routing receipts, and the superpowers planning surface for free.
+
+When in doubt about whether to build something, check the table below first — if a row covers it, route to that asset instead of writing new machinery. It composes existing assets rather than rebuilding them. Defers to:
 
 - **`/verify-slice` and `/verify-milestone`** (claude-code-orchestration) — the acceptance-verification engine. `loop-evals` *designs* the criteria; `loop-run` *calls* the gate. No new verification engine is shipped here.
 - **Harmony `engine/cli.py` spine** — the tested init/next/complete + `state.json`-resume FSM. When `loop-architect` picks the max-determinism / cross-engine realization, it points to this; v1 ships no new spine code.
 - **[[launch-local-agent]]** — its objective-gate-then-judged-grader split is the model for separating the deterministic (blocking) gate from the rubric (advisory) judge.
 - **Model-routing HARD CONTRACT** (`model_routing.py` / `workflow_routing.py`, `/routing` modes, `.gsd/audit/receipts/*.jsonl`) — every dispatched agent names an explicit `model:` (read→haiku, reason→sonnet, write→opus), receipts are emitted, routing modes are honored.
 - **superpowers** — `writing-plans`, `executing-plans`, `subagent-driven-development`, `verification-before-completion`, `test-driven-development` compose the markdown-supervisor realization. GSD (`.gsd/`) is the planning surface.
+- **ui/orchestration surfaces** — when a loop's actual work is UI/UX or general orchestration (not loop engineering), defer to the appropriate `ui-ux`/`orchestration` surface; this suite builds and runs the loop, it does not do that domain work.
 
 Routing example (the contract every dispatch in this suite follows): a read-only scenario scan dispatches an `Explore` agent with `model: haiku`; a plan critique dispatches with `model: sonnet`; a code-writing repair dispatches `engineer` with `model: opus`. Never omit `model:`.
 
 ## Where the depth lives
 
-Start with the architecture/realization picker: **`reference/architecture-matrix.md`** (the 5-candidate matrix + the scenario→architecture→realization decision table + the "maximize a single agent first" rule). Each spoke links its own deeper references (`loop-patterns.md`, `repo-os-contract.md`, `prompt-templates.md`, `eval-suite.md`, `safety-and-approvals.md`, `platform-map.md`).
+This router stays deliberately thin; every detail lives one hop away in `reference/`, loaded on demand by the spoke that needs it. Start with the architecture/realization picker: **`reference/architecture-matrix.md`** (the 5-candidate matrix + the scenario→architecture→realization decision table + the "maximize a single agent first" rule). From there, each spoke links its own deeper reference — use this map to jump straight to the right depth:
+
+- `reference/architecture-matrix.md` — owned by [[loop-architect]]; the 5-candidate ratings + the realization picker.
+- `reference/loop-patterns.md` — [[loop-architect]]; the 6-pattern inner-control-flow library.
+- `reference/repo-os-contract.md` — [[loop-contract]]; the repo-OS tree + per-artifact schema.
+- `reference/prompt-templates.md` — [[loop-contract]] and [[loop-run]]; BOOTSTRAP / GOAL-LAUNCH / REPAIR / SHORT-OUTCOME-FIRST.
+- `reference/eval-suite.md` — [[loop-evals]] and [[loop-flywheel]]; the 7 layers, the two first-class metrics, the flywheel schedule.
+- `reference/safety-and-approvals.md` — [[loop-run]] and [[loop-repair]]; escalation ladder, approval lifecycle, terminal states, anti-cheat.
+- `reference/platform-map.md` — [[loop-architect]]; the engine-neutral contract mapped onto Claude / Codex / Hermes / Google.
+
+If a question is about *how* a step works rather than *which* step is next, you have left the router — open the reference above and read it there.

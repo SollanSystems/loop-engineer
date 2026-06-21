@@ -48,7 +48,9 @@ This is the surface loop-engineer is built on and dogfooded against (spec §2, d
 | Verification | the same `scripts/verify-*` exit codes — Codex runs them in its sandbox; no vendor-eval-UI dependency |
 | **Portability note (spec §4 Codex nuance)** | keep *execution* prompts tight and artifact-oriented — avoid verbose upfront-plan chatter during rollout (see `reference/prompt-templates.md` SHORT-OUTCOME-FIRST). The plan lives in `SPEC.md`/`WORKFLOW.md`, so the rollout prompt need not re-narrate it. |
 
-### Hermes (Nous)
+### Hermes
+
+Hermes is the Sollan Systems agent orchestration system; its relevant primitives for the repo-OS contract are persistent memory, auto-skills (play the spoke role), and isolated subagents/sandboxes (enforce permission tiers).
 
 | Contract element | Hermes realization |
 |---|---|
@@ -83,4 +85,4 @@ Net: switching engines is a **runner swap, not a rebuild** — and v1 proves the
 
 See also: `reference/architecture-matrix.md` (which realization to pick), `reference/repo-os-contract.md` (the on-disk schema each surface reads/writes), `[[loop-architect]]` (emits the architecture decision that selects a realization), `[[loop-run]]` (drives the state machine on the chosen surface).
 
-Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing OpenAI Agents/Codex guidance, Anthropic "Effective harnesses for long-running agents," Google Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).
+Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing OpenAI Agents/Codex guidance, Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), Google Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).

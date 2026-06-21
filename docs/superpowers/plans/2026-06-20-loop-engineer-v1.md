@@ -214,7 +214,7 @@ Required content: how the engine-neutral repo-OS contract maps onto each surface
 - `WORKFLOW.md.tmpl` enumerates the 7 terminal states + the repair cap (N=2) + approval policy.
 - `verify-fast.sh` / `verify-full.sh` are runnable stubs (`#!/usr/bin/env bash`, `set -euo pipefail`, echo + exit 0) with comment markers for where real checks go.
 
-**Acceptance:** `TASKS.json.tmpl` + `state.json.tmpl` + `terminal_state.json.tmpl` parse as JSON after `{{...}}` tokens are replaced with sample values; shell stubs are `bash -n` clean.
+**Acceptance:** `TASKS.json.tmpl` + `state.json.tmpl` + `terminal_state.json.tmpl` parse as JSON after `{{...}}` tokens are replaced **type-aware** (not by a single naive string swap — these templates carry un-quoted numeric/boolean placeholders such as `"plan_version": {{PLAN_VERSION}}`, `"best_score": {{BEST_SCORE}}`, `"repair_cap": {{REPAIR_CAP}}`, `"succeeded": {{SUCCEEDED}}`, `"score": {{FINAL_SCORE}}`, which a `{{...}}`→`placeholder` swap would render invalid). Two-pass substitution test recipe: quoted placeholders (`"{{X}}"`) → `"sample"`; bare placeholders (`: {{X}}`) → `0` (or `false` for the boolean `succeeded`/`pending_approval` fields). Then `json.loads` must succeed. Shell stubs are `bash -n` clean.
 
 ---
 
@@ -258,7 +258,7 @@ The 10 deterministic checks:
 3. every `reference/*.md` is referenced by ≥1 SKILL.md
 4. every `[[link]]` in skills resolves to an existing skill dir
 5. `loop-run/SKILL.md` contains all 7 terminal-state tokens
-6. `loop-repair/SKILL.md` contains the 5 repair-record fields
+6. `loop-repair/SKILL.md` contains the 7 repair-record fields (`evals/cases/structural.json` is richer than spec §9: it splits `verification_before`/`verification_after` into two and adds `productive`, so the count is 7, not the spec's compounded 5 — plan text, structural.json, and the self_eval output string all read 7)
 7. `loop-evals/SKILL.md` contains all 7 eval-layer names + both missed metrics
 8. all template files exist (the Phase-2 set)
 9. no obvious secret patterns in any tracked file (reuse a simple regex set)
@@ -288,7 +288,7 @@ def test_all_pass_on_real_repo():
 - [ ] **Step 3: Implement `self_eval.py`** with the 10 checks (each a small function returning `(ok, detail)`; `run_checks` aggregates; `main()` prints a table + the structural pass rate and exits non-zero if not all pass).
 - [ ] **Step 4: Run — expect PASS** once all skills/references/templates are in place (run after Phase 3).
 - [ ] **Step 5: Author `evals/rubric.md`** — 10 weighted dimensions (research-fidelity, scenario-routing-correctness, contract-completeness, reuse-not-duplication, safety/terminal-state rigor, eval-suite depth, flywheel/memory clarity, frontmatter/trigger quality, brevity/altitude, worked-example quality), each with a 1–10 anchor description; target mean ≥9.5.
-- [ ] **Step 6: Author `evals/cases/structural.json`** — the expected facts (7 skill names, 7 reference files, 7 terminal states, 5 repair fields, template list) for check inputs.
+- [ ] **Step 6: Author `evals/cases/structural.json`** — the expected facts (7 skill names, 7 reference files, 7 terminal states, 7 repair fields, template list) for check inputs.
 - [ ] **Step 7: Commit** — `git -C <repo> add scripts/self_eval.py scripts/test_self_eval.py evals && git -C <repo> commit -m "feat(eval): structural self-eval harness + rubric (TDD)"`
 
 **Acceptance:** `uv run --with pyyaml python3 scripts/self_eval.py` exits 0 with structural_pass_rate == 1.0.

@@ -31,10 +31,12 @@ Then advanced to `T2` (coverage) in the same iteration's verify step:
 
 ### Repair record (T2, attempt 1 of 2)
 
-- **failure mode:** `coverage_below_threshold`
-- **hypothesis:** the zero-qty and negative-price branches of `apply_discount` are never exercised.
-- **repair action:** added two table-driven test cases (qty==0, price<0); **no** production-code,
-  test-harness, or `SPEC.md` edits to manufacture the pass.
+- **failure mode:** `deterministic-fail` (a deterministic gate — `verify-full` coverage — went red)
+- **hypothesis:** the zero-qty and negative-price branches of `apply_discount` are never reached
+  because the production function lacks them.
+- **repair action:** added the two missing branches directly to production `apply_discount`
+  (qty==0 → base_price, price<0 → raises `PricingError`); the existing tests cover both once they
+  exist. **No** test-harness assertion edits or fixture relaxations to manufacture the pass.
 - **attempt:** 1 of 2
 - **measurable improvement:** pending re-verify (see Iteration 2) — full record in
   `repair-record.json`
@@ -55,8 +57,8 @@ Then advanced to `T2` (coverage) in the same iteration's verify step:
 
 ### Repair record (T2, attempt 1 — resolved)
 
-- **failure mode:** `coverage_below_threshold`
-- **repair action:** the two added cases lifted coverage past the gate.
+- **failure mode:** `deterministic-fail`
+- **repair action:** the two added production branches lifted coverage past the gate.
 - **attempt:** 1 of 2 (cap not reached — one productive pass)
 - **measurable improvement:** YES — `verification_after.score` 0.83 > `verification_before.score`
   0.74 → `productive: true`. See `repair-record.json`.

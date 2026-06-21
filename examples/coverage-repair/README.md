@@ -25,6 +25,7 @@ Succeeded`.
 | `ADR.md` | `[[loop-architect]]` | The architecture decision: **architecture = supervisor-skill (single supervisor)**, **realization = markdown-supervisor + repo-OS contract**, the loop patterns, the prime-directive check, the risk profile, and why cheaper/costlier shapes were rejected. |
 | `SPEC.md` | `[[loop-contract]]` | The **intent** — goal, two independently-verifiable success criteria, constraints, non-goals, and the evidence rule (which `scripts/verify-*` proves each criterion). |
 | `WORKFLOW.md` | `[[loop-contract]]` | The **stable loop policy** — state machine, the 7 terminal states, repair cap N=2, approval policy, budgets, and the model-routing dispatch rule. |
+| `.loop/manifest.yaml` | `[[loop-contract]]` | The machine-readable operating contract (inputs/outputs/permissions/terminal_states). |
 | `TASKS.json` | `[[loop-contract]]` → updated by `[[loop-run]]` | The **machine-readable queue** — `T1` (validation) and `T2` (coverage), each with its `verify` command, `criterion_ref`, `attempts`, and `evidence`. Both end `done`. |
 | `RUNLOG.md` | `[[loop-run]]` (+ repair blocks from `[[loop-repair]]`) | The **append-only history** — two dated iterations: iteration 1 verify **FAIL** → repair → iteration 2 verify **PASS** → terminal. |
 | `.loop/state.json` | `[[loop-run]]` | The **live FSM cursor** — serialized after every transition; here at the terminal snapshot (`state: terminal`, `best_score: 0.83`, `terminal_state: "Succeeded"`). This is what makes the loop resumable across sessions. |

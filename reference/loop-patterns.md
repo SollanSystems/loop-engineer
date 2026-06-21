@@ -36,7 +36,9 @@ guard against the dominant long-horizon failure mode (false completion / weak
 self-verification). Make it mandatory for high-risk, ambiguous, or
 side-effect-bearing goals.
 
-**A/B trigger policy:** the reflection step has a cost/benefit knob.
+**A/B trigger policy:** the reflection step has a cost/benefit knob (PreFlect, arXiv
+2602.07187: structured reflect-before-act lifts long-horizon success and cuts wasted edits).
+
 - **Policy A — always reflect:** unconditional pre-execution reflection. Default for
   high-risk / underspecified / production-mutating goals where a wrong first move is
   expensive.
@@ -203,4 +205,4 @@ the loop commits to a plan, but never blindly.
 
 ---
 
-**Sources:** synthesized from the loop-engineer design spec (`docs/superpowers/specs/2026-06-20-loop-engineer-design.md`, §4 pattern library, §6 terminal states, §7 safety) and its cited research — PreFlect pre-execution reflection (arXiv 2602.07187), SWE-Marathon ultra-long-horizon failure modes (arXiv 2606.07682), Web Agents Plan-Then-Execute (arXiv 2605.14290), Plan Compliance (arXiv 2604.12147), Code as Agent Harness (arXiv 2605.18747), plus OpenAI Agents/Codex guidance, Anthropic "Effective harnesses for long-running agents," and Google Conductor.
+**Sources:** synthesized from the loop-engineer design spec (`docs/superpowers/specs/2026-06-20-loop-engineer-design.md`, §4 pattern library, §6 terminal states, §7 safety) and its cited research — PreFlect pre-execution reflection (arXiv 2602.07187), SWE-Marathon ultra-long-horizon failure modes (arXiv 2606.07682), Web Agents Plan-Then-Execute (arXiv 2605.14290), Plan Compliance (arXiv 2604.12147), Code as Agent Harness (arXiv 2605.18747), plus OpenAI Agents/Codex guidance, Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), and Google Conductor.

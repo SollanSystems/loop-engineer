@@ -129,4 +129,4 @@ Every tool/action a loop can take is classified into one of five ascending tiers
 
 ---
 
-Sources: synthesized from the loop-engineer design spec (§1, §6, §7) and its cited research — OpenAI Agents/Codex guidance, Anthropic "Effective harnesses for long-running agents," Google Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), and Code as Agent Harness (2605.18747).
+Sources: synthesized from the loop-engineer design spec (§1, §6, §7) and its cited research — OpenAI Agents/Codex guidance, Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), Google Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), and Code as Agent Harness (2605.18747).

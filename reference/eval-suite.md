@@ -142,4 +142,4 @@ The schedule is a ratchet: you only add gates, and you only freeze once the chea
 
 ---
 
-Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682), PreFlect (arXiv 2602.07187), Plan Compliance (arXiv 2604.12147), Anthropic "Effective harnesses for long-running agents," and OpenAI Agents/Codex evaluation guidance.
+Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682), PreFlect (arXiv 2602.07187), Plan Compliance (arXiv 2604.12147), Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), and OpenAI Agents/Codex evaluation guidance.

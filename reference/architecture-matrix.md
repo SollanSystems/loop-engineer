@@ -158,4 +158,4 @@ appear — the same fail-cheap-then-climb discipline the loop itself uses.
 
 ---
 
-Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing OpenAI Agents/Codex orchestration guidance, Anthropic "Effective harnesses for long-running agents," Google Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).
+Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing OpenAI Agents/Codex orchestration guidance, Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), Google Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).

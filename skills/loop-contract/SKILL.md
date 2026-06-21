@@ -1,6 +1,6 @@
 ---
 name: loop-contract
-description: "Scaffold the repo-OS operating contract for an agent loop — SPEC/WORKFLOW/TASKS.json/RUNLOG/.loop/state.json + verify-* skeletons — from an architecture decision, then run the pre-execution reflection before the first change. Use when someone says scaffold the loop contract, set up SPEC/WORKFLOW/TASKS, create the operating contract, initialize a loop, or stand up the files an agent loop needs to resume across sessions."
+description: "Scaffold the repo-OS operating contract for an agent loop — SPEC/WORKFLOW/TASKS.json/RUNLOG/.loop/state.json + verify-* skeletons — from an architecture decision, then run the pre-execution reflection before the first change. Use when someone says scaffold the loop contract, set up SPEC/WORKFLOW/TASKS, create the operating contract, initialize a loop, or initialize the repo-OS files for a new agent loop."
 ---
 
 # loop-contract — scaffold the repo-OS operating contract
@@ -60,12 +60,12 @@ points). Use the **BOOTSTRAP** prompt in `reference/prompt-templates.md` to driv
 | `state.json.tmpl` | Initial cursor (`iteration_id:0`, first incomplete `state`, `terminal_state: null`) | Carries every field from the spec State row; serialized after every transition by `[[loop-run]]`. |
 | `RUNLOG.md.tmpl` | The iteration-0 reflection entry | Append-only; never edit past entries. |
 | `terminal_state.json.tmpl` | Leave as the template | Written exactly once, at loop end, by `[[loop-run]]`. |
+| `manifest.yaml.tmpl` | `inputs` (goal, success_criteria, constraints, allowed_tools, risk_profile, budgets, approval_policy) + `outputs` + least-privilege `permissions` + `approval_gates` + `policies` (repair_cap, plan_then_execute) + the 7 `terminal_states` | The explicit machine-readable operating contract; keys mirror the ADR. Canonical schema: `reference/repo-os-contract.md` §10. |
 | `verify-fast.sh` / `verify-full.sh` | Wire the deterministic checks the SPEC criteria demand | Runnable stubs; `[[loop-evals]]` owns the real proof logic. |
 | `EVALS-rubric.md.tmpl` | Per-artifact rubric schema | Advisory judge; deterministic gates remain the hard pass/fail. |
 
-Fill `.loop/manifest.yaml` directly from the ADR: `inputs` (goal, success_criteria, constraints,
-allowed_tools, risk_profile, budgets, approval_policy) + `outputs` + least-privilege `permissions`
-+ `approval_gates` + `policies` (repair_cap, plan_then_execute) + the 7 `terminal_states`.
+Fill `.loop/manifest.yaml` from `manifest.yaml.tmpl` (above), mapping each `{{PLACEHOLDER}}` to the
+ADR — the canonical schema for every key is `reference/repo-os-contract.md` §10.
 
 ## Pre-execution reflection (do BEFORE queueing tasks)
 
@@ -120,6 +120,6 @@ hardening the gate → `[[loop-evals]]`. Mining the resulting RUNLOG into new ev
 
 ---
 
-Reference: `reference/repo-os-contract.md` (canonical artifact schemas), `reference/prompt-templates.md`
-(the BOOTSTRAP prompt), `reference/safety-and-approvals.md` (terminal-state triggers), and the
-scaffoldable files in `templates/`.
+Reference: `reference/repo-os-contract.md` (canonical artifact schemas, incl. the manifest schema in
+§10), `reference/prompt-templates.md` (the BOOTSTRAP prompt), `reference/safety-and-approvals.md`
+(terminal-state triggers), and the scaffoldable files in `templates/` (incl. `templates/manifest.yaml.tmpl`).

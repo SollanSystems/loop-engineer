@@ -1,0 +1,47 @@
+# .loop/manifest.yaml — the explicit operating contract for one loop
+# Canonical schema: reference/repo-os-contract.md §10. Fill every {{PLACEHOLDER}} from the ADR.
+loop: {{LOOP_NAME}}
+schema: loop-engineer/manifest@1
+
+inputs:
+  goal: "{{GOAL_DESCRIPTION}}"
+  success_criteria:
+    - "{{CRITERION_1}}"
+  constraints:
+    - "{{CONSTRAINT_1}}"
+  workspace_path: "{{WORKSPACE_PATH}}"
+  allowed_tools: [{{ALLOWED_TOOLS}}]            # NOT network / external-side-effects unless required
+  risk_profile: {{RISK_PROFILE}}               # low | med | high
+  time_budget: "{{TIME_BUDGET}}"
+  cost_budget: "{{COST_BUDGET}}"
+  approval_policy: {{APPROVAL_POLICY}}         # never | on_side_effects | strict
+
+outputs:
+  plan: SPEC.md
+  task_queue: TASKS.json
+  current_state: .loop/state.json
+  verification_bundle: .loop/artifacts/
+  repair_actions: .loop/artifacts/repair-record.json
+  terminal_state: .loop/terminal_state.json
+  lessons_learned: .loop/memory/lessons.md
+
+permissions:                                   # least-privilege tiers
+  - {{PERMISSION_1}}
+  # network / external-side-effects / production-mutation are OFF unless listed
+
+approval_gates:                                # each pauses-and-resumes from run state
+  - {{APPROVAL_GATE_1}}
+
+policies:
+  repair_cap: {{REPAIR_CAP}}                   # then replan | revert | approve | terminate
+  plan_then_execute: {{PLAN_THEN_EXECUTE}}     # true for untrusted/web environments
+  verifier_gaming: hard_terminate_as_security_failure
+
+terminal_states:                              # the canonical 7, verbatim
+  - Succeeded
+  - FailedUnverifiable
+  - FailedBlocked
+  - FailedBudget
+  - FailedSafety
+  - FailedSpecGap
+  - AbortedByHuman

@@ -1,0 +1,8 @@
+{
+  "task": "T2",
+  "verify": "scripts/verify-full",
+  "outcome": "FAIL",
+  "score": 0.74,
+  "criteria": { "1": false },
+  "detail": "coverage 0.74 < 0.80; uncovered pricing.py:41-47 (zero-qty) and pricing.py:58 (negative-price)"
+}

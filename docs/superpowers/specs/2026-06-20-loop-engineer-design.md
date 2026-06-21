@@ -4,7 +4,7 @@
 - **Status:** Approved (brainstorming) — pending spec review
 - **Author:** Sollan Systems
 - **Repo:** `github.com/SollanSystems/loop-engineer` (private)
-- **Source research:** "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesized from OpenAI Agents/Codex guidance, Anthropic "Effective harnesses for long-running agents," Google Conductor, and arXiv: PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).
+- **Source research:** "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesized from OpenAI Agents/Codex guidance, Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), Google Conductor, and arXiv: PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).
 
 ---
 
@@ -160,7 +160,7 @@ Separation of concerns: stable rules (`AGENTS.md`, `WORKFLOW.md`) ≠ intent (`S
 - **loop-architect** — in: raw objective + context; out: architecture decision record (chosen architecture + realization + selected loop patterns + which spokes to run + risk profile). Read-only/advisory.
 - **loop-contract** — in: architecture decision + goal; out: scaffolded repo-OS files (SPEC/WORKFLOW/TASKS.json/RUNLOG/.loop/state.json/verify-* skeletons) + pre-execution reflection record.
 - **loop-run** — in: contract files; out: executed iterations (RUNLOG entries, state.json transitions, verification bundles), terminal_state.json. Approval-gated; dispatches via Agent/Workflow with model routing; calls `/verify-slice`.
-- **loop-repair** — in: failing verification + best prior state + diff; out: structured repair record (`failure_mode`, `hypothesis`, `repair_action`, `verification_before/after`, `remaining_delta`); enforces a max-attempt cap (default N=2, configurable in `WORKFLOW.md`) then replan/revert/approve/terminate.
+- **loop-repair** — in: failing verification + best prior state + diff; out: structured repair record (7 fields: `failure_mode`, `hypothesis`, `repair_action`, `verification_before`, `verification_after`, `remaining_delta`, `productive` — the last operationalizes the repair-productivity metric); enforces a max-attempt cap (default N=2, configurable in `WORKFLOW.md`) then replan/revert/approve/terminate.
 - **loop-evals** — in: SPEC + artifacts; out: `scripts/verify-*` + `EVALS/` rubrics + the metric definitions.
 - **loop-flywheel** — in: RUNLOG + traces + memory; out: new eval cases from failures, harness-change proposals, compacted memory (short-term summary + long-term lessons).
 

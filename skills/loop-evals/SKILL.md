@@ -93,12 +93,7 @@ for (const c of regressionCases) {
 
 ## Standing the suite up
 
-Do not freeze a scorecard on day one — `[[loop-flywheel]]` drives the staged rollout (full detail in `reference/eval-suite.md` §6):
-
-1. **Baseline** — wire Layer 1 (`/verify-slice` vs `SPEC.md` acceptance) + Layer 7 cost; get an honest pass rate, cost-per-success, and starting FCR. Measure, don't optimize. This is the minimum before `[[loop-run]]` may execute the loop.
-2. **Loop-hardening** — bring up Layers 4, 2, then 3; FCR and RP go live; tighten until FCR → 0 and RP trends up.
-3. **Regression-harness** — mine accumulated failures into `EVALS/regressions/`, seed the dataset, bring Layer 6 online; add Layer 5 probes for any side-effecting loop.
-4. **Freeze the first scorecard** — snapshot pass rate, FCR, RP, regression count (0), judge agreement, cost-per-success. After the freeze, Layer 6 is blocking: any regression failure or FCR > 0 fails the loop. The schedule is a ratchet — only add gates, only freeze once the cheap layers are clean.
+Do not freeze a scorecard on day one — `[[loop-flywheel]]` drives the staged rollout (Baseline → Loop-hardening → Regression-harness → Freeze): the full four-phase sequence, with which layers come online when, is in `reference/eval-suite.md` §6. Two load-bearing facts from it: Baseline (Layer 1 + Layer 7) is the minimum before `[[loop-run]]` may execute the loop, and the schedule is a ratchet — only add gates, only freeze once the cheap layers are clean.
 
 ## Hands off to / from
 

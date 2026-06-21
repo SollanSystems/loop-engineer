@@ -1,0 +1,53 @@
+# .loop/manifest.yaml — the explicit operating contract for one loop
+# Scaffolded by [[loop-contract]] from ADR.md. Canonical schema: reference/repo-os-contract.md §10.
+loop: pricing-coverage-and-validation
+schema: loop-engineer/manifest@1
+
+inputs:
+  goal: "Bring pricing.py to >=80% coverage and add input validation to parse_request."
+  success_criteria:
+    - "1: pricing.py line coverage >= 80% (scripts/verify-full)"
+    - "2: parse_request rejects malformed input with a typed PricingError (scripts/verify-fast)"
+  constraints:
+    - "Do not modify existing public function signatures (parse_request, apply_discount, quote)."
+    - "No new third-party dependencies."
+    - "Do not edit tests, fixtures, golden files, or the verify scripts to manufacture a passing gate."
+  workspace_path: "./"
+  allowed_tools: [read, workspace-write]      # NOT network, NOT external-side-effects
+  risk_profile: low                           # low | med | high
+  time_budget: "30m"
+  cost_budget: "1.00usd"
+  approval_policy: on_side_effects            # never | on_side_effects | strict
+
+outputs:
+  plan: SPEC.md
+  task_queue: TASKS.json
+  current_state: .loop/state.json
+  verification_bundle: .loop/artifacts/
+  repair_actions: .loop/artifacts/repair-record.json
+  terminal_state: .loop/terminal_state.json
+  lessons_learned: .loop/memory/lessons.md
+
+permissions:                                  # least-privilege tiers
+  - read-only
+  - workspace-write
+  # network / external-side-effects / production-mutation are OFF for this loop
+
+approval_gates:                               # each pauses-and-resumes from run state
+  - destructive_commands
+  - secret_access
+  - production_changes
+
+policies:
+  repair_cap: 2                               # then replan | revert | approve | terminate
+  plan_then_execute: false                    # set true for untrusted/web environments
+  verifier_gaming: hard_terminate_as_security_failure
+
+terminal_states:                              # the canonical 7, verbatim
+  - Succeeded
+  - FailedUnverifiable
+  - FailedBlocked
+  - FailedBudget
+  - FailedSafety
+  - FailedSpecGap
+  - AbortedByHuman

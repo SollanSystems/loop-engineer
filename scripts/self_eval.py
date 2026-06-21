@@ -42,6 +42,7 @@ SECRET_PATTERNS = {
 }
 
 _DISPATCH_RE = re.compile(r"subagent_type|agent\s*\(", re.IGNORECASE)
+_FENCE_RE = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
 _TEXT_SUFFIXES = {".md", ".py", ".js", ".json", ".tmpl", ".sh", ".txt", ""}
 
 
@@ -68,6 +69,61 @@ def _skill_dirs(root: pathlib.Path) -> set:
 
 def _skill_texts(root: pathlib.Path) -> dict:
     return {p.parent.name: _read(p) for p in _skill_paths(root)}
+
+
+# Match a failure_mode VALUE assignment in Markdown — the label, then a
+# colon/equals separator, then the quoted token — with no comma or backtick in
+# between (so a prose list of field NAMES like "`failure_mode`, `hypothesis`"
+# is not mistaken for a value).
+_FM_MD_RE = re.compile(
+    r"failure[_ ]mode[`*\s]*[:=][`*\s]*[`\"']([a-z][a-z-]+)[`\"']", re.IGNORECASE
+)
+
+
+def _json_failure_modes(obj) -> list:
+    """Every value under a ``failure_mode`` key anywhere in a parsed JSON tree."""
+    found = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "failure_mode" and isinstance(v, str):
+                found.append(v)
+            else:
+                found.extend(_json_failure_modes(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_json_failure_modes(item))
+    return found
+
+
+def _scan_failure_modes(base: pathlib.Path, taxonomy: set) -> list:
+    """Failure_mode values in examples/ that fall outside the canonical taxonomy.
+
+    Closes the detection gap where an example could carry a non-canonical enum
+    (e.g. ``coverage_below_threshold``) and still pass the field-name check.
+    Scans JSON structurally and Markdown via a labelled-token regex.
+    """
+    bad = []
+    if not base.exists():
+        return bad
+    for p in base.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix == ".json":
+            try:
+                values = _json_failure_modes(json.loads(_read(p)))
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                continue
+        elif p.suffix == ".md":
+            try:
+                values = _FM_MD_RE.findall(_read(p))
+            except (OSError, UnicodeDecodeError):
+                continue
+        else:
+            continue
+        for v in values:
+            if v not in taxonomy:
+                bad.append(f"{p.relative_to(base.parent)}:{v}")
+    return bad
 
 
 def _iter_suite_files(root: pathlib.Path, scope) -> list:
@@ -139,7 +195,12 @@ def check_repair_fields(root, facts):
     missing = [f for f in facts["repair_record_fields"] if f not in text]
     if missing:
         return False, f"loop-repair missing repair-record fields: {missing}"
-    return True, f"loop-repair names all {len(facts['repair_record_fields'])} repair fields"
+    taxonomy = set(facts["failure_mode_taxonomy"])
+    bad = _scan_failure_modes(root / "examples", taxonomy)
+    if bad:
+        return False, f"non-canonical failure_mode in examples/: {bad}"
+    n = len(facts["repair_record_fields"])
+    return True, f"loop-repair names all {n} repair fields; example failure_modes canonical"
 
 
 def check_eval_layers_and_metrics(root, facts):
@@ -182,13 +243,19 @@ def check_no_secrets(root, facts):
 def check_dispatch_names_model(root, facts):
     scope = ["skills", "reference", "templates", "examples"]
     offenders = []
+    n_dispatch_fences = 0
     for p in _iter_suite_files(root, scope):
         text = _read(p)
-        if _DISPATCH_RE.search(text) and "model:" not in text:
-            offenders.append(str(p.relative_to(root)))
+        for fence in _FENCE_RE.findall(text):
+            if not _DISPATCH_RE.search(fence):
+                continue
+            n_dispatch_fences += 1
+            if "model:" not in fence and "model=" not in fence:
+                offenders.append(str(p.relative_to(root)))
     if offenders:
-        return False, f"agent dispatch example without 'model:': {offenders}"
-    return True, "every agent-dispatch example names model: (routing contract)"
+        return False, f"agent-dispatch fence without 'model:': {sorted(set(offenders))}"
+    return True, (f"all {n_dispatch_fences} agent-dispatch fences name model: "
+                  "(routing contract)")
 
 
 CHECKS = [

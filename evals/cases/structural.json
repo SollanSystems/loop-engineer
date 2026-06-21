@@ -32,7 +32,17 @@
     "hypothesis",
     "repair_action",
     "verification_before",
-    "verification_after"
+    "verification_after",
+    "remaining_delta",
+    "productive"
+  ],
+  "failure_mode_taxonomy": [
+    "deterministic-fail",
+    "rubric-fail",
+    "flaky",
+    "regression",
+    "spec-gap",
+    "environmental"
   ],
   "template_filenames": [
     "AGENTS.md.tmpl",
@@ -40,6 +50,7 @@
     "WORKFLOW.md.tmpl",
     "TASKS.json.tmpl",
     "RUNLOG.md.tmpl",
+    "manifest.yaml.tmpl",
     "state.json.tmpl",
     "terminal_state.json.tmpl",
     "verify-fast.sh",

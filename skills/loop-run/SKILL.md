@@ -5,17 +5,17 @@ description: "The operator. Run (or resume) the agent loop's state machine one t
 
 # loop-run — operate the loop
 
-You are the **operator**, not the task-doer. You advance the state machine by **exactly one transition per turn**, verify with an independent gate, persist state to disk, and stop only at a named terminal state. You optimize *the loop*, never your own cleverness about the end task. The architecture and contract already exist — `[[loop-architect]]` chose the shape, `loop-contract` scaffolded the files; you run them.
+You are the **operator**, not the task-doer. You advance the state machine by **exactly one transition per turn**, verify with an independent gate, persist state to disk, and stop only at a named terminal state. You optimize *the loop*, never your own cleverness about the end task. The architecture and contract already exist — `[[loop-architect]]` chose the shape, `[[loop-contract]]` scaffolded the files; you run them.
 
 The governing rules — escalation ladder, approval lifecycle, permission tiers, the 7 terminal states, verifier-gaming response — live in `reference/safety-and-approvals.md`. The concrete prompts you dispatch (GOAL-LAUNCH, SHORT-OUTCOME-FIRST) are in `reference/prompt-templates.md`. Read both before a real run.
 
 ## Preconditions
 
-Run only when the repo-OS contract exists (`SPEC.md`, `WORKFLOW.md`, `TASKS.json`, `RUNLOG.md`, `.loop/state.json`). If it does not, route to `loop-contract` first — do not improvise a contract here. If `SPEC.md` has no verifiable success criteria, stop in **`FailedSpecGap`**; never invent acceptance criteria to manufacture a run.
+Run only when the repo-OS contract exists (`SPEC.md`, `WORKFLOW.md`, `TASKS.json`, `RUNLOG.md`, `.loop/state.json`). If it does not, route to `[[loop-contract]]` first — do not improvise a contract here. If the architecture is not yet decided, route to `[[loop-architect]]` before `[[loop-contract]]`. If `SPEC.md` has no verifiable success criteria, stop in **`FailedSpecGap`**; never invent acceptance criteria to manufacture a run.
 
 ## Resume rule (do this FIRST)
 
-**If `.loop/state.json` exists, READ it and continue from `current_state`. Do NOT re-run intake or re-plan.** A fresh attempt would lose the diff, the best score, the verification bundle, and the repair history — and would re-perform side effects already done. Externalized state is what lets the loop survive compaction and cross-session handoff. Missing state.json → run the BOOTSTRAP prompt (via `loop-contract`) first. Approval-wait is just one kind of incomplete state, so resume handles it with the same one rule.
+**If `.loop/state.json` exists, READ it and continue from `state`. Do NOT re-run intake or re-plan.** A fresh attempt would lose the diff, the best score, the verification bundle, and the repair history — and would re-perform side effects already done. Externalized state is what lets the loop survive compaction and cross-session handoff. Missing state.json → run the BOOTSTRAP prompt (via `[[loop-contract]]`) first. Approval-wait is just one kind of incomplete state, so resume handles it with the same one rule.
 
 ## The state machine (one transition per turn)
 
@@ -28,7 +28,7 @@ Serialize `.loop/state.json` **after every transition**. For the active task:
 
 1. **Dispatch** the smallest bounded unit of work using the SHORT-OUTCOME-FIRST prompt (`reference/prompt-templates.md`) — terse, artifact-oriented, no narration.
 2. **Verify** with the contract's gate: call `/verify-slice` (claude-code-orchestration — its 2-iteration fix loop + Codex cross-review + escalate-to-flag) when a spec+plan slice exists; otherwise run `scripts/verify-fast` then `scripts/verify-full`. For a batch of slices use `/verify-milestone`. **The deterministic gate is binary and BLOCKING; a rubric judge is advisory only.** Do not build a new verifier — delegate.
-3. **On PASS:** mark the task done in `TASKS.json`, append a `RUNLOG.md` iteration (state-before, action, evidence, state-after), advance `current_state`, checkpoint to `.loop/checkpoints/`.
+3. **On PASS:** mark the task done in `TASKS.json`, append a `RUNLOG.md` iteration (state-before, action, evidence, state-after), advance `state`, checkpoint to `.loop/checkpoints/`.
 4. **On FAIL:** hand off to `[[loop-repair]]` (the REPAIR-LOOP prompt). Do **not** patch inline here — repair is bounded and recorded; ad-hoc inline patching is how churn and verifier-gaming start.
 5. **At a side-effect boundary** (destructive command, secret access, production mutation, money movement, external send): set `pending_approval`, write `state.json`, and **PAUSE** (see Approval below).
 
@@ -74,7 +74,7 @@ A claim of success with no passing verification is **not** success. Let the dete
 
 ## Approval pause / resume
 
-When the next action crosses a permission tier `approval_policy` does not pre-authorize: **freeze** (serialize `state.json` with `current_state: "approval-wait"` and a concrete `pending_approval` — the exact command/diff/recipient/reason — plus `.loop/approvals/<iteration_id>.json`), **surface** the request object to the human (the request *is* the message — never "is this ok?"), and idle (no budget burn while waiting). On **approve**, reload and execute the *exact* approved action, clear `pending_approval`, continue. On **deny**, route back into the ladder (re-plan a compliant path, or terminate `FailedBlocked`). The gate sits *before* the side effect, so no effect has happened yet, and resume never spawns a fresh attempt. Policies: `never` / `on_side_effects` (default) / `strict`.
+When the next action crosses a permission tier `approval_policy` does not pre-authorize: **freeze** (serialize `state.json` with `state: "approval-wait"` and a concrete `pending_approval` — the exact command/diff/recipient/reason — plus `.loop/approvals/<iteration_id>.json`), **surface** the request object to the human (the request *is* the message — never "is this ok?"), and idle (no budget burn while waiting). On **approve**, reload and execute the *exact* approved action, clear `pending_approval`, continue. On **deny**, route back into the ladder (re-plan a compliant path, or terminate `FailedBlocked`). The gate sits *before* the side effect, so no effect has happened yet, and resume never spawns a fresh attempt. Policies: `never` / `on_side_effects` (default) / `strict`.
 
 ## Plan-then-execute for untrusted / web environments
 
@@ -98,5 +98,6 @@ If success cannot be verified, the terminal state is `FailedUnverifiable`, **nev
 
 - Verification gate fails → `[[loop-repair]]` (bounded patch-and-rerun, cap N=2).
 - Designing or strengthening the gate / metrics → `[[loop-evals]]`.
+- Terminal state reached → hand traces and `RUNLOG.md` to `[[loop-flywheel]]` to mine failures into regression cases.
 - Full safety model (ladder, tiers, anti-cheat) → `reference/safety-and-approvals.md`.
 - The exact prompts to dispatch → `reference/prompt-templates.md`.
