@@ -92,7 +92,7 @@ A run ends in **exactly one** of these. Name it explicitly and write `terminal_s
 - **`FailedSpecGap`** — the objective is underspecified; return the missing criterion rather than guessing. Resolved by tightening `SPEC.md`, then relaunching.
 - **`AbortedByHuman`** — a human explicitly stopped the run.
 
-If success cannot be verified, the terminal state is `FailedUnverifiable`, **never** `Succeeded`. Then hand the run's traces and `RUNLOG.md` to `loop-flywheel` so failures compound into new eval cases.
+If success cannot be verified, the terminal state is `FailedUnverifiable`, **never** `Succeeded`. Then hand the run's traces and `RUNLOG.md` to `[[loop-flywheel]]` so failures compound into new eval cases.
 
 ## Next steps
 

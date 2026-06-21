@@ -32,7 +32,7 @@ Approval gates exist so that a side effect crosses the human boundary **once, de
 **Lifecycle:**
 
 1. **Detect.** [[loop-run]] reaches a state whose next action crosses a permission tier (§7) that `approval_policy` does not pre-authorize.
-2. **Freeze.** Serialize the live state to `.loop/state.json` with `current_state: "approval-wait"` and `pending_approval` set to the concrete request (the exact command/diff/recipient, the tier, the reason, the affected resource). Write the request to `.loop/approvals/<iteration_id>.json`. No side effect has happened yet — the gate is *before* the action.
+2. **Freeze.** Serialize the live state to `.loop/state.json` with `state: "approval-wait"` and `pending_approval` set to the concrete request (the exact command/diff/recipient, the tier, the reason, the affected resource). Write the request to `.loop/approvals/<iteration_id>.json`. No side effect has happened yet — the gate is *before* the action.
 3. **Surface.** Emit the request to the human (the request object is the message — never a vague "is this ok?"). The run is now idle; it consumes no budget while waiting.
 4. **Resolve.**
    - **Approved** → reload `.loop/state.json`, execute the *exact* pending action (not a regenerated one — the approved diff is the contract), clear `pending_approval`, continue the state machine from where it froze.

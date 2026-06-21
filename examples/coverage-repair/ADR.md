@@ -51,7 +51,7 @@ still gives resumable, evidence-backed verification. We do **not** reach for mul
   "approval_policy": "on_side_effects",
   "terminal_state_plan": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget",
                           "FailedSafety", "FailedSpecGap", "AbortedByHuman"],
-  "next_spokes": ["loop-contract", "loop-run", "loop-evals", "loop-repair"],
+  "next_spokes": ["loop-contract", "loop-run", "loop-evals", "loop-repair", "loop-flywheel"],
   "rationale": "Single agent is enough for the work itself, but the measure-change-remeasure loop needs externalized state to resume and to prove 'done' by evidence rather than assertion — the context-overload signal that justifies one supervisor over the repo-OS contract. Cheaper shapes (inline single-skill) cannot survive compaction or guard against false completion; costlier shapes (multi-agent / Python spine) buy parallelism and cross-engine resume this task does not need."
 }
 ```
@@ -80,7 +80,9 @@ still gives resumable, evidence-backed verification. We do **not** reach for mul
 
 `[[loop-contract]]` scaffolds this ADR into `SPEC.md` / `WORKFLOW.md` / `TASKS.json` /
 `RUNLOG.md` / `.loop/state.json`; `[[loop-evals]]` fills the `scripts/verify-*` gates;
-`[[loop-run]]` then operates the machine. See `README.md` for the artifact→spoke map.
+`[[loop-run]]` then operates the machine. After the run reaches `Succeeded`, `[[loop-flywheel]]`
+mines `RUNLOG.md` + traces to promote the zero-qty / negative-price failures into the permanent
+regression set so they can never silently return. See `README.md` for the artifact→spoke map.
 
 Reference: `reference/architecture-matrix.md` (5-candidate ratings + realization picker),
 `reference/loop-patterns.md` (the pattern library).

@@ -104,7 +104,7 @@ step, verify, and persist. You optimize the LOOP, not your own cleverness.
 CONTRACT FILES: SPEC.md, WORKFLOW.md, TASKS.json, RUNLOG.md, .loop/state.json
 
 RESUME CHECK (do first):
-  - If .loop/state.json exists, READ it and continue from current_state. Do NOT
+  - If .loop/state.json exists, READ it and continue from state. Do NOT
     re-run intake or re-plan. If it is missing, run BOOTSTRAP first.
 
 STATE MACHINE (one transition per turn):
@@ -117,7 +117,7 @@ FOR THE ACTIVE TASK:
    when a spec+plan slice exists, else run scripts/verify-fast then verify-full.
    The deterministic gate is binary and BLOCKING; a rubric judge is advisory only.
 3. If verify PASSES: mark the task done in TASKS.json, append a RUNLOG iteration
-   (state-before, action, evidence, state-after), advance current_state.
+   (state-before, action, evidence, state-after), advance state.
 4. If verify FAILS: hand off to the REPAIR-LOOP prompt (do not patch inline here).
 5. If a side-effect boundary is reached (destructive cmd, secret, production
    mutation, money movement): set pending_approval, write state.json, and PAUSE.

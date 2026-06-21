@@ -44,7 +44,7 @@ Classifying correctly is the whole game: repairing a `spec-gap` or `environmenta
 
 ## The structured repair record
 
-Every pass appends one record to `.loop/repair/<iteration_id>.json` (and a one-line `RUNLOG.md` entry). All six fields are required — a record missing `verification_before`/`after` cannot demonstrate productivity and is rejected:
+Every pass appends one record to `.loop/repair/<iteration_id>.json` (and a one-line `RUNLOG.md` entry). All seven fields are required — a record missing `verification_before`/`after` cannot demonstrate productivity and is rejected:
 
 ```json
 {
@@ -66,6 +66,7 @@ Every pass appends one record to `.loop/repair/<iteration_id>.json` (and a one-l
 - **`verification_before`** — the failing check state *before* the repair.
 - **`verification_after`** — the check state *after* re-running (proves the effect).
 - **`remaining_delta`** — what is still unmet (drives the next pass or the terminal state). `"none"` means the criterion is met.
+- **`productive`** — the derived churn flag (`verification_after.score > verification_before.score`); the field [[loop-evals]] reads to compute the repair-productivity metric.
 
 `productive = verification_after.score > verification_before.score`. A run of non-productive records is the churn signal that trips the cap.
 

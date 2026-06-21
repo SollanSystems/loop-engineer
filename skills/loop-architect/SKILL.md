@@ -128,4 +128,4 @@ picker), `reference/loop-patterns.md` (the 6-pattern library).
 
 ---
 
-Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682 — long-horizon success rates motivating the verifiable-success bar), PreFlect (arXiv 2602.07187 — the pre-execution reflection policy), Plan Compliance (arXiv 2604.12147 — the scenario→architecture decision table), and Anthropic guidance on long-running agent harnesses (anthropic.com, 2025).
+Sources: `reference/architecture-matrix.md` (the 5-candidate ratings + realization picker this skill emits) and "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682 — long-horizon success rates motivating the verifiable-success bar), PreFlect (arXiv 2602.07187 — the pre-execution reflection policy), Plan Compliance (arXiv 2604.12147 — the scenario→architecture decision table), and Anthropic guidance on long-running agent harnesses (anthropic.com, 2025).

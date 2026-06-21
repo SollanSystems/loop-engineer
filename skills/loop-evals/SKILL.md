@@ -93,7 +93,7 @@ for (const c of regressionCases) {
 
 ## Standing the suite up
 
-Do not freeze a scorecard on day one — `[[loop-flywheel]]` drives the staged rollout (Baseline → Loop-hardening → Regression-harness → Freeze): the full four-phase sequence, with which layers come online when, is in `reference/eval-suite.md` §6. Two load-bearing facts from it: Baseline (Layer 1 + Layer 7) is the minimum before `[[loop-run]]` may execute the loop, and the schedule is a ratchet — only add gates, only freeze once the cheap layers are clean.
+Do not freeze a scorecard on day one — `[[loop-flywheel]]` drives the staged rollout; the full four-phase sequence (with which layers come online when) is in `reference/eval-suite.md` §6. Two load-bearing facts hold here: Baseline (Layer 1 + Layer 7) is the minimum before `[[loop-run]]` may execute the loop, and the schedule is a ratchet — only add gates, only freeze once the cheap layers are clean.
 
 ## Hands off to / from
 

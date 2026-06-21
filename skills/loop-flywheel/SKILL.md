@@ -84,4 +84,4 @@ Rule: a continue-run summary is never promoted to a lesson without evidence (a c
 
 ---
 
-Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682), PreFlect (arXiv 2602.07187), Plan Compliance (arXiv 2604.12147), and Anthropic guidance on long-running agent harnesses (anthropic.com, 2025). (Web Agents Plan-Then-Execute (arXiv 2605.14290) and Code as Agent Harness (arXiv 2605.18747) inform [[loop-architect]] and [[loop-run]]; not cited here as they are pre-run design concerns.)
+Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682 — the false-completion failure mode FCR guards), PreFlect (arXiv 2602.07187), Plan Compliance (arXiv 2604.12147), Code as Agent Harness (arXiv 2605.18747 — mining run history into the repo-native regression harness), Web Agents Plan-Then-Execute (arXiv 2605.14290 — the prompt-injection guard applied to memory compaction over traces/tool output), and Anthropic guidance on long-running agent harnesses (anthropic.com, 2025).
