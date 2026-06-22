@@ -7,7 +7,9 @@
     "loop-run",
     "loop-repair",
     "loop-evals",
-    "loop-flywheel"
+    "loop-flywheel",
+    "loop-runtime-monitor",
+    "loop-inspector"
   ],
   "reference_filenames": [
     "architecture-matrix.md",

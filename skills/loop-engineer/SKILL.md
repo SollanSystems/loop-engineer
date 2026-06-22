@@ -9,7 +9,7 @@ description: "Router for designing, launching, verifying, repairing, and improvi
 
 **Prime directive.** If you cannot define success, verification, or a terminal state, the task is **underspecified** (`FailedSpecGap`) — say so, do not call the next completion "done." This is the central defense against the #1 long-horizon failure mode: false completion / weak self-verification / verifier gaming.
 
-This skill is the **router**. It maps broad intent onto six focused spokes. Read the matching spoke's `SKILL.md`; depth lives in `reference/` (loaded on demand).
+This skill is the **router**. It maps broad intent onto eight focused spokes — six that own the loop lifecycle (architect → contract → run → repair → evals → flywheel) and two diagnostic spokes (runtime-monitor, inspector) that observe a loop live or audit its contract. Read the matching spoke's `SKILL.md`; depth lives in `reference/` (loaded on demand).
 
 ## When to use this router
 
@@ -17,9 +17,9 @@ Reach here for broad agent-loop intent: "design an agent loop", "build a verific
 
 The router's only job is to send you to the right spoke — it does **not** design, scaffold, run, or repair a loop itself; the spokes do. Two signals say you are in the right place: the work is about the *loop* (its shape, contract, execution, verification, or improvement) rather than the end task the loop performs, and the request is broad enough that the phase is not yet obvious. If the actual work is the domain task — writing the feature, doing the UI, running the migration — this is the wrong entry point; route to the matching domain skill and let the loop wrap it.
 
-## The 6-spoke decision map
+## The 8-spoke decision map
 
-Each spoke owns one phase of the loop lifecycle; pick by where you are, not by what you hope to produce. The phases run in order for a new loop and are re-entered out of order as a run hits failures, approval boundaries, or improvement opportunities.
+Six spokes own one phase each of the loop lifecycle; pick by where you are, not by what you hope to produce. The phases run in order for a new loop and are re-entered out of order as a run hits failures, approval boundaries, or improvement opportunities. The last two spokes are diagnostic — reach for them to watch a running loop or audit an existing one, at any point in the lifecycle.
 
 | Spoke | Reach for it when… | Why this spoke |
 |---|---|---|
@@ -29,6 +29,8 @@ Each spoke owns one phase of the loop lifecycle; pick by where you are, not by w
 | **[[loop-repair]]** | Verification failed and you need to **patch and rerun** — classify the failure mode, make the smallest bounded repair, emit a structured repair record, and cap attempts (default N=2) before replan/revert/approve/terminate. | Bounded, recorded, capped repair is what makes a loop converge instead of thrash; unbounded retrying is itself a failure mode and the most common precursor to an agent editing the goalposts. |
 | **[[loop-evals]]** | You need to **measure the loop** — design the 7-layer eval suite and the two first-class metrics (**false-completion-rate**, **repair-productivity**), with deterministic gates before rubric judges. | A loop is only as trustworthy as the checks that gate it, so the deterministic blocking gate is designed before the advisory rubric judge — a model score alone can never clear a deterministic failure. |
 | **[[loop-flywheel]]** | You want the loop to **get better over time** — mine traces/RUNLOG into new eval cases, propose harness changes, and compact memory (short-term continue-run summary vs long-term lessons). | Every real failure should compound into a permanent regression case rather than recur, and separating short-term continue-run memory from long-term lessons keeps both the current run lean and the harness improving. |
+| **[[loop-runtime-monitor]]** | A loop is mid-run and you need to **watch it live** — read `.loop/state.json` + `RUNLOG.md` to flag stall, repair-churn, or budget-overrun and recommend an intervention before the run thrashes or burns its budget. | Catching a degenerating run while it is still running is cheaper than adjudicating the wreckage afterward; live stall/churn/overrun signals are the early-warning layer that turns a silent runaway into a bounded intervention. |
+| **[[loop-inspector]]** | You inherited (or finished) a loop and need to **audit its contract** — score an existing loop dir against the 7-state taxonomy and the prime-directive checklist (defines success? verification? terminal states? approval gates? false-completion defense?) and emit a gap report. | A loop you cannot verify is a false-completion risk by construction; scoring the contract against the prime directive surfaces the missing success/verification/terminal-state machinery before you trust the loop's "done." |
 
 ## Quickstart — pick a path
 

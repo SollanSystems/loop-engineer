@@ -4,6 +4,79 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
+## 0.3.0 — 2026-06-21
+
+The v0.2-roadmap (`G5`–`G8`) plus the two anti-cheat scanner fixes carried over
+from the 0.2.0 run, built to the same deterministic release bar. Two net-new
+spokes take the suite from 7 to 9 skills; the new capability ships as runnable,
+composable tooling, not a new runtime. No publish — that remains a human-only act.
+
+### Added
+
+**Two new spokes (7 → 9 skills)**
+- `skills/loop-runtime-monitor/` (**G6**) — the *observer*. Watches an in-flight
+  run from outside via `.loop/state.json` + `RUNLOG.md`, detects **stall**
+  (same `active_task` across N iterations with no measured progress),
+  **repair-churn** (repair attempts without score improvement), and
+  **budget-overrun**, and surfaces one intervention recommendation
+  (replan / revert / approval / terminate). Backed by runnable
+  `scripts/runtime_monitor.py`. Read-only over the run — it recommends, never
+  mutates.
+- `skills/loop-inspector/` (**G7**) — the *quality layer above the ecosystem*.
+  Reads an existing loop directory (a `.loop/` contract, a superpowers or ruflo
+  harness — read-only, plan-then-execute) and emits a **scored gap report**
+  against the prime-directive checklist (defines success? verification? terminal
+  states? approval gates? false-completion defense?) plus the 7-state taxonomy.
+  Backed by runnable `scripts/inspect_loop.py`.
+
+**Rollout ledger (G8)**
+- `scripts/rollout_ledger.py` — an append-only JSONL **rollout ledger**: one
+  record per loop candidate with EXACTLY the 7 fields `id`, `parent`, `verdict`,
+  `score`, `score_delta`, `coherent_with_prior_winner`, `productive`, plus a
+  read/summarize path. The lineage survives compaction; `productive` is the
+  per-candidate signal behind repair-productivity. `scripts/test_rollout_ledger.py`
+  is the TDD suite (round-trips ≥2 records, asserts all 7 fields).
+
+**Comparative benchmark (G5)**
+- `scripts/benchmark_harness.py` — a **comparative benchmark** that computes
+  false-completion-rate, repair-productivity, and criteria-met for TWO result
+  inputs (reference-harness vs loop-engineer) and the delta between them. Ships
+  the measurement tool only — live numbers are the operator's to run, not a baked
+  claim. `scripts/test_benchmark_harness.py` asserts the deltas across two
+  distinct inputs.
+- `reference/eval-suite.md` — adds a documented **Comparative A/B Protocol**
+  section pairing the harness with the existing metric definitions.
+
+### Fixed
+
+**Anti-cheat scanner (two false-positive classes pinned as regression tests)**
+- `scripts/anticheat_scan.py` — gate-path matching is now **basename /
+  word-boundary**, not substring: a test file editing test-mutation is graded
+  `test-file-mutation` (medium), never upgraded to critical `gate-tampering` by a
+  substring collision with a gate script's path.
+- `scripts/anticheat_scan.py` — **self-exclusion**: a diff that introduces or
+  modifies the scanner's own file set (`anticheat_scan.py` + its test) is no
+  longer graded as gate-tampering against its own correction.
+- `scripts/test_anticheat_scan.py` — both fixes pinned as regression tests; the
+  pre-existing `gate-tampering-is-critical` failsafe stays green.
+
+**Stricter structural facts**
+- `evals/cases/structural.json` — `skill_names` updated 7 → 9 to match real
+  on-disk state (the two new spokes); `self_eval.py` now asserts all 9 skills.
+- `skills/loop-engineer/SKILL.md` — router decision-map gains
+  `[[loop-runtime-monitor]]` and `[[loop-inspector]]` rows.
+
+### Changed
+- `.claude-plugin/plugin.json` — version `0.2.0` → `0.3.0`.
+- `README.md` / `GLOSSARY.md` — document the two new spokes, the rollout ledger,
+  and the comparative benchmark; the *How it compares* positioning is unchanged.
+
+### Notes
+- The repo remains private. Flipping it to public MIT is a separate, human-only
+  act outside the scope of the run that produced this version.
+
+---
+
 ## 0.2.0 — 2026-06-21
 
 Release-readiness pass: a real LICENSE file, owned terminology, a documented

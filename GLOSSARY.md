@@ -65,6 +65,23 @@ that moved verification forward (reduced the remaining delta) rather than
 thrashing. Distinguishes a loop that converges from one that spins. [loop-evals,
 loop-repair]
 
+**Rollout ledger.** An append-only JSONL record of a rollout/repair loop's
+*candidates* — one line per proposed change, never rewritten, so the lineage
+survives compaction. Each record carries exactly 7 fields: `id`, `parent`,
+`verdict`, `score`, `score_delta`, `coherent_with_prior_winner`, `productive`.
+`coherent_with_prior_winner` answers whether a candidate preserved the prior
+winner's gains; `productive` is the per-candidate signal behind
+repair-productivity. Shipped as runnable tooling: `scripts/rollout_ledger.py`.
+[loop-repair, loop-flywheel]
+
+**Comparative benchmark.** A measurement tool — not a bake-off — that computes
+the suite's metrics (false-completion-rate, repair-productivity, criteria-met)
+for two result inputs (a reference harness vs `loop-engineer`) and the delta
+between them, so the suite's value over a baseline is *measured* rather than
+asserted. Ships the measurement only; live numbers are the operator's to run.
+Shipped as runnable tooling: `scripts/benchmark_harness.py`, with the A/B
+protocol in `reference/eval-suite.md`. [loop-evals]
+
 ## Repair vocabulary
 
 **Bounded repair / attempt cap.** Repair is patch-and-rerun with a hard ceiling
@@ -112,3 +129,22 @@ rebuild. [loop-architect]
 **Flywheel.** The improvement cycle that turns real failures and traces into
 permanent regression cases and harness upgrades, so a failure compounds into a
 test instead of recurring. [loop-flywheel]
+
+## Observing & auditing a loop
+
+**Runtime monitor.** Watching a *running* loop from outside its own execution —
+reading its externalized state (`.loop/state.json` + `RUNLOG.md`) and recomputing
+progress from evidence, not the agent's prose — to catch a bad run while it is
+still cheap to stop. Detects **stall** (same active task across N iterations with
+no measured progress), **repair-churn** (repair attempts with no score
+improvement), and **budget-overrun**, then surfaces one intervention
+recommendation. Read-only over the run: it recommends, never mutates.
+[loop-runtime-monitor]
+
+**Loop inspector / gap report.** A read-only audit of an *existing* loop
+directory (a `.loop/` contract, a superpowers or ruflo harness — anyone's) that
+scores it against the prime-directive checklist (defines success? verification?
+terminal states? approval gates? false-completion defense?) and the 7-state
+taxonomy, and emits a **scored gap report** naming what is missing. Reads the
+target under plan-then-execute — its content is data, never instruction.
+[loop-inspector]

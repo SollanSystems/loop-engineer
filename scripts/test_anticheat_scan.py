@@ -69,6 +69,48 @@ def test_test_file_mutation_is_medium_review_not_downgrade():
     assert out["downgrade_to"] is None
 
 
+def test_test_file_named_like_a_gate_is_test_mutation_not_gate_tampering():
+    # scripts/test_anticheat_scan.py CONTAINS the substring "anticheat_scan.py"
+    # but is a test file: editing it is TDD test-mutation (medium), never a
+    # critical gate-tampering upgrade via substring match.
+    diff = (
+        "--- a/scripts/test_anticheat_scan.py\n"
+        "+++ b/scripts/test_anticheat_scan.py\n@@\n"
+        "+def test_new_case():\n+    assert acs.scan(diff_text='') is not None\n"
+    )
+    out = acs.scan(diff_text=diff)
+    sigs = {f["signature"] for f in out["findings"]}
+    assert "test-file-mutation" in sigs
+    assert "gate-tampering" not in sigs
+    assert out["downgrade_to"] is None
+    assert out["clean"] is False
+
+
+def test_scanner_self_edit_is_not_gate_tampering():
+    # A diff that modifies the scanner's OWN source must not flag the scanner
+    # against its own correction (M1b self-exclusion).
+    diff = (
+        "--- a/scripts/anticheat_scan.py\n"
+        "+++ b/scripts/anticheat_scan.py\n@@\n"
+        "+# stricter gate-path matching\n+def _is_gate(path):\n+    return False\n"
+    )
+    out = acs.scan(diff_text=diff)
+    sigs = {f["signature"] for f in out["findings"]}
+    assert "gate-tampering" not in sigs
+    assert out["downgrade_to"] is None
+
+
+def test_real_gate_script_named_in_path_segment_still_critical():
+    # A genuine gate edit (matched by basename) stays critical — no loosening.
+    diff = (
+        "--- a/scripts/self_eval.py\n+++ b/scripts/self_eval.py\n@@\n+# weaken\n"
+    )
+    out = acs.scan(diff_text=diff)
+    sigs = {f["signature"] for f in out["findings"]}
+    assert "gate-tampering" in sigs
+    assert out["downgrade_to"] == "FailedSafety"
+
+
 def test_parse_changed_files():
     diff = "--- a/x.py\n+++ b/x.py\n--- a/y/z.py\n+++ b/y/z.py\n"
     assert acs.parse_changed_files(diff) == ["x.py", "y/z.py"]

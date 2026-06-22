@@ -32,10 +32,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import re
 import sys
 
-# Path substrings that mark a file as a gate (editing one mid-run = tampering).
+# Path markers for a gate file. A bare name (e.g. "self_eval.py") matches by
+# BASENAME / path-segment, never by raw substring — so a test file whose name
+# merely CONTAINS a gate name (test_anticheat_scan.py) is not mis-upgraded.
+# A trailing "/" entry (".github/workflows/") matches as a directory prefix.
 DEFAULT_GATE_PATHS = (
     "self_eval.py",
     "validate_frontmatter.py",
@@ -44,6 +48,33 @@ DEFAULT_GATE_PATHS = (
     "conftest.py",
     ".github/workflows/",
 )
+
+# The scanner's own source set — excluded from gate-tampering self-flagging so a
+# diff that corrects the scanner is not graded as tampering against itself.
+_SELF_FILES = frozenset({"anticheat_scan.py", "test_anticheat_scan.py"})
+
+
+def _basename(path: str) -> str:
+    return path.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _is_gate_path(path: str, gate_paths: tuple[str, ...]) -> bool:
+    """Whether ``path`` is a gate file.
+
+    A directory-style entry (ends in ``/``) matches as a path prefix/segment.
+    A filename entry matches only by exact basename, never by substring, so a
+    file that merely contains a gate name in its own filename is not upgraded.
+    """
+    if _basename(path) in _SELF_FILES:
+        return False
+    segments = path.split("/")
+    for g in gate_paths:
+        if g.endswith("/"):
+            if g.rstrip("/") in segments or g in path:
+                return True
+        elif _basename(path) == g:
+            return True
+    return False
 
 # A changed file that is a test (any common language convention).
 _TEST_PATH_RE = re.compile(
@@ -104,7 +135,7 @@ def scan(
     findings: list[dict] = []
 
     for f in files:
-        if any(g in f for g in gate_paths):
+        if _is_gate_path(f, gate_paths):
             findings.append(
                 {"signature": "gate-tampering", "severity": "critical", "evidence": f}
             )
@@ -145,9 +176,23 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--diff", help="path to a unified diff file (else read stdin)")
     ap.add_argument("--files", help="comma-separated changed files (overrides diff parse)")
     ap.add_argument("--trajectory", help="path to a JSON array of trajectory strings")
+    ap.add_argument(
+        "--self-check",
+        action="store_true",
+        help="scan the scanner's own git diff (anticheat_scan.py + its test)",
+    )
     args = ap.parse_args(argv)
 
-    if args.diff:
+    if args.self_check:
+        import subprocess
+
+        here = pathlib.Path(__file__).resolve().parent
+        diff_text = subprocess.run(
+            ["git", "diff", "--", "scripts/anticheat_scan.py",
+             "scripts/test_anticheat_scan.py"],
+            cwd=here.parent, capture_output=True, text=True, check=True,
+        ).stdout
+    elif args.diff:
         with open(args.diff, encoding="utf-8") as fh:
             diff_text = fh.read()
     elif not sys.stdin.isatty():

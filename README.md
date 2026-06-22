@@ -8,7 +8,7 @@ Prime directive: if it cannot define success, verification, or a terminal state,
 
 ---
 
-## The 7 Skills
+## The 9 Skills
 
 | Skill | One line |
 |---|---|
@@ -19,6 +19,8 @@ Prime directive: if it cannot define success, verification, or a terminal state,
 | **loop-repair** | Patch-and-repair loop with a structured repair record and a max-attempt cap |
 | **loop-evals** | Designs the 7-layer eval suite and makes false-completion-rate + repair-productivity first-class |
 | **loop-flywheel** | Turns traces and failures into new eval cases; manages memory compaction |
+| **loop-runtime-monitor** | Watches an in-flight run from outside; flags stall / repair-churn / budget-overrun and recommends the intervention |
+| **loop-inspector** | Audits an existing loop directory read-only; emits a scored gap report against the prime-directive checklist |
 
 ---
 
@@ -56,6 +58,16 @@ claude plugin install loop-engineer@loop-engineer-local
 **Want to improve the loop over time?**
 ```
 /loop-flywheel
+```
+
+**Run isn't making progress — is it stuck?**
+```
+/loop-runtime-monitor
+```
+
+**Auditing an existing loop or harness (yours or someone else's)?**
+```
+/loop-inspector
 ```
 
 **Not sure which spoke to reach for?**
@@ -126,7 +138,7 @@ Checks every `skills/*/SKILL.md`: frontmatter parses via `yaml.safe_load`, is a 
 uv run --with pyyaml python3 scripts/validate_frontmatter.py
 ```
 
-Exits `0` on clean, `1` with error lines on any failure. All 7 skills must pass before the plugin is considered release-ready.
+Exits `0` on clean, `1` with error lines on any failure. All 9 skills must pass before the plugin is considered release-ready.
 
 ### Self-eval (12 structural checks)
 

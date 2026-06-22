@@ -132,6 +132,65 @@ The schedule is a ratchet: you only add gates, and you only freeze once the chea
 
 ---
 
+## 7. Comparative A/B Protocol
+
+The metrics above (§2) score *one* loop. To answer "is loop-engineer's harness actually better than a baseline reference harness?" you run the **same task set under both harnesses** and read the **swing** between their scorecards. This is a measurement protocol, not a shipped result — `scripts/benchmark_harness.py` is the measurement tool; the numbers are the operator's to run.
+
+**The honest caveat, up front.** Any A/B number this protocol produces is **operator-run on the operator's task set with the operator's harnesses** — it is *not* a benchmark claim shipped by `loop-engineer`. The suite ships the *tool and the protocol*; it deliberately bakes in no win/loss numbers, because a comparative result is only as honest as the task set and the two harnesses behind it. Do not quote a delta from this harness as a product claim; quote it as "on *my* N tasks, *my* two harnesses swung X."
+
+### Same task set, both harnesses
+
+1. **Fix the task set.** Pick a fixed set of N tasks (ideally the curated seed dataset from §5 plus trace-derived cases). The *identical* set must run under both harnesses — a different task set per harness makes the swing meaningless.
+2. **Run harness A (reference).** Run the baseline / reference harness over the task set. For each task, capture an outcome record (schema below).
+3. **Run harness B (loop-engineer).** Run the loop-engineer harness over the *same* task set, capturing the same record per task.
+4. **Hold everything else constant.** Same tasks, same success criteria, same deterministic verify layer (§3). The only independent variable is the harness.
+
+### Capturing outcomes
+
+Each harness run is a JSON list of per-task outcome dicts. Capture these straight from the deterministic evidence (§3) and the repair records (§2.2) — never from the agent's narration:
+
+```json
+{
+  "task": "t1",
+  "claimed_done": true,            // the loop self-asserted done (from RUNLOG)
+  "verification_passed": true,     // layer-1/6 deterministic verify agreed
+  "repairs": 2,                    // repair passes attempted
+  "productive_repairs": 1,         // passes where verification_after > before
+  "criteria_met": 2,               // success_criteria satisfied
+  "criteria_total": 3              // success_criteria declared
+}
+```
+
+- `claimed_done` × `verification_passed` is exactly the FCR cross-join of §2.1 — a `claimed_done: true` with `verification_passed: false` is a false completion.
+- `productive_repairs` / `repairs` is the RP ratio of §2.2, read off the repair-record `verification_before` vs `verification_after` fields.
+- `criteria_met` / `criteria_total` is the criteria-met rate.
+
+### Reading the swing
+
+Feed the two outcome lists to the harness:
+
+```bash
+python3 scripts/benchmark_harness.py reference.json loop_engineer.json
+```
+
+It emits each harness's per-metric scorecard plus a `delta` block — the **swing** (`loop_engineer − reference`) for each metric:
+
+| Metric | A healthy swing for loop-engineer | Why |
+|---|---|---|
+| `false_completion_rate` | **negative** (lower FCR) | the deterministic-first stopping rule (§3) should declare "done" wrongly *less* often |
+| `repair_productivity` | **positive** (higher RP) | bounded patch-and-repair should churn *less*, converge *more* |
+| `criteria_met_rate` | **positive** (more criteria met) | more `success_criteria` actually satisfied |
+
+Read the swing *directionally first*, magnitude second: the sign tells you whether the harness helped; a single run's magnitude is noisy. Re-run across several task sets before trusting a number, and note the N — a swing over 4 tasks is an anecdote, not a benchmark.
+
+### What this protocol is NOT
+
+- It is **not** a live model-vs-model bake-off. The independent variable is the *harness*, not the base model — hold the model constant across A and B.
+- It is **not** a shipped claim. `loop-engineer` ships `benchmark_harness.py` + this protocol; the swing you measure is yours, run on your tasks, reportable only as such.
+- It does **not** gate anything. Like the rubric judge (§3), it is advisory measurement — a model or a comparative number may only *add* a finding, never clear a deterministic failure.
+
+---
+
 ## Cross-links
 
 - [[loop-evals]] — designs this suite, owns `scripts/verify-*` + `EVALS/`.
