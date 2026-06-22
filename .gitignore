@@ -1,6 +1,13 @@
 # Ephemeral workbench
 .tmp/
 
+# Loop run telemetry (operating-contract state for the self-improvement run; not plugin content)
+.loop/
+
+# Machine-local Claude Code config + GSD audit telemetry (not plugin content)
+.claude/
+.gsd/
+
 # Python
 __pycache__/
 *.pyc

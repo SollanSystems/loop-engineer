@@ -93,6 +93,29 @@ Every loop exits through one of exactly 7 named states — no silent "completed"
 
 ---
 
+## How it compares
+
+The *loop-as-design-object* niche is essentially unoccupied — no existing Claude Code plugin sits in it. The adjacent work splits into three clusters, and `loop-engineer` is positioned deliberately **above** all three rather than against any one of them.
+
+| Cluster | Examples | What they optimize | What `loop-engineer` adds |
+|---|---|---|---|
+| **Native execution primitives** | Claude Code `/goal` (runs across turns until a condition holds, grading after each turn), `/loop` | Driving one objective to a stopping condition | `/goal` is the *engine*; `loop-engineer` is the *design harness above it* — architect/operator roles, an on-disk operating contract, 7 typed terminal states, and measured false completion. It decides **what loop to run and how to know it worked**, then can hand execution to `/goal`. |
+| **SDLC workflow harnesses** | [obra/superpowers](https://github.com/obra/superpowers) and other skills-based dev harnesses | Gating the *phases* of shipping code (plan → build → review) | These gate phases; `loop-engineer` treats the loop itself as the artifact — a terminal-state taxonomy, a structured repair record, first-class metrics. The two **compose**: a phase harness can run *inside* a `loop-engineer` contract. |
+| **Swarm / orchestration engines** | ruflo, claude-code-flow, LangGraph, AutoGen | Coordinating many agents; the loop is execution mechanics | `loop-engineer` is engine-neutral design *over* such runtimes — it names the loop, its gates, and its stopping rule rather than providing the runtime. |
+
+**What's genuinely differentiated (the suite owns these):**
+
+- **A 7-state typed terminal taxonomy as a contract primitive** — every run ends in exactly one named state; no silent "completed." No operator harness in the survey prescribes one.
+- **`repair-productivity` as a first-class metric** — the fraction of repair attempts that measurably move verification forward, so a *thrashing* loop is visible, not merely a slow one.
+- **`false-completion-rate`, *measured* not self-reported** — via a held-out verifier split (`scripts/holdout_gate.py`) and an anti-cheat trajectory scan (`scripts/anticheat_scan.py`), a `Succeeded` claim must survive checks the loop never optimized against.
+- **The loop *as the design object*** — not the prompt, not the agent.
+
+**What's table-stakes (the suite has it, but does not oversell it):** an on-disk contract that survives compaction, a bounded repair cap, and deterministic-gate-before-rubric ordering are shared with mature harnesses (AGENTS.md, LangGraph, and the long-horizon agent-evaluation literature). `loop-engineer`'s claim is the *framing* and the *two metrics* on top — not these foundations.
+
+This suite aims to be a concrete, gate-backed reference implementation of the emerging discipline of **loop engineering** (popularized by [Addy Osmani](https://addyosmani.com/blog/loop-engineering/), June 2026).
+
+---
+
 ## Running the Quality Gates
 
 ### Frontmatter validation (structural hard gate)
@@ -105,15 +128,15 @@ uv run --with pyyaml python3 scripts/validate_frontmatter.py
 
 Exits `0` on clean, `1` with error lines on any failure. All 7 skills must pass before the plugin is considered release-ready.
 
-### Self-eval (10 structural checks)
+### Self-eval (12 structural checks)
 
-Verifies the suite against its own spec: skills present, frontmatter valid, reference files all cross-linked, `[[link]]` targets resolve, terminal-state tokens in `loop-run`, repair-record fields in `loop-repair`, 7 eval layers + 2 first-class metrics in `loop-evals`, all templates present, no secret patterns, model-routing compliance in dispatch examples.
+Verifies the suite against its own spec: skills present, frontmatter valid, reference files all cross-linked, `[[link]]` targets resolve, terminal-state tokens in `loop-run`, repair-record fields in `loop-repair`, 7 eval layers + 2 first-class metrics in `loop-evals`, all templates present, no secret patterns, model-routing compliance in dispatch examples, a real LICENSE file at repo root, and a README differentiation section.
 
 ```bash
 uv run --with pyyaml python3 scripts/self_eval.py
 ```
 
-Exits `0` with `structural_pass_rate: 1.0` when all 10 checks pass.
+Exits `0` with `structural_pass_rate: 1.0` when all 12 checks pass.
 
 ### Running both gates together
 

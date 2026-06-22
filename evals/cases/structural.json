@@ -71,5 +71,16 @@
     "repair-productivity"
   ],
   "rubric_target_mean": 9.5,
-  "repair_cap_default": 2
+  "repair_cap_default": 2,
+  "license": {
+    "spdx": "MIT",
+    "title": "MIT License",
+    "holder": "Sollan Systems",
+    "year": "2026",
+    "body_marker": "Permission is hereby granted, free of charge"
+  },
+  "readme_differentiation": {
+    "section_heading_pattern": "^#+\\s+.*how (it|this) compares",
+    "required_markers": ["false-completion-rate", "repair-productivity"]
+  }
 }

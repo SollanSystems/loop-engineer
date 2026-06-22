@@ -1,6 +1,6 @@
 """Deterministic structural self-eval for the loop-engineer suite.
 
-Runs the 10 structural checks the suite grades itself by (the hard pass/fail
+Runs the 12 structural checks the suite grades itself by (the hard pass/fail
 gate; the rubric in evals/rubric.md is the advisory layer above this). Reuses
 ``validate_frontmatter`` from this same scripts/ dir rather than reimplementing
 the frontmatter parse. Expected structural facts live in
@@ -141,7 +141,7 @@ def _iter_suite_files(root: pathlib.Path, scope) -> list:
     return files
 
 
-# --- the 10 checks -----------------------------------------------------------
+# --- the 12 checks -----------------------------------------------------------
 # Each returns (ok: bool, detail: str).
 
 
@@ -258,6 +258,48 @@ def check_dispatch_names_model(root, facts):
                   "(routing contract)")
 
 
+def check_license_present(root, facts):
+    """Release blocker: a real MIT LICENSE file at repo root (not just a
+    plugin.json/README declaration). Verifies title, holder, year, and a
+    distinctive MIT body phrase so a stub file does not pass."""
+    spec = facts["license"]
+    path = root / "LICENSE"
+    if not path.exists():
+        return False, "LICENSE file missing at repo root"
+    text = _read(path)
+    missing = [
+        label
+        for label, needle in (
+            ("title", spec["title"]),
+            ("holder", spec["holder"]),
+            ("year", spec["year"]),
+            ("body", spec["body_marker"]),
+        )
+        if needle not in text
+    ]
+    if missing:
+        return False, f"LICENSE present but missing {missing}"
+    return True, f"LICENSE present ({spec['spdx']}, {spec['holder']} {spec['year']})"
+
+
+def check_readme_differentiation(root, facts):
+    """Release blocker (SPEC North Star): the README must position the suite
+    against alternatives. Requires a 'How it compares' heading AND the two
+    first-class metrics named, so the section is substantive, not a stub."""
+    spec = facts["readme_differentiation"]
+    path = root / "README.md"
+    if not path.exists():
+        return False, "README.md missing"
+    text = _read(path)
+    if not re.search(spec["section_heading_pattern"], text,
+                     re.IGNORECASE | re.MULTILINE):
+        return False, "README has no differentiation section heading"
+    missing = [m for m in spec["required_markers"] if m not in text]
+    if missing:
+        return False, f"README differentiation missing markers: {missing}"
+    return True, "README has differentiation section + first-class-metric markers"
+
+
 CHECKS = [
     ("all-skills-present", check_all_skills_present),
     ("frontmatter-valid", check_frontmatter_valid),
@@ -269,6 +311,8 @@ CHECKS = [
     ("templates-present", check_templates_present),
     ("no-secrets", check_no_secrets),
     ("dispatch-names-model", check_dispatch_names_model),
+    ("license-present", check_license_present),
+    ("readme-differentiation", check_readme_differentiation),
 ]
 
 

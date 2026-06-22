@@ -106,6 +106,8 @@ High-value or high-stakes regression tasks carry **hidden anti-cheat instrumenta
 - **Adversarial probes** — inputs designed to break a shallow/overfit solution (edge values, malformed input, injection strings, boundary conditions). They distinguish "passes the happy path" from "actually correct/robust."
 - **Held-out regression set** — a slice of regression cases withheld from the agent during the run and only scored at verification time, so the agent cannot tune to them.
 
+**Runnable realization.** This is not only doctrine: the held-out split ships as `scripts/holdout_gate.py` (certifies `Succeeded` only if the withheld holdout set passes) and the post-`Succeeded` trajectory sweep ships as `scripts/anticheat_scan.py` (flags gate-tampering, skip/`xfail` injection, hidden-answer reads, and test-file mutation; HIGH/CRITICAL findings downgrade the verdict to `FailedUnverifiable` / `FailedSafety`, MEDIUM is a review flag). A loop calls them at its terminal gate.
+
 A run that passes the visible checks but fails canaries/probes does **not** earn `Succeeded` — it routes to `FailedUnverifiable` (the fix is unproven) and, **if the divergence shows the agent specifically gamed the visible checks, it escalates to the verifier-gaming path (§5) → `FailedSafety`.** [[loop-flywheel]] promotes every real failure (including a tripped canary) into a new permanent regression case, so the canary set compounds over time.
 
 ---

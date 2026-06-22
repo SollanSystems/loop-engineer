@@ -43,6 +43,7 @@ FCR = (iterations claiming success AND failing deterministic verify)
 - Computed from `RUNLOG.md` self-reports cross-joined with the layer-1 verification bundle for the same `iteration_id`. A claim of "Succeeded" that is not backed by a green `scripts/verify-full` run is a false completion, full stop.
 - **Target: 0.** Any non-zero FCR is a defect in the loop's *stopping rule*, not in the task — it means the terminal-state machine is trusting narration over evidence.
 - This is the direct, numeric guard against the prime-directive failure mode: a loop that cannot verify must terminate `FailedUnverifiable`, never silent-"completed". A rising FCR is the earliest signal that a loop is drifting toward verifier-blindness; a detected *deliberate* false completion (e.g. the agent edited a test to pass) is escalated by Layer 5 to a verifier-gaming hard-terminate, not just counted here.
+- **Measured, not narrated — the runnable split.** `loop-engineer` ships the held-out verifier split as composable tooling: `scripts/holdout_gate.py` certifies `Succeeded` only when a withheld **holdout** check set passes, not just the **visible** set the loop optimized against, and emits a `false_completion` flag when the visible set passes while the holdout fails. Aggregated across runs, that flag *is* FCR — no longer a self-reported number. Pair it with `scripts/anticheat_scan.py` (the post-`Succeeded` trajectory sweep, `reference/safety-and-approvals.md` §6).
 
 ### 2.2 repair-productivity (RP)
 

@@ -4,6 +4,66 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
+## 0.2.0 — 2026-06-21
+
+Release-readiness pass: a real LICENSE file, owned terminology, a documented
+differentiation story, and — most substantively — the false-completion defense
+turned from prose into **runnable tooling** the loop can call.
+
+### Added
+
+**Licensing & docs**
+- `LICENSE` — MIT, Sollan Systems 2026, at repo root. (Through 0.1.0, MIT was
+  declared only in `plugin.json` / `README.md`; the license file itself was
+  missing — a real public-release blocker.)
+- `GLOSSARY.md` — owns the suite's vocabulary: loop engineering, the operating
+  contract, deterministic gate vs advisory rubric, held-out verifier split,
+  anti-cheat trajectory scan, false completion, the two first-class metrics, the
+  repair record, the failure-mode taxonomy, and the 7 terminal states.
+- `README.md` — a **"How it compares"** section positioning the suite against the
+  adjacent clusters (native execution primitives, SDLC workflow harnesses,
+  swarm/orchestration engines) and separating what is genuinely differentiated
+  from what is table-stakes.
+
+**Runnable false-completion defense (design-only in 0.1.0 → tooling in 0.2.0)**
+- `scripts/holdout_gate.py` — the held-out verifier split as composable tooling:
+  a loop may declare `Succeeded` only if a withheld **holdout** check set passes,
+  not just the **visible** set it optimized against. Emits a measurable
+  `false_completion` event so false-completion-rate is *measured*, not
+  self-reported. Pure `decide()` core + a `run_manifest()` executor.
+- `scripts/anticheat_scan.py` — the anti-cheat trajectory scan as composable
+  tooling: after a `Succeeded` claim, sweeps the diff + trajectory for shortcut
+  signatures (gate tampering, skip/xfail injection, assert-true, hidden-answer
+  reads, test-file mutation). HIGH/CRITICAL findings auto-downgrade the verdict
+  (`FailedUnverifiable` / `FailedSafety`); MEDIUM is a review flag so honest TDD
+  is not punished.
+- `scripts/test_holdout_gate.py`, `scripts/test_anticheat_scan.py` — TDD suites
+  for both tools.
+- `reference/eval-suite.md` + `skills/loop-evals/SKILL.md` — wire the two scripts
+  in as the runnable realization of the Layer-4 false-completion-rate and
+  Layer-5 anti-cheat surfaces (previously described only as design guidance).
+
+**Stricter self-eval (10 → 12 deterministic checks)**
+- `scripts/self_eval.py` — added `license-present` (a real MIT LICENSE with
+  correct title / holder / year / body marker, so a stub cannot pass) and
+  `readme-differentiation` (a "How it compares" heading plus both first-class
+  metrics named). The gate was *strengthened*; no existing check was weakened.
+- `evals/cases/structural.json` — `license` and `readme_differentiation` expected
+  facts backing the two new checks.
+- `scripts/test_self_eval.py` — coverage for both new checks
+  (missing-then-present, wrong-holder, heading-required, markers-required) and
+  the updated 12-check count.
+
+### Changed
+- `.gitignore` — ignore `.loop/` (per-run operating-contract telemetry from the
+  self-improvement run; not plugin content).
+
+### Notes
+- The repo remains private. Flipping it to public MIT is a separate, human-only
+  act outside the scope of the release run that produced this version.
+
+---
+
 ## 0.1.0 — 2026-06-20
 
 Initial release of the loop-engineer local plugin.

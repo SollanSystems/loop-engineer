@@ -44,7 +44,7 @@ Most harnesses track pass-rate and stop. These two predict whether a *loop* (not
 ```
 FCR = (iterations claiming success AND failing deterministic verify) / (iterations claiming success)
 ```
-Computed by joining `RUNLOG.md` self-reports to the layer-1 verification bundle for the same `iteration_id`. **Target: 0.** A non-zero FCR is a defect in the loop's *stopping rule* — it is trusting narration over evidence, the prime-directive failure mode. A loop that cannot verify must go `FailedUnverifiable`, never silent-"completed". A *deliberate* false completion (e.g. an edited test) is escalated by Layer 5 to a verifier-gaming hard-terminate, not merely counted.
+Computed by joining `RUNLOG.md` self-reports to the layer-1 verification bundle for the same `iteration_id`. **Target: 0.** A non-zero FCR is a defect in the loop's *stopping rule* — it is trusting narration over evidence, the prime-directive failure mode. A loop that cannot verify must go `FailedUnverifiable`, never silent-"completed". A *deliberate* false completion (e.g. an edited test) is escalated by Layer 5 to a verifier-gaming hard-terminate, not merely counted. `loop-engineer` ships this as runnable tooling — `scripts/holdout_gate.py` (the visible/holdout split that makes FCR a measured event) and `scripts/anticheat_scan.py` (the post-`Succeeded` trajectory sweep for shortcut signatures) — so the metric is computed at the gate, not narrated.
 
 **repair-productivity (RP)** — fraction of repair passes that measurably improve the score vs churn; the health metric for `[[loop-repair]]`.
 
