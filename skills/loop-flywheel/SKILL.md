@@ -29,7 +29,7 @@ One turn of the wheel, in order:
 4. **Propose harness changes, don't apply silently.** When the trend shows a structural problem — chronic FCR>0, low RP, a recurring failure mode, a drifted judge (Layer 3 false-accept rising) — emit a **harness-change proposal**: what to change (stopping rule, repair cap, a rubric dimension, an added probe), the evidence, and the expected metric movement. Changes route through the loop's normal review; they do not bypass the gate.
 5. **Re-run the scorecard.** After any harness or base-model change, re-run the frozen scorecard (`reference/eval-suite.md` §6). A change is adopted only if it is a verified, broad improvement — never a single-case win that regresses the set.
 
-Mining is the canonical Workflow fan-out over many trace files — every dispatched agent names an explicit `model:` per the routing HARD CONTRACT:
+Mining is the canonical Workflow fan-out over many trace files — every dispatched agent names an explicit `model:` per the model-routing rule:
 
 ```js
 // Workflow: mine the run history into a trend read and harness-change proposals
