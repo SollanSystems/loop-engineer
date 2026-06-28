@@ -15,13 +15,14 @@ def test_readme_has_no_stale_seven_skills():
     assert "all 9 skills" in readme
 
 
-def test_plugin_version_is_0_3_1():
+def test_plugin_version_is_0_3_2():
     plugin = json.loads(_read(".claude-plugin/plugin.json"))
-    assert plugin["version"] == "0.3.1"
+    assert plugin["version"] == "0.3.2"
 
 
-def test_changelog_has_0_3_1_entry():
+def test_changelog_has_current_and_historical_entries():
     changelog = _read("CHANGELOG.md")
+    assert "## 0.3.2" in changelog
     assert "## 0.3.1" in changelog
 
 

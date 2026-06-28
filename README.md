@@ -1,191 +1,309 @@
-# loop-engineer
+# Loop Engineer
 
-**Design, launch, verify, repair, and improve agent loops.**
+Executable operating contracts for AI agent loops.
 
-A Claude-Code-native skill suite that treats the *loop itself* as the design object — not the prompt, not the agent. Its job is to transform an underspecified objective into an executable operating contract (success criteria, task queue, tool boundaries, verification methods, stopping rules, approval gates, persistent artifacts) and then run it.
+Loop Engineer turns long-running AI work from a fragile chat transcript into a
+repo-native contract: success criteria, task queue, verification gates, repair
+policy, terminal states, run history, and machine-readable state.
 
-Prime directive: if it cannot define success, verification, or a terminal state, it flags the task as `FailedSpecGap` rather than pretending the next completion is "done."
+It ships as:
+
+- a portable **Loop Contract Protocol**,
+- a Python validator and inspector,
+- and a Claude Code reference skill suite.
+
+The prime directive is simple:
+
+> If a loop cannot define success, verification, or a terminal state, it stops
+> as `FailedSpecGap` instead of pretending the next completion is done.
 
 ---
 
-## The 9 Skills
+## Why this exists
 
-| Skill | One line |
+Long-running agents fail in predictable ways:
+
+- they forget what "done" meant after context compaction,
+- they optimize to visible tests,
+- they keep patching without measurable progress,
+- they declare success without independent evidence,
+- they have no typed way to say blocked, unsafe, unverifiable, or underspecified.
+
+Loop Engineer makes those failure modes explicit contract states instead of
+vibes. It is a concrete, gate-backed reference implementation of the emerging
+discipline of **loop engineering**.
+
+---
+
+## Core guarantees
+
+- **Typed termination:** every run exits through exactly one of 7 terminal states.
+- **Evidence before completion:** tasks require verifier-backed evidence.
+- **Externalized state:** loop status lives in files, not chat memory.
+- **Bounded repair:** repair attempts are capped and measured.
+- **False-completion defense:** held-out gates and anti-cheat scans catch verifier gaming.
+
+---
+
+## 30-second demo
+
+```bash
+git clone https://github.com/SollanSystems/loop-engineer.git
+cd loop-engineer
+
+python3 -m loop doctor examples/coverage-repair
+python3 -m loop inspect examples/coverage-repair
+```
+
+`doctor` validates the contract objects:
+
+```json
+{
+  "ok": true,
+  "schemas_checked": [
+    "loop-engineer/manifest@1",
+    "loop-engineer/state@1",
+    "loop-engineer/tasks@1",
+    "loop-engineer/terminal@1"
+  ],
+  "issues": []
+}
+```
+
+`inspect` scores the higher-level loop contract:
+
+```json
+{
+  "score": 90,
+  "terminal_states_covered": 7,
+  "verdict": "strong"
+}
+```
+
+Both commands accept either a workspace root or its `.loop/` directory.
+
+---
+
+## Contract anatomy
+
+A loop contract is a small repo-OS that externalizes intent, queue state,
+runtime state, verification, approvals, and terminal outcome:
+
+```text
+<workspace>/
+  AGENTS.md              # short entrypoint: where to find the contract
+  SPEC.md                # what done means: success criteria + evidence rules
+  WORKFLOW.md            # gates, budgets, repair cap, terminal states
+  TASKS.json             # machine-readable task queue
+  RUNLOG.md              # append-only iteration history
+  EVALS/                 # datasets, rubrics, regressions, traces
+  scripts/
+    verify-fast          # cheap deterministic gate
+    verify-full          # full deterministic gate
+    verify-safety        # safety / approval / injection checks
+    judge-rubric         # advisory rubric judge
+  .loop/
+    manifest.yaml        # contract metadata
+    state.json           # live FSM cursor
+    terminal_state.json  # final exit record, written once
+    artifacts/           # evidence bundles and intermediate outputs
+    approvals/           # approval requests and resolutions
+    checkpoints/         # recoverable snapshots
+    memory/              # run summaries and durable lessons
+```
+
+The contract split is deliberate:
+
+- `SPEC.md` defines success.
+- `WORKFLOW.md` defines how the loop is allowed to operate.
+- `TASKS.json` defines the executable queue.
+- `RUNLOG.md` records human-readable history.
+- `.loop/state.json` is the machine source of truth while the loop runs.
+- `.loop/terminal_state.json` records the final outcome.
+
+A task is not done because an agent says it is done. A task is done only when it
+maps to a success criterion, its verifier passes, and evidence is recorded.
+
+See `reference/repo-os-contract.md` for the canonical artifact schemas.
+
+---
+
+## Honest termination model
+
+Loop Engineer does not allow a vague "completed." Every run exits through
+exactly one named state:
+
+| State | When |
 |---|---|
-| **loop-engineer** (router) | Broad intent → spoke map; the entry point for every loop question |
-| **loop-architect** | Classifies the scenario and selects the architecture + physical realization |
-| **loop-contract** | Scaffolds the repo-OS operating contract (SPEC/WORKFLOW/TASKS/RUNLOG/.loop/) |
-| **loop-run** | Runs the state machine iteration by iteration, approval-gated, calling `/verify-slice` |
-| **loop-repair** | Patch-and-repair loop with a structured repair record and a max-attempt cap |
-| **loop-evals** | Designs the 7-layer eval suite and makes false-completion-rate + repair-productivity first-class |
-| **loop-flywheel** | Turns traces and failures into new eval cases; manages memory compaction |
-| **loop-runtime-monitor** | Watches an in-flight run from outside; flags stall / repair-churn / budget-overrun and recommends the intervention |
-| **loop-inspector** | Audits an existing loop directory read-only; emits a scored gap report against the prime-directive checklist |
+| `Succeeded` | Verification passes; all acceptance criteria are met. |
+| `FailedUnverifiable` | Success or failure cannot be confirmed because verification is insufficient. |
+| `FailedBlocked` | The loop cannot proceed because of a tool, permission, dependency, or external blocker. |
+| `FailedBudget` | Time or cost budget is exhausted. |
+| `FailedSafety` | Safety, policy, or approval risk is detected; the loop hard-terminates. |
+| `FailedSpecGap` | The objective is underspecified; success criteria cannot be defined. |
+| `AbortedByHuman` | The operator explicitly stops the run. |
 
 ---
 
 ## Install
 
+### Claude Code plugin
+
 ```bash
-# 1. Register the local marketplace
-claude plugin marketplace add /mnt/c/Dev/projects/loop-engineer
-
-# 2. Install the plugin
-claude plugin install loop-engineer@loop-engineer-local
-
-# 3. Restart Claude Code — all 9 skills are now discoverable
+claude plugin marketplace add SollanSystems/loop-engineer
+claude plugin install loop-engineer@loop-engineer
 ```
+
+Restart Claude Code; all 9 skills should be discoverable. (Local dev: clone the
+repo and run `claude plugin marketplace add "$PWD"` instead.)
+
+**Requirements:** Python 3.10+ for the portable validator/inspector; Claude Code
+for the plugin — no other dependencies. Optional integrations (e.g.
+`claude-code-orchestration` for `/verify-slice`) are layered on when present and
+never required; every skill runs on the bundled core alone.
+
+### Portable validator / inspector
+
+No Claude Code plugin install is required to validate or inspect an existing
+loop contract:
+
+```bash
+python3 -m loop doctor /path/to/workspace
+python3 -m loop inspect /path/to/workspace
+```
+
+The portable core lives in `loop/` and validates schema-bearing artifacts in
+`schemas/`:
+
+- `loop-engineer/manifest@1`
+- `loop-engineer/state@1`
+- `loop-engineer/tasks@1`
+- `loop-engineer/terminal@1`
 
 ---
 
-## Decision Quickstart
+## Claude Code reference workflow
 
-**Starting a new loop?**
-```
-/loop-engineer → /loop-architect (classify) → /loop-contract (scaffold) → /loop-run (execute)
-```
+The Claude Code plugin is the reference UI over the portable loop contract.
 
-**Loop is failing?**
-```
-/loop-repair
-```
-
-**Need to measure or build eval criteria?**
-```
-/loop-evals
+```text
+/loop-engineer
+→ /loop-architect
+→ /loop-contract
+→ /loop-run
+→ /loop-repair when a gate fails
+→ /loop-flywheel after terminal state
 ```
 
-**Want to improve the loop over time?**
-```
-/loop-flywheel
-```
+### Design
 
-**Run isn't making progress — is it stuck?**
-```
-/loop-runtime-monitor
-```
-
-**Auditing an existing loop or harness (yours or someone else's)?**
-```
-/loop-inspector
-```
-
-**Not sure which spoke to reach for?**
-```
-/loop-engineer  ← always safe starting point; it routes you
-```
-
-### Terminal states
-
-Every loop exits through one of exactly 7 named states — no silent "completed":
-
-| State | When |
+| Skill | One line |
 |---|---|
-| `Succeeded` | Verification passes; all acceptance criteria met |
-| `FailedUnverifiable` | Cannot confirm success or failure (verification gap) |
-| `FailedBlocked` | Loop cannot proceed (tool, permission, or dependency block) |
-| `FailedBudget` | Time or cost budget exhausted |
-| `FailedSafety` | Safety or policy risk detected; hard-terminated |
-| `FailedSpecGap` | Objective underspecified — success criteria could not be defined |
-| `AbortedByHuman` | Explicitly stopped by the operator |
+| **loop-engineer** | Router: broad intent → the right spoke map. |
+| **loop-architect** | Classifies the scenario and selects the loop architecture + physical realization. |
+| **loop-contract** | Scaffolds the repo-OS operating contract: `SPEC.md`, `WORKFLOW.md`, `TASKS.json`, `RUNLOG.md`, `.loop/`. |
+
+### Run
+
+| Skill | One line |
+|---|---|
+| **loop-run** | Runs the state machine iteration by iteration, approval-gated, running the contract's verify gate (optionally `/verify-slice`). |
+| **loop-repair** | Runs a bounded patch-and-repair loop with a structured repair record. |
+| **loop-runtime-monitor** | Watches an in-flight run from outside; flags stall, repair-churn, and budget overrun. |
+
+### Improve
+
+| Skill | One line |
+|---|---|
+| **loop-evals** | Designs the 7-layer eval suite and makes false-completion-rate + repair-productivity first-class. |
+| **loop-flywheel** | Turns traces and failures into new eval cases; manages memory compaction. |
+| **loop-inspector** | Audits an existing loop directory read-only; emits a scored gap report. |
+
+Not sure which spoke to use? Start with `/loop-engineer`; it routes the task.
 
 ---
 
-## Reuse — what this suite does NOT reimplement
+## What ships
 
-| Capability | Existing asset used |
-|---|---|
-| Acceptance verification | `/verify-slice` + `/verify-milestone` (claude-code-orchestration) |
-| State-machine / resume spine | Harmony `engine/cli.py` (init / next / complete; `state.json` serialize) |
-| Grader / judge split | `launch-local-agent` (objective gate then rubric judge) |
-| Dispatch + cost tracking | Agent model-routing HARD CONTRACT; `model_routing.py` / `workflow_routing.py`; `.gsd/audit/receipts/*.jsonl` |
-| Planning surface | GSD (`.gsd/`); superpowers (writing-plans, executing-plans, verification-before-completion) |
+- `loop/` — portable contract core and CLI: `doctor`, `validate`, `verify`, `inspect`.
+- `schemas/` — JSON schemas for contract artifacts.
+- `skills/` — Claude Code skill suite.
+- `reference/` — protocol, architecture, eval, safety, and platform reference docs.
+- `scripts/` — validators, runtime monitor, anti-cheat scanner, benchmark harness, rollout ledger.
+- `examples/` — sample loop contracts, including `examples/coverage-repair`.
 
-`loop-engineer` calls these assets. It does not duplicate them.
+Loop Engineer deliberately composes with existing agent runtimes and workflow
+harnesses. It defines the loop contract above them; it does not try to replace
+their execution engines.
 
 ---
 
 ## How it compares
 
-The *loop-as-design-object* niche is essentially unoccupied — no existing Claude Code plugin sits in it. The adjacent work splits into three clusters, and `loop-engineer` is positioned deliberately **above** all three rather than against any one of them.
+- `/goal`, `/loop`, and agent runtimes execute loops.
+- LangGraph, AutoGen, ruflo, claude-code-flow, and similar tools orchestrate agents.
+- Superpowers-style harnesses gate software-development phases.
 
-| Cluster | Examples | What they optimize | What `loop-engineer` adds |
-|---|---|---|---|
-| **Native execution primitives** | Claude Code `/goal` (runs across turns until a condition holds, grading after each turn), `/loop` | Driving one objective to a stopping condition | `/goal` is the *engine*; `loop-engineer` is the *design harness above it* — architect/operator roles, an on-disk operating contract, 7 typed terminal states, and measured false completion. It decides **what loop to run and how to know it worked**, then can hand execution to `/goal`. |
-| **SDLC workflow harnesses** | [obra/superpowers](https://github.com/obra/superpowers) and other skills-based dev harnesses | Gating the *phases* of shipping code (plan → build → review) | These gate phases; `loop-engineer` treats the loop itself as the artifact — a terminal-state taxonomy, a structured repair record, first-class metrics. The two **compose**: a phase harness can run *inside* a `loop-engineer` contract. |
-| **Swarm / orchestration engines** | ruflo, claude-code-flow, LangGraph, AutoGen | Coordinating many agents; the loop is execution mechanics | `loop-engineer` is engine-neutral design *over* such runtimes — it names the loop, its gates, and its stopping rule rather than providing the runtime. |
+Loop Engineer defines the operating contract above those engines: what success
+means, what evidence proves it, when repair is allowed, and how the loop must
+terminate.
 
-**What's genuinely differentiated (the suite owns these):**
+What this suite owns:
 
-- **A 7-state typed terminal taxonomy as a contract primitive** — every run ends in exactly one named state; no silent "completed." No operator harness in the survey prescribes one.
-- **`repair-productivity` as a first-class metric** — the fraction of repair attempts that measurably move verification forward, so a *thrashing* loop is visible, not merely a slow one.
-- **`false-completion-rate`, *measured* not self-reported** — via a held-out verifier split (`scripts/holdout_gate.py`) and an anti-cheat trajectory scan (`scripts/anticheat_scan.py`), a `Succeeded` claim must survive checks the loop never optimized against.
-- **The loop *as the design object*** — not the prompt, not the agent.
+- **7 typed terminal states** as a contract primitive; no silent "completed."
+- **`false-completion-rate`**, measured with held-out verification and anti-cheat trajectory scanning.
+- **`repair-productivity`**, the fraction of repair attempts that measurably move verification forward.
+- **Repo-native loop state** that survives compaction, crashes, and handoff.
+- **Deterministic-gate-before-rubric ordering** so model judges are advisory, not the first line of proof.
 
-**What's table-stakes (the suite has it, but does not oversell it):** an on-disk contract that survives compaction, a bounded repair cap, and deterministic-gate-before-rubric ordering are shared with mature harnesses (AGENTS.md, LangGraph, and the long-horizon agent-evaluation literature). `loop-engineer`'s claim is the *framing* and the *two metrics* on top — not these foundations.
-
-This suite aims to be a concrete, gate-backed reference implementation of the emerging discipline of **loop engineering** (popularized by [Addy Osmani](https://addyosmani.com/blog/loop-engineering/), June 2026).
-
----
-
-## Running the Quality Gates
-
-### Frontmatter validation (structural hard gate)
-
-Checks every `skills/*/SKILL.md`: frontmatter parses via `yaml.safe_load`, is a dict, `name:` matches the directory, `description:` is non-empty.
-
-```bash
-uv run --with pyyaml python3 scripts/validate_frontmatter.py
-```
-
-Exits `0` on clean, `1` with error lines on any failure. All 9 skills must pass before the plugin is considered release-ready.
-
-### Self-eval (12 structural checks)
-
-Verifies the suite against its own spec: skills present, frontmatter valid, reference files all cross-linked, `[[link]]` targets resolve, terminal-state tokens in `loop-run`, repair-record fields in `loop-repair`, 7 eval layers + 2 first-class metrics in `loop-evals`, all templates present, no secret patterns, model-routing compliance in dispatch examples, a real LICENSE file at repo root, and a README differentiation section.
-
-```bash
-uv run --with pyyaml python3 scripts/self_eval.py
-```
-
-Exits `0` with `structural_pass_rate: 1.0` when all 12 checks pass.
-
-### Loop Contract Core
-
-The portable contract core lives in `loop/` with schemas in `schemas/`. It is the
-engine-neutral validator underneath the Claude Code plugin reference UI.
-
-```bash
-python3 -m loop doctor examples/coverage-repair
-python3 -m loop inspect examples/coverage-repair
-```
-
-`doctor` / `validate` / `verify` resolve either a workspace root or its `.loop/`
-directory, validate the `manifest@1`, `state@1`, `tasks@1`, and `terminal@1`
-contract objects, and flag release blockers such as stub `verify-*` scripts.
-`inspect` emits the higher-level scored gap report using contract-owned files,
-not README keyword matches.
-
-### Running both gates together
-
-```bash
-uv run --with pyyaml python3 scripts/validate_frontmatter.py && \
-uv run --with pyyaml python3 scripts/self_eval.py
-```
+What is table-stakes rather than oversold: on-disk contracts, bounded repair
+caps, and deterministic verification gates are shared with mature harnesses.
+Loop Engineer's claim is the loop-as-design-object framing plus the typed
+termination and loop-health metrics on top.
 
 ---
 
-## Reference Depth
+## Verification
 
-Deep content lives in `reference/` (loaded on demand by skills, not inline):
+Release readiness is gate-backed, not asserted by README prose.
 
-- `reference/architecture-matrix.md` — 5-candidate architecture comparison + scenario→realization decision table
-- `reference/loop-patterns.md` — 6 loop patterns (PreFlect, milestone, patch-and-repair, flywheel, manager-orchestrator, plan-then-execute)
-- `reference/repo-os-contract.md` — repo-OS layout, per-artifact schemas, state machine
-- `reference/prompt-templates.md` — BOOTSTRAP / GOAL-LAUNCH / REPAIR-LOOP / SHORT prompt templates
-- `reference/eval-suite.md` — 7-layer eval suite, first-class metrics, flywheel schedule
-- `reference/safety-and-approvals.md` — escalation ladder, approval lifecycle, anti-cheat
-- `reference/platform-map.md` — portable-core mapping across Claude / Codex / Hermes / Google
+```bash
+uv run --with pyyaml python3 -B scripts/validate_frontmatter.py
+uv run --with pyyaml python3 -B scripts/self_eval.py
+uv run --with pyyaml --with pytest python3 -B -m pytest -q -p no:cacheprovider scripts
+python3 -m py_compile loop/*.py scripts/*.py
+claude plugin validate --strict .claude-plugin/plugin.json
+```
+
+The structural self-eval checks skill presence, frontmatter, cross-links,
+terminal-state coverage, repair-record fields, eval metrics, templates, secret
+patterns, dispatch examples, the bring-your-own-verifier default, the MIT
+license, and README differentiation.
+
+---
+
+## Status
+
+- Version: `0.3.2`
+- Release tag: `loop-engineer--v0.3.2` (cut at publish)
+- License: MIT
+- Primary interface: Claude Code plugin
+- Portable core: Python CLI + JSON schemas
+- Current reference example: `examples/coverage-repair`
+
+---
+
+## Reference docs
+
+Deep content lives in `reference/` and is loaded on demand by the skills:
+
+- `reference/architecture-matrix.md` — architecture comparison + scenario→realization table.
+- `reference/loop-patterns.md` — PreFlect, milestone, patch-and-repair, flywheel, manager-orchestrator, plan-then-execute.
+- `reference/repo-os-contract.md` — repo-OS layout, artifact schemas, state machine.
+- `reference/prompt-templates.md` — bootstrap, goal-launch, repair-loop, and short prompt templates.
+- `reference/eval-suite.md` — 7-layer eval suite, first-class metrics, flywheel schedule.
+- `reference/safety-and-approvals.md` — escalation ladder, approval lifecycle, anti-cheat.
+- `reference/platform-map.md` — portable-core mapping across Claude, Codex, Hermes, and Google.
 
 ---
 
