@@ -8,6 +8,9 @@
 .claude/
 .gsd/
 
+# Local session memory / private build narrative (not plugin content)
+memory/
+
 # Python
 __pycache__/
 *.pyc

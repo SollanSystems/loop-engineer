@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/terminal@1",
+  "title": "Loop Engineer Terminal State @1",
+  "type": "object",
+  "required": ["schema", "state", "iteration_id", "criteria_met", "evidence", "false_completion", "reason", "lessons_ref"],
+  "properties": {
+    "schema": { "const": "loop-engineer/terminal@1" },
+    "state": { "enum": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"] },
+    "iteration_id": { "type": "integer", "minimum": 0 },
+    "criteria_met": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "false_completion": { "type": "boolean" },
+    "reason": { "type": "string", "minLength": 1 },
+    "lessons_ref": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

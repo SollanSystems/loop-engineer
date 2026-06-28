@@ -4,6 +4,75 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+- **Loop Contract Core.** Added the portable `loop/` package with
+  `python3 -m loop doctor|validate|verify|inspect`, shared workspace/`.loop`
+  path resolution, and JSON schemas for `manifest@1`, `state@1`, `tasks@1`, and
+  `terminal@1`.
+
+### Fixed
+- `scripts/inspect_loop.py` now scores contract-owned artifacts instead of broad
+  README/prose keyword matches; `plan_then_execute: false` no longer receives
+  credit by substring.
+- `scripts/runtime_monitor.py` now resolves canonical root `RUNLOG.md`, returns
+  structured reports for partial loop state, and avoids cross-task repair-churn
+  false positives.
+- `scripts/benchmark_harness.py` rejects duplicate task ids before computing A/B
+  metrics.
+- `scripts/anticheat_scan.py` flags semantic self-weakening of safety ranking or
+  downgrade mapping as `FailedSafety`.
+
+---
+
+## 0.3.1 — 2026-06-22
+
+Adversarial-fix milestone. The v0.3.0 release closed two false-POSITIVE classes
+in the anti-cheat scanner; a GPT-5.5/xhigh `codex challenge` over the v0.3.0 diff
+then found the blind side — evasion paths the scanner failed to flag, plus
+boundary-validation gaps in three harness scripts. This patch closes them.
+
+### Fixed
+
+**Anti-cheat scanner false-negatives (P1.1–P1.5)** — `scripts/anticheat_scan.py`
+- **Scoped self-exclusion (P1.1).** A scanner self-edit that empties or shrinks
+  `DEFAULT_GATE_PATHS` / `_ADDED_LINE_SIGNATURES` is now graded critical
+  (`FailedSafety`); additive and comment-only self-edits stay clean. Removed
+  entries are compared semantically, so a reorder or reformat does not flag.
+- **Delete + rename evidence (P1.2).** `parse_changed_files` now also captures
+  gate files that are deleted (`+++ /dev/null`) or renamed
+  (`rename from`/`rename to`); both of Codex's exact exploit diffs now return
+  `clean:false`.
+- **verify-\* gate coverage (P1.3).** Gate-path matching now covers
+  `verify-fast` / `verify-full` / `verify-safety`; tampering one to bypass it is
+  flagged.
+- **Broader tautology detection (P1.4).** Identical-operand assertions (a literal
+  or an identifier compared against itself) and always-true unittest calls now
+  downgrade to `FailedUnverifiable`; honest asserts with distinct operands stay clean.
+- **Path-shaped hidden-answer names (P1.5).** Trajectory reads of held-out /
+  hold_out / answer-key / golden / expected-output paths are flagged, while a
+  plain `assert result == expected` stays clean.
+
+**Boundary validation (P1.6, P2.1–P2.4)**
+- `scripts/benchmark_harness.py` — `compare()` raises on a mismatched A/B
+  task-set instead of reporting a silent delta; non-bool `claimed_done` /
+  `verification_passed` and out-of-range repair / criteria counts are rejected.
+- `scripts/runtime_monitor.py` — robust score parsing for `1e-3`, negatives, and
+  malformed input (no crash); tests pin the exact intervention per scenario.
+- `scripts/inspect_loop.py` — bounded shallow walk with a per-file read cap
+  replaces the unbounded full-tree traversal.
+
+### Changed (P2.5)
+- `README.md` — present-tense install note corrected to "all 9 skills".
+- `.claude-plugin/plugin.json` — version `0.3.0` → `0.3.1`.
+
+### Credits
+- The false-negative and boundary findings came from the GPT-5.5/xhigh
+  `codex` adversarial review over the v0.3.0 release diff.
+
+---
+
 ## 0.3.0 — 2026-06-21
 
 The v0.2-roadmap (`G5`–`G8`) plus the two anti-cheat scanner fixes carried over

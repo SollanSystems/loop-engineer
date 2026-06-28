@@ -33,7 +33,7 @@ claude plugin marketplace add /mnt/c/Dev/projects/loop-engineer
 # 2. Install the plugin
 claude plugin install loop-engineer@loop-engineer-local
 
-# 3. Restart Claude Code — all 7 skills are now discoverable
+# 3. Restart Claude Code — all 9 skills are now discoverable
 ```
 
 ---
@@ -149,6 +149,22 @@ uv run --with pyyaml python3 scripts/self_eval.py
 ```
 
 Exits `0` with `structural_pass_rate: 1.0` when all 12 checks pass.
+
+### Loop Contract Core
+
+The portable contract core lives in `loop/` with schemas in `schemas/`. It is the
+engine-neutral validator underneath the Claude Code plugin reference UI.
+
+```bash
+python3 -m loop doctor examples/coverage-repair
+python3 -m loop inspect examples/coverage-repair
+```
+
+`doctor` / `validate` / `verify` resolve either a workspace root or its `.loop/`
+directory, validate the `manifest@1`, `state@1`, `tasks@1`, and `terminal@1`
+contract objects, and flag release blockers such as stub `verify-*` scripts.
+`inspect` emits the higher-level scored gap report using contract-owned files,
+not README keyword matches.
 
 ### Running both gates together
 

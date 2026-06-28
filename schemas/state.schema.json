@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/state@1",
+  "title": "Loop Engineer State @1",
+  "type": "object",
+  "required": ["schema", "iteration_id", "state", "plan_version", "active_task", "best_score", "failure_mode", "pending_approval", "budget_remaining", "checkpoint_path", "terminal_state"],
+  "properties": {
+    "schema": { "const": "loop-engineer/state@1" },
+    "iteration_id": { "type": "integer", "minimum": 0 },
+    "state": { "type": "string" },
+    "plan_version": { "type": "integer", "minimum": 0 },
+    "active_task": { "type": ["string", "null"] },
+    "best_score": { "type": ["number", "null"] },
+    "failure_mode": { "type": ["string", "null"] },
+    "pending_approval": { "type": ["string", "null"] },
+    "budget_remaining": { "type": "object" },
+    "checkpoint_path": { "type": ["string", "null"] },
+    "terminal_state": {
+      "type": ["string", "null"],
+      "enum": [null, "Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"]
+    }
+  },
+  "additionalProperties": true
+}

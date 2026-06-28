@@ -56,6 +56,52 @@ def _ratio(numerator: int, denominator: int) -> float:
     return numerator / denominator
 
 
+def _validate_outcome(outcome: dict) -> None:
+    """Reject malformed per-task outcomes at the data boundary.
+
+    Bool flags must be real bools (a JSON string ``"false"`` is truthy and would
+    silently corrupt the FCR); productive repairs and met criteria cannot exceed
+    their denominators (a rate > 1.0 is impossible, not a data point).
+    """
+    task = outcome.get("task", "<unknown>")
+    for flag in ("claimed_done", "verification_passed"):
+        if flag in outcome and not isinstance(outcome[flag], bool):
+            raise ValueError(
+                f"task {task!r}: {flag} must be a bool, got "
+                f"{type(outcome[flag]).__name__}"
+            )
+
+    repairs = int(outcome.get("repairs", 0))
+    productive = int(outcome.get("productive_repairs", 0))
+    if productive > repairs:
+        raise ValueError(
+            f"task {task!r}: productive_repairs ({productive}) exceeds "
+            f"repairs ({repairs})"
+        )
+
+    criteria_met = int(outcome.get("criteria_met", 0))
+    criteria_total = int(outcome.get("criteria_total", 0))
+    if criteria_met > criteria_total:
+        raise ValueError(
+            f"task {task!r}: criteria_met ({criteria_met}) exceeds "
+            f"criteria_total ({criteria_total})"
+        )
+
+
+def _validate_unique_task_ids(outcomes: list[dict]) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for outcome in outcomes:
+        task = outcome.get("task")
+        if not isinstance(task, str) or not task:
+            raise ValueError("task id must be a non-empty string")
+        if task in seen:
+            duplicates.append(task)
+        seen.add(task)
+    if duplicates:
+        raise ValueError(f"duplicate task id(s): {sorted(set(duplicates))}")
+
+
 def harness_metrics(outcomes: list[dict]) -> dict:
     """Per-harness FCR, repair-productivity, and criteria-met rate.
 
@@ -63,6 +109,10 @@ def harness_metrics(outcomes: list[dict]) -> dict:
     definitions: FCR is over CLAIMED-done tasks, RP is over attempted repairs,
     criteria-met is over total declared criteria.
     """
+    for o in outcomes:
+        _validate_outcome(o)
+    _validate_unique_task_ids(outcomes)
+
     claimed = [o for o in outcomes if o.get("claimed_done")]
     false_completions = sum(
         1 for o in claimed if not o.get("verification_passed")
@@ -102,7 +152,21 @@ def compare(reference: list[dict], loop_engineer: list[dict]) -> dict:
     negative FCR swing means loop-engineer false-completes less; a positive
     repair-productivity / criteria-met swing means it does better on those.
     No verdict is rendered — the swing is the signal.
+
+    The A/B protocol requires both runs to cover the IDENTICAL task set; a
+    mismatch is operator error (the runs aren't comparable), so it raises
+    rather than reporting a meaningless delta.
     """
+    ref_tasks = {o.get("task") for o in reference}
+    le_tasks = {o.get("task") for o in loop_engineer}
+    if ref_tasks != le_tasks:
+        raise ValueError(
+            "task sets differ between the two harness runs; the A/B protocol "
+            f"requires identical task sets (only in reference: "
+            f"{sorted(ref_tasks - le_tasks)}; only in loop_engineer: "
+            f"{sorted(le_tasks - ref_tasks)})"
+        )
+
     m_ref = harness_metrics(reference)
     m_le = harness_metrics(loop_engineer)
     delta = {k: m_le[k] - m_ref[k] for k in _COMPARED_METRICS}
