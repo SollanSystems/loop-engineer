@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/manifest@1",
+  "title": "Loop Engineer Manifest @1",
+  "type": "object",
+  "required": ["schema", "loop", "policies", "terminal_states"],
+  "properties": {
+    "schema": { "const": "loop-engineer/manifest@1" },
+    "loop": { "type": "string", "minLength": 1 },
+    "inputs": { "type": "object" },
+    "outputs": { "type": "object" },
+    "permissions": { "type": "array", "items": { "type": "string" } },
+    "approval_gates": { "type": "array", "items": { "type": "string" } },
+    "policies": {
+      "type": "object",
+      "properties": {
+        "repair_cap": { "type": "integer", "minimum": 0 },
+        "plan_then_execute": { "type": "boolean" },
+        "verifier_gaming": { "type": "string" }
+      },
+      "required": ["plan_then_execute"],
+      "additionalProperties": true
+    },
+    "terminal_states": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "Succeeded" },
+        { "const": "FailedUnverifiable" },
+        { "const": "FailedBlocked" },
+        { "const": "FailedBudget" },
+        { "const": "FailedSafety" },
+        { "const": "FailedSpecGap" },
+        { "const": "AbortedByHuman" }
+      ],
+      "minItems": 7,
+      "maxItems": 7
+    }
+  },
+  "additionalProperties": true
+}

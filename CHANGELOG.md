@@ -4,6 +4,28 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+- **Loop Contract Core.** Added the portable `loop/` package with
+  `python3 -m loop doctor|validate|verify|inspect`, shared workspace/`.loop`
+  path resolution, and JSON schemas for `manifest@1`, `state@1`, `tasks@1`, and
+  `terminal@1`.
+
+### Fixed
+- `scripts/inspect_loop.py` now scores contract-owned artifacts instead of broad
+  README/prose keyword matches; `plan_then_execute: false` no longer receives
+  credit by substring.
+- `scripts/runtime_monitor.py` now resolves canonical root `RUNLOG.md`, returns
+  structured reports for partial loop state, and avoids cross-task repair-churn
+  false positives.
+- `scripts/benchmark_harness.py` rejects duplicate task ids before computing A/B
+  metrics.
+- `scripts/anticheat_scan.py` flags semantic self-weakening of safety ranking or
+  downgrade mapping as `FailedSafety`.
+
+---
+
 ## 0.3.1 — 2026-06-22
 
 Adversarial-fix milestone. The v0.3.0 release closed two false-POSITIVE classes

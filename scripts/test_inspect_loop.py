@@ -216,3 +216,57 @@ def test_read_text_honors_size_cap(tmp_path):
     text = il._read_text(f)
     # Assert — never returns more than the cap
     assert len(text) <= il._MAX_READ_BYTES
+
+
+def test_keyword_stuffed_readme_cannot_score_strong(tmp_path):
+    # Arrange — all scoring keywords in one prose file, but no contract-owned
+    # artifacts (SPEC/TASKS/WORKFLOW/scripts/.loop). This was the Opus-identified
+    # exploit: substring stuffing could previously score 100/strong.
+    loop = tmp_path / "stuffed"
+    loop.mkdir()
+    (loop / "README.md").write_text(
+        "success criteria verify-fast approval gate holdout anticheat "
+        "plan-then-execute Succeeded FailedUnverifiable FailedBlocked "
+        "FailedBudget FailedSafety FailedSpecGap AbortedByHuman\n",
+        encoding="utf-8",
+    )
+
+    # Act
+    report = il.inspect_loop(str(loop))
+
+    # Assert — prose-only keyword stuffing is not a valid loop contract.
+    assert report["verdict"] == "weak"
+    assert report["score"] < 50
+    assert any("contract" in gap.lower() or "SPEC.md" in gap for gap in report["gaps"])
+
+
+def test_manifest_false_plan_then_execute_does_not_get_credit(tmp_path):
+    # Arrange — a structurally valid loop whose manifest explicitly sets
+    # plan_then_execute false. The inspector must read the boolean, not credit the
+    # mere string "plan_then_execute" appearing in manifest YAML.
+    loop = _make_good_loop(tmp_path)
+    (loop / ".loop" / "manifest.yaml").write_text(
+        "schema: loop-engineer/manifest@1\n"
+        "loop: sample\n"
+        "policies:\n"
+        "  plan_then_execute: false\n"
+        "  verifier_gaming: hard_terminate_as_security_failure\n"
+        "terminal_states:\n"
+        "  - Succeeded\n"
+        "  - FailedUnverifiable\n"
+        "  - FailedBlocked\n"
+        "  - FailedBudget\n"
+        "  - FailedSafety\n"
+        "  - FailedSpecGap\n"
+        "  - AbortedByHuman\n",
+        encoding="utf-8",
+    )
+
+    # Act
+    report = il.inspect_loop(str(loop))
+    present_text = " ".join(report["present"]).lower()
+    gap_text = " ".join(report["gaps"]).lower()
+
+    # Assert
+    assert "plan-then-execute" not in present_text
+    assert "plan-then-execute" in gap_text

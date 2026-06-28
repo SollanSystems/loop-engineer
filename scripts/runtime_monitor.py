@@ -17,6 +17,21 @@ import pathlib
 import re
 import sys
 
+try:
+    from loop.paths import resolve_loop_paths
+except ImportError:  # pragma: no cover - direct script copy outside repo root
+    def resolve_loop_paths(target):
+        class _Paths:
+            def __init__(self, target):
+                loop_dir = pathlib.Path(target)
+                workspace = loop_dir.parent if loop_dir.name == ".loop" else loop_dir
+                self.workspace = workspace
+                self.loop_dir = workspace / ".loop"
+                self.state = self.loop_dir / "state.json"
+                self.runlog = workspace / "RUNLOG.md"
+
+        return _Paths(target)
+
 # Detection thresholds (see skills/loop-runtime-monitor/reference/patterns.md).
 STALL_MIN_ITERS = 3          # same active_task, no score progress, this many iters
 CHURN_MIN_ATTEMPTS = 3       # repair attempts with no score improvement
@@ -87,9 +102,10 @@ def _detect_repair_churn(rows: list[dict]) -> tuple[bool, str]:
     if len(repairs) < CHURN_MIN_ATTEMPTS:
         return False, ""
     tail = repairs[-CHURN_MIN_ATTEMPTS:]
+    same_task = len({r["task"] for r in tail}) == 1
     none_productive = all(r["productive"] is False for r in tail)
     score_span = max(r["score"] for r in tail) - min(r["score"] for r in tail)
-    if none_productive and score_span <= SCORE_EPSILON:
+    if same_task and none_productive and score_span <= SCORE_EPSILON:
         return True, (
             f"{len(tail)} consecutive repair attempts on '{tail[-1]['task']}' with "
             f"productive=false and best_score flat at {tail[-1]['score']}"
@@ -122,12 +138,65 @@ def _recommend(stalled: bool, churn: bool, overrun: bool) -> str:
     return "continue"
 
 
+def _missing_report(paths, missing: list[str]) -> dict:
+    return {
+        "status": "error",
+        "error": "missing_loop_state" if any(m.endswith("state.json") for m in missing) else "missing_loop_artifact",
+        "missing": missing,
+        "active_task": None,
+        "iterations_observed": 0,
+        "stalled": False,
+        "repair_churn": False,
+        "budget_overrun": False,
+        "recommendation": "replan",
+        "evidence": [f"missing {m}" for m in missing],
+        "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
+    }
+
+
 def health_report(loop_dir) -> dict:
-    """Read a `.loop/` dir's state.json + RUNLOG.md → a JSON health report."""
-    loop_dir = pathlib.Path(loop_dir)
-    state_raw = (loop_dir / "state.json").read_text(encoding="utf-8")
-    state = json.loads(state_raw)
-    runlog = (loop_dir / "RUNLOG.md").read_text(encoding="utf-8")
+    """Read loop state + RUNLOG.md → a JSON health report.
+
+    Accepts either the workspace root or the `.loop/` directory. Canonical
+    repo-OS layout stores RUNLOG.md at workspace root and state under `.loop/`.
+    Missing/partial state returns an actionable structured report, not a
+    traceback.
+    """
+    paths = resolve_loop_paths(loop_dir)
+    missing = [str(p.name) for p in (paths.state, paths.runlog) if not p.exists()]
+    if missing:
+        return _missing_report(paths, missing)
+
+    try:
+        state = json.loads(paths.state.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "error",
+            "error": "invalid_loop_state",
+            "active_task": None,
+            "iterations_observed": 0,
+            "stalled": False,
+            "repair_churn": False,
+            "budget_overrun": False,
+            "recommendation": "replan",
+            "evidence": [f"invalid state.json: {exc}"],
+            "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
+        }
+    if not isinstance(state, dict):
+        return {
+            "status": "error",
+            "error": "invalid_loop_state",
+            "active_task": None,
+            "iterations_observed": 0,
+            "stalled": False,
+            "repair_churn": False,
+            "budget_overrun": False,
+            "recommendation": "replan",
+            "evidence": ["state.json is not an object"],
+            "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
+        }
+
+    runlog = paths.runlog.read_text(encoding="utf-8")
     rows = _parse_runlog(runlog)
 
     stalled, stall_ev = _detect_stall(rows)
@@ -136,6 +205,7 @@ def health_report(loop_dir) -> dict:
 
     evidence = [e for e in (stall_ev, churn_ev, overrun_ev) if e]
     return {
+        "status": "ok",
         "active_task": state.get("active_task"),
         "iterations_observed": len(rows),
         "stalled": stalled,
@@ -143,6 +213,7 @@ def health_report(loop_dir) -> dict:
         "budget_overrun": overrun,
         "recommendation": _recommend(stalled, churn, overrun),
         "evidence": evidence,
+        "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
     }
 
 

@@ -310,3 +310,24 @@ def test_criteria_met_exceeding_total_rejected():
     # Act / Assert
     with pytest.raises(ValueError):
         bh.harness_metrics(outcomes)
+
+
+def test_duplicate_task_ids_in_single_run_are_rejected():
+    # Arrange — duplicate task ids make both per-harness counts and A/B pairing
+    # ambiguous. Sets in compare() used to hide this cardinality mismatch.
+    outcomes = _reference_outcomes() + [dict(_reference_outcomes()[0])]
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="duplicate task"):
+        bh.harness_metrics(outcomes)
+
+
+def test_compare_rejects_duplicate_task_ids_even_when_sets_match():
+    # Arrange — both runs have the same task-id set, but each contains an extra
+    # duplicate row. A set comparison would miss the cardinality mismatch.
+    ref = _reference_outcomes() + [dict(_reference_outcomes()[0])]
+    le = _loop_engineer_outcomes() + [dict(_loop_engineer_outcomes()[1])]
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="duplicate task"):
+        bh.compare(ref, le)

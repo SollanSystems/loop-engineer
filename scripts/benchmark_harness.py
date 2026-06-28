@@ -88,6 +88,20 @@ def _validate_outcome(outcome: dict) -> None:
         )
 
 
+def _validate_unique_task_ids(outcomes: list[dict]) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for outcome in outcomes:
+        task = outcome.get("task")
+        if not isinstance(task, str) or not task:
+            raise ValueError("task id must be a non-empty string")
+        if task in seen:
+            duplicates.append(task)
+        seen.add(task)
+    if duplicates:
+        raise ValueError(f"duplicate task id(s): {sorted(set(duplicates))}")
+
+
 def harness_metrics(outcomes: list[dict]) -> dict:
     """Per-harness FCR, repair-productivity, and criteria-met rate.
 
@@ -97,6 +111,7 @@ def harness_metrics(outcomes: list[dict]) -> dict:
     """
     for o in outcomes:
         _validate_outcome(o)
+    _validate_unique_task_ids(outcomes)
 
     claimed = [o for o in outcomes if o.get("claimed_done")]
     false_completions = sum(

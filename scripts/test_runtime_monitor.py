@@ -172,3 +172,65 @@ def test_score_parse_malformed_does_not_crash(tmp_path):
 
     # The malformed row is dropped; the valid 0.5 row survives.
     assert report["iterations_observed"] == 1
+
+
+def test_health_report_resolves_root_runlog_when_called_with_loop_dir(tmp_path):
+    # Arrange — repo-OS keeps RUNLOG.md at workspace root, while state.json lives
+    # under .loop/. The monitor used to require .loop/RUNLOG.md and failed on the
+    # canonical/example layout.
+    workspace = tmp_path / "workspace"
+    loop_dir = workspace / ".loop"
+    loop_dir.mkdir(parents=True)
+    (loop_dir / "state.json").write_text(
+        json.dumps({"active_task": "T2", "best_score": 0.5, "iteration_id": 3}),
+        encoding="utf-8",
+    )
+    (workspace / "RUNLOG.md").write_text(
+        _runlog([(1, "T2", 0.5), (2, "T2", 0.5), (3, "T2", 0.5)]),
+        encoding="utf-8",
+    )
+
+    # Act
+    report = runtime_monitor.health_report(loop_dir)
+
+    # Assert
+    assert report["iterations_observed"] == 3
+    assert report["stalled"] is True
+
+
+def test_cross_task_repair_attempts_do_not_count_as_churn(tmp_path):
+    # Arrange — three flat, unproductive attempts across different tasks are not
+    # repair churn for one task and must not recommend revert.
+    state = {"active_task": "T3", "best_score": 0.6, "iteration_id": "3"}
+    runlog = "\n".join(
+        [
+            "# RUNLOG",
+            "",
+            "- iter 1: active_task=T1 verify=FAIL best_score=0.6 repair attempt=1 productive=false",
+            "- iter 2: active_task=T2 verify=FAIL best_score=0.6 repair attempt=1 productive=false",
+            "- iter 3: active_task=T3 verify=FAIL best_score=0.6 repair attempt=1 productive=false",
+        ]
+    ) + "\n"
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    # Act
+    report = runtime_monitor.health_report(loop_dir)
+
+    # Assert
+    assert report["repair_churn"] is False
+    assert report["recommendation"] != "revert"
+
+
+def test_missing_loop_state_returns_structured_error(tmp_path):
+    # Arrange
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+
+    # Act
+    report = runtime_monitor.health_report(loop_dir)
+
+    # Assert — partial loop state is an actionable report, not a traceback.
+    assert report["status"] == "error"
+    assert report["error"] == "missing_loop_state"
+    assert "state.json" in report["missing"]
+    assert report["recommendation"] == "replan"
