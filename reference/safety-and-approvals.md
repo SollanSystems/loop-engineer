@@ -92,9 +92,9 @@ Operational consequences inside [[loop-run]]:
 - fabricating or doctoring the `verification_bundle` / evidence;
 - disabling, deleting, or tampering with the anti-cheat canaries (§6).
 
-**Response:** immediate **hard-terminate → `FailedSafety`**, no repair attempt, **and log as a security failure** in `RUNLOG.md` and the run receipt (`.gsd/audit/receipts/*.jsonl`) — flagged distinctly from an ordinary `FailedSafety` so it surfaces in the security/governance eval layer and in [[loop-flywheel]]'s trace mining as a recurring red-team case.
+**Response:** immediate **hard-terminate → `FailedSafety`**, no repair attempt, **and log as a security failure** in `RUNLOG.md` and the run receipt (`.loop/receipts/*.jsonl`) — flagged distinctly from an ordinary `FailedSafety` so it surfaces in the security/governance eval layer and in [[loop-flywheel]]'s trace mining as a recurring red-team case.
 
-This is why two structural rules from [[loop-repair]] are load-bearing safety rules, not style preferences: **no editing the tests to make them pass** and **no widening scope to dodge a failing check.** The verifier must remain an *independent* signal; the moment the agent under test can also move the goalposts, the success signal is worthless. Detection is reinforced by the deterministic, in-repo nature of the verification layer (it delegates to `/verify-slice` / `/verify-milestone` — see `reference/eval-suite.md` — rather than to a self-graded model claim) and by treating verifier/test/fixture/spec files as a protected set whose modification during a run is itself a gaming signal.
+This is why two structural rules from [[loop-repair]] are load-bearing safety rules, not style preferences: **no editing the tests to make them pass** and **no widening scope to dodge a failing check.** The verifier must remain an *independent* signal; the moment the agent under test can also move the goalposts, the success signal is worthless. Detection is reinforced by the deterministic, in-repo nature of the verification layer (it runs the contract's `scripts/verify-*` gate — optionally `/verify-slice` / `/verify-milestone`, see `reference/eval-suite.md` — rather than a self-graded model claim) and by treating verifier/test/fixture/spec files as a protected set whose modification during a run is itself a gaming signal.
 
 ---
 

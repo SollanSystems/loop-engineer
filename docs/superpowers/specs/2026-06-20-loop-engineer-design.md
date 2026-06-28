@@ -1,9 +1,14 @@
 # loop-engineer — Design Spec
 
+> Historical design record from the original build. For current public docs see the
+> repo `README.md` and `reference/`. Internal tool names below (GSD, Harmony, Hermes,
+> `/verify-slice`) are the author's setup — the shipped plugin runs on the bundled core
+> and treats all of them as optional integrations.
+
 - **Date:** 2026-06-20
 - **Status:** Approved (brainstorming) — pending spec review
 - **Author:** Sollan Systems
-- **Repo:** `github.com/SollanSystems/loop-engineer` (private)
+- **Repo:** `github.com/SollanSystems/loop-engineer`
 - **Source research:** "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesized from OpenAI Agents/Codex guidance, Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), Google Conductor, and arXiv: PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), Code as Agent Harness (2605.18747).
 
 ---
@@ -171,7 +176,7 @@ Separation of concerns: stable rules (`AGENTS.md`, `WORKFLOW.md`) ≠ intent (`S
 - `.claude-plugin/plugin.json`: `name: loop-engineer`, version `0.1.0`, author, MIT.
 - `.claude-plugin/marketplace.json`: marketplace `name: loop-engineer-local`, one plugin entry `source: "./"`.
 - Frontmatter rule: `description:` must be **quoted** (avoids the colon-space YAML-discovery break); `scripts/validate_frontmatter.py` (`yaml.safe_load` gate) enforces parse + dict + name==dir.
-- Install: `claude plugin marketplace add /mnt/c/Dev/projects/loop-engineer` → `claude plugin install loop-engineer@loop-engineer-local` → restart.
+- Install: `claude plugin marketplace add <repo>` → `claude plugin install loop-engineer@loop-engineer` → restart.
 
 ---
 
@@ -194,7 +199,7 @@ Separation of concerns: stable rules (`AGENTS.md`, `WORKFLOW.md`) ≠ intent (`S
 
 ## 12. Build approach & model routing
 
-spec → `writing-plans` → parallel **Opus** authors (disjoint skills/files, no git-worktree isolation — Apex hazard; central path-scoped commits) → **Sonnet** skeptic verify per skill → **Opus** fix-where-broken → `self_eval.py` + frontmatter gate → adversarial review loop until ≥9.5/10 → register marketplace + verify discovery → commit + push to private origin. Reads/exploration → **Haiku**.
+spec → `writing-plans` → parallel **Opus** authors (disjoint skills/files, no git-worktree isolation; central path-scoped commits) → **Sonnet** skeptic verify per skill → **Opus** fix-where-broken → `self_eval.py` + frontmatter gate → adversarial review loop until ≥9.5/10 → register marketplace + verify discovery → commit + push to origin. Reads/exploration → **Haiku**.
 
 ## 13. Risks & open questions
 

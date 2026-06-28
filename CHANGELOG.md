@@ -6,11 +6,39 @@ All notable changes to `loop-engineer` are documented here.
 
 ## Unreleased
 
+## 0.3.2 — 2026-06-28
+
+Loop Contract Core plus a public open-source readiness pass: every skill now runs
+on the bundled portable core with no private tooling, and the repo ships CI and
+standard community files.
+
 ### Added
-- **Loop Contract Core.** Added the portable `loop/` package with
+- **Loop Contract Core.** The portable `loop/` package with
   `python3 -m loop doctor|validate|verify|inspect`, shared workspace/`.loop`
   path resolution, and JSON schemas for `manifest@1`, `state@1`, `tasks@1`, and
   `terminal@1`.
+- **Generic receipt schema** (`schemas/receipt.schema.json`, `receipt@1`) — an
+  engine-neutral dispatch/cost record at `.loop/receipts/*.jsonl` so the flywheel,
+  evals, and runtime-monitor compute routing + cost metrics without any private
+  telemetry.
+- **`byo-default` structural check** (the 13th self-eval check) — fails if any
+  skill depends on an unbundled tool without also naming the bundled default path.
+- **Continuous integration** (`.github/workflows/ci.yml`) — runs the frontmatter,
+  self-eval, pytest, compile, JSON-validity, and quickstart-smoke gates on Python
+  3.10 / 3.11 / 3.12.
+- **Community files** — CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, and issue/PR
+  templates.
+- **Discoverability metadata** in `plugin.json` (homepage, repository, keywords).
+
+### Changed
+- **Bring-your-own-verifier decoupling.** Skills and reference docs now default to
+  the bundled gate (`scripts/verify-fast` → `verify-full`, `python3 -m loop verify`)
+  and `.loop/receipts/*.jsonl`. `/verify-slice`, `/verify-milestone`, `.gsd/`
+  receipts, `model_routing.py` / `workflow_routing.py`, Harmony, and Hermes are now
+  documented as optional integrations / example realizations, never requirements.
+- **Install** is now `claude plugin marketplace add SollanSystems/loop-engineer`;
+  the marketplace is renamed from `loop-engineer-local` to `loop-engineer`.
+- `.claude-plugin/plugin.json` version `0.3.1` → `0.3.2`.
 
 ### Fixed
 - `scripts/inspect_loop.py` now scores contract-owned artifacts instead of broad

@@ -1,6 +1,6 @@
 """Deterministic structural self-eval for the loop-engineer suite.
 
-Runs the 12 structural checks the suite grades itself by (the hard pass/fail
+Runs the 13 structural checks the suite grades itself by (the hard pass/fail
 gate; the rubric in evals/rubric.md is the advisory layer above this). Reuses
 ``validate_frontmatter`` from this same scripts/ dir rather than reimplementing
 the frontmatter parse. Expected structural facts live in
@@ -141,7 +141,7 @@ def _iter_suite_files(root: pathlib.Path, scope) -> list:
     return files
 
 
-# --- the 12 checks -----------------------------------------------------------
+# --- the 13 checks -----------------------------------------------------------
 # Each returns (ok: bool, detail: str).
 
 
@@ -300,6 +300,25 @@ def check_readme_differentiation(root, facts):
     return True, "README has differentiation section + first-class-metric markers"
 
 
+def check_byo_default(root, facts):
+    """Out-of-the-box invariant: a public user has none of the author's private
+    tooling, so no skill may *depend* on an unbundled integration. Any SKILL.md
+    that names an external-only tool (``/verify-slice``, ``.gsd/`` receipts, the
+    routing hooks) must also name the bundled default path (``verify-fast``/
+    ``verify-full``, the ``loop`` CLI, ``.loop/receipts``) so the skill still
+    works standalone. External tools may appear only as optional integrations."""
+    spec = facts["byo_default"]
+    external = spec["external_tokens"]
+    bundled = spec["bundled_tokens"]
+    offenders = []
+    for name, text in _skill_texts(root).items():
+        if any(tok in text for tok in external) and not any(tok in text for tok in bundled):
+            offenders.append(name)
+    if offenders:
+        return False, f"skills depend on an unbundled tool with no bundled default: {sorted(offenders)}"
+    return True, "every skill naming an optional integration also ships the bundled default"
+
+
 CHECKS = [
     ("all-skills-present", check_all_skills_present),
     ("frontmatter-valid", check_frontmatter_valid),
@@ -313,6 +332,7 @@ CHECKS = [
     ("dispatch-names-model", check_dispatch_names_model),
     ("license-present", check_license_present),
     ("readme-differentiation", check_readme_differentiation),
+    ("byo-default", check_byo_default),
 ]
 
 

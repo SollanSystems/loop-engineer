@@ -1,5 +1,9 @@
 # loop-engineer v1 Implementation Plan
 
+> Historical implementation plan from the original v1 build. For current public docs see
+> the repo `README.md` and `reference/`; tool names like `/verify-slice`, Harmony, and the
+> model-routing contract are the author's setup and are optional in the shipped plugin.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the `loop-engineer` local plugin — a Claude-Code-native skill suite (1 router + 6 spokes) that designs, launches, verifies, repairs, and improves agent loops, plus a self-eval harness and a worked example.
@@ -321,7 +325,7 @@ Not file-authoring tasks; executed by the build orchestrator:
 1. Run `validate_frontmatter.py` (7/7) + `self_eval.py` (100% structural).
 2. Per skill: Sonnet skeptic verifies content against spec/research → Opus fixes where broken; loop until rubric mean ≥9.5.
 3. Cross-skill consistency reviewer (terminal-state tokens, link integrity, no duplicated verification engine).
-4. `claude plugin marketplace add /mnt/c/Dev/projects/loop-engineer` → `claude plugin install loop-engineer@loop-engineer-local`; verify discovery.
+4. `claude plugin marketplace add <repo>` → `claude plugin install loop-engineer@loop-engineer`; verify discovery.
 5. Final commit + `git push -u origin main`.
 
 ---

@@ -88,7 +88,7 @@ dispatch it at the reasoning tier:
 ```text
 Agent(
   subagent_type: "general-purpose",
-  model: "sonnet",                     # reason → sonnet (model-routing HARD CONTRACT)
+  model: "sonnet",                     # reason → sonnet (model-routing rule)
   prompt: "Critique this loop plan against SPEC.md success_criteria and WORKFLOW.md gates.
            List unverifiable tasks, over-phasing, and missing approval gates. Output a
            revised TASKS.json only — do not implement. [pre-execution reflection]"

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/receipt@1",
+  "title": "Loop Engineer Dispatch Receipt @1",
+  "description": "One engine-neutral dispatch/cost record. A loop appends one JSON object per line to .loop/receipts/*.jsonl; loop-evals and loop-flywheel read the trail to verify model routing (role vs model) and compute cost-per-success without any private telemetry. Any JSONL receipt source that carries these keys (e.g. a GSD audit trail) works.",
+  "type": "object",
+  "required": ["schema", "iteration_id", "role", "model", "outcome"],
+  "properties": {
+    "schema": { "const": "loop-engineer/receipt@1" },
+    "iteration_id": { "type": "integer", "minimum": 0 },
+    "dispatch_id": { "type": ["string", "null"] },
+    "role": { "type": "string", "enum": ["read", "reason", "write", "orchestrate"] },
+    "model": { "type": "string" },
+    "outcome": { "type": "string", "enum": ["ok", "fail", "escalated"] },
+    "tokens": { "type": ["integer", "null"], "minimum": 0 },
+    "cost_usd": { "type": ["number", "null"], "minimum": 0 },
+    "escalated_from": { "type": ["string", "null"] },
+    "ts": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

@@ -79,8 +79,8 @@ the core decision table (spec §4):
 |---|---|---|
 | Bounded, parallelizable, single-session fan-out | Multi-agent / modular (row 4/2) | **Workflow tool** — deterministic JS spine; `agent()` calls each name an explicit `model:`; intermediate results stay in script vars, off the main context. |
 | Long-horizon, multi-session, repo-backed, resumable | Repository-OS-integrated / supervisor (row 5/3) | **Repo-OS contract + markdown supervisor** — state externalized to files; clean cross-session handoff; the supervisor reads `state.json` and continues. |
-| Max-determinism / cross-engine resume required | Supervisor + portable spine (row 3 over row 5) | **Python FSM spine** — Harmony's existing `engine/cli.py` pattern (init/next/complete + `state.json` serialize). v1 ships **no new spine code**; it points at Harmony. |
-| Acceptance-gated slice (spec + plan already exist) | (delegation) | **`/verify-slice`** + the `engineer` agent (`claude-code-orchestration`) — don't reimplement; the slice loop already does the 2-iteration fix + Codex cross-review + escalate-to-flag. |
+| Max-determinism / cross-engine resume required | Supervisor + portable spine (row 3 over row 5) | **Portable Python FSM spine** — init/next/complete + `state.json` serialize (~100 lines, or reuse the author's `harmony-agent` `engine/cli.py` reference impl). v1 ships **no new spine code**. |
+| Acceptance-gated slice (spec + plan already exist) | (delegation) | **The contract's `scripts/verify-fast`→`verify-full` gate** + a write agent — don't reimplement. *Optional:* `/verify-slice` (claude-code-orchestration) adds a 2-iteration fix + Codex cross-review + escalate-to-flag. |
 | Early prototype, single maintainer | Single-skill (row 1) | Inline supervisor, minimal contract — just enough SPEC + a verify command; skip the full repo-OS scaffold until the loop earns it. |
 
 The emitted ADR records: chosen architecture (+ which rows compose), chosen
@@ -97,8 +97,9 @@ Pick when work is **bounded and parallelizable in a single session** and you
 want determinism + cost control: tens–hundreds of independent sub-tasks, a
 fixed join, no cross-session resume needed. The JS spine is the control flow;
 agents do judgment. Every `agent()` call **must** name `model:` (read→haiku,
-reason→sonnet, write→opus) — `workflow_routing.py` enforces this at runtime and
-the omission inherits the costly main-loop model.
+reason→sonnet, write→opus); omitting it inherits the costly main-loop model.
+*Optional:* the author enforces this at runtime with a `workflow_routing.py`
+PreToolUse hook.
 
 ```js
 // fan-out 20 file audits → join → one synthesis (illustrative)
@@ -118,39 +119,43 @@ externalizes to `SPEC/WORKFLOW/TASKS.json/RUNLOG/.loop/state.json` (see
 `state.json`, continues from the first incomplete state, and writes one RUNLOG
 entry per iteration. This is the default unless a signal pushes you up to a
 Python spine or down to an inline prototype. Dispatched sub-work still names
-`model:`; verification calls `/verify-slice`.
+`model:`; verification calls the contract's `scripts/verify-*` gate (optionally
+`/verify-slice`).
 
 ```text
 resume rule: state.json exists → skip intake → continue from first incomplete state
 ```
 
-### Harmony Python-spine (max determinism / cross-engine)
+### Portable Python-spine (max determinism / cross-engine)
 Pick **only** when you need a tested deterministic state machine that an engine
 other than Claude can also drive (true cross-engine resume), or when drift
-between runners is unacceptable. Realization = Harmony's `engine/cli.py` spine
+between runners is unacceptable. Realization = a portable Python FSM spine
 (init/next/complete, `state.json` after every transition, one resume rule in a
-thin per-engine runner). **v1 reuses Harmony — it ships no new spine.** If a
-scenario "needs a runtime," that is the over-engineering trap Harmony already
-closed: reach for the existing spine, not a new one.
+thin per-engine runner; ~100 lines, or reuse the author's `harmony-agent`
+`engine/cli.py` reference impl). **v1 ships no new spine code.** If a scenario
+"needs a runtime," that is the over-engineering trap the spine pattern already
+closes: reach for the ~100-line pattern, not a new runtime.
 
-### Delegate to /verify-slice (acceptance-gated slice)
+### Acceptance-gated slice (spec + plan exist)
 Pick when a **spec + plan already exist** and the unit of work is an
 acceptance-gated slice — i.e. the loop *is* "implement this slice until its
 `## Acceptance Criteria` + per-task `Verify:` commands pass." Do **not** build a
-loop here; hand off to `/verify-slice` (independent verifier ∥ Codex
-cross-review + auto-fix, max 2 then escalate) and, for a milestone batch,
-`/verify-milestone`. `loop-engineer` *designs* the criteria and *calls* the
-gate; it never reimplements verification (spec §5 reuse contract). Receipts land
-in `.gsd/audit/receipts/*.jsonl` under the model-routing contract.
+loop here; run the contract's own `scripts/verify-fast`→`verify-full` gate
+against the slice's criteria. *Optional integration:* `/verify-slice`
+(claude-code-orchestration) adds an independent verifier ∥ Codex cross-review +
+auto-fix (max 2 then escalate), and `/verify-milestone` runs a milestone batch.
+`loop-engineer` *designs* the criteria and *calls* the gate; it never
+reimplements verification (spec §5 reuse contract). The receipts each dispatch
+appends land in `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`).
 
 ---
 
 ## Decision shortcut
 
-1. Can one agent do it with a tight toolset and a self-evident check? → **row 1, inline** (or, if a plan exists, **delegate to `/verify-slice`**).
+1. Can one agent do it with a tight toolset and a self-evident check? → **row 1, inline** (or, if a plan exists, run the contract's `verify-*` gate — *optionally* `/verify-slice`).
 2. Single session, lots of independent units, fixed join? → **row 4/2, Workflow tool**.
 3. Spans sessions / needs resume / needs approval gates? → **row 5/3, markdown-supervisor + repo-OS contract** (the default real loop).
-4. Must a non-Claude engine resume the exact state, or is runner-drift unacceptable? → **row 3-over-5, Harmony Python-spine** (reuse, don't build).
+4. Must a non-Claude engine resume the exact state, or is runner-drift unacceptable? → **row 3-over-5, portable Python-spine** (~100 lines, or reuse the author's `harmony-agent` `engine/cli.py`).
 
 When unsure, choose the **lower-complexity** row and let `[[loop-repair]]` /
 `[[loop-flywheel]]` escalate the architecture if overload signals actually

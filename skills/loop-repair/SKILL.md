@@ -83,7 +83,7 @@ The cap is `repair.max_attempts`, **default N=2**, configurable in `WORKFLOW.md`
 
 ## Dispatching a repair to a subagent
 
-For a bounded, isolated fix, [[loop-run]] may dispatch the repair to a write-tier agent. Per the model-routing HARD CONTRACT, the dispatch **must** name an explicit `model:` — repairs write production code, so they route to `opus`:
+For a bounded, isolated fix, [[loop-run]] may dispatch the repair to a write-tier agent. Per the model-routing rule, the dispatch **must** name an explicit `model:` — repairs write production code, so they route to `opus`:
 
 ```
 Agent(
@@ -96,7 +96,7 @@ Agent(
 )
 ```
 
-A read-only triage step (classify the failure, locate the line) routes to `model: "haiku"`; the actual code change routes to `opus`. The acceptance re-verification itself is delegated to `/verify-slice` (claude-code-orchestration) — this skill never builds its own verifier; it consumes the one [[loop-evals]] designed. The repair record and the receipt land in `.gsd/audit/receipts/*.jsonl` alongside the run.
+A read-only triage step (classify the failure, locate the line) routes to `model: "haiku"`; the actual code change routes to `opus`. The acceptance re-verification runs the contract's gate — `scripts/verify-fast`→`verify-full` (optionally `/verify-slice`) — this skill never builds its own verifier; it consumes the one [[loop-evals]] designed. The repair record and the receipt append to `.loop/receipts/*.jsonl` alongside the run.
 
 ## Boundaries
 
