@@ -3,7 +3,7 @@
 The pattern library `loop-architect` selects from once a scenario is classified. A
 pattern is **how the loop iterates** (its inner control flow); the architecture
 (see `architecture-matrix.md`) is **where it runs** (Workflow tool, markdown
-supervisor, Harmony Python spine, or a delegated `/verify-slice`). One architecture
+supervisor, portable Python spine, or a delegated acceptance gate). One architecture
 usually composes two or three of these patterns — e.g. a repository-OS supervisor
 runs PreFlect once at intake, a milestone loop across the run, and patch-and-repair
 inside each milestone.
@@ -15,8 +15,9 @@ terminal states (`Succeeded`, `FailedUnverifiable`, `FailedBlocked`, `FailedBudg
 a bug, not a pattern.
 
 The skeletons are pseudocode control-flow, not literal scripts. They reuse — they do
-not reimplement — `/verify-slice`, the Harmony `engine/cli.py` spine, and the
-`.gsd/audit/receipts` trail. See `[[loop-architect]]` to pick a pattern,
+not reimplement — the contract's `scripts/verify-*` gate (optionally `/verify-slice`),
+a portable Python FSM spine (or the author's `harmony-agent` `engine/cli.py`), and the
+`.loop/receipts` trail. See `[[loop-architect]]` to pick a pattern,
 `[[loop-run]]` to execute it, `[[loop-repair]]` for the repair inner loop, and
 `[[loop-evals]]` for the verification each pattern calls.
 
@@ -74,7 +75,7 @@ can reach `FailedBudget` rather than grinding indefinitely.
 
 ```text
 while queue.has_incomplete() and budget.remaining():
-    m = queue.next_incomplete(); execute(m); v = verify(m)   # delegates to /verify-slice
+    m = queue.next_incomplete(); execute(m); v = verify(m)   # runs the contract's verify-* gate
     runlog.append({milestone: m.id, verdict: v, criteria_met: v.count, evidence: v.bundle})
     if v.failed: invoke patch-and-repair(m)   # pattern 3
 terminal = Succeeded if queue.all_complete() else (FailedBudget | FailedUnverifiable)
@@ -142,8 +143,8 @@ pattern behind the multi-agent / Workflow realization. Adopt it only when a sing
 agent is genuinely overloaded on tools, instructions, or context; the standing rule
 (see `architecture-matrix.md`) is **maximize one agent first, add orchestration only
 when the overload justifies it.** Every delegated agent names an explicit `model:`
-per the model-routing HARD CONTRACT, and every dispatch emits a receipt to
-`.gsd/audit/receipts`.
+per the model-routing rule, and the receipt each dispatch appends lands in
+`.loop/receipts`.
 
 **When to use:** Bounded, parallelizable fan-out within a session; or a long plan with
 cleanly separable workstreams. Avoid for tightly-coupled work where hand-off overhead
@@ -153,7 +154,7 @@ and integration risk exceed the parallelism gain.
 plan = manager.decompose(goal)                       # manager keeps plan + verify authority
 results = parallel([ agent(task=t, model="opus")     # write workers → Opus; read scouts → Haiku
                      for t in plan.independent_tasks ])
-integrated = manager.integrate(results); v = verify(integrated)   # delegates to /verify-slice
+integrated = manager.integrate(results); v = verify(integrated)   # runs the contract's verify-* gate
 ```
 
 ---

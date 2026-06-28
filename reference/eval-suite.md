@@ -15,12 +15,12 @@ Each layer answers a different question, runs at a different cost, and emits one
 | 1 | Deterministic correctness | tests, lint, typecheck, schema/contract validation — `scripts/verify-fast` then `scripts/verify-full` | pass rate, constraint-violation count | **Yes** (hard gate) |
 | 2 | Artifact quality | rubric-based model judge against a **fixed schema** (`EVALS/rubrics/`) | rubric mean, per-dimension score | No (advisory) |
 | 3 | Human calibration | adjudicated sample review of judge verdicts | judge↔human agreement, false-accept / false-reject rate | Gate on the *judge*, not the run |
-| 4 | Loop behavior | trace analysis over runs (`EVALS/traces/`, `RUNLOG.md`, `.gsd/audit/receipts/*.jsonl`) | plan compliance, repair depth, **premature-stop / false-completion rate** | No (advisory + alarm) |
+| 4 | Loop behavior | trace analysis over runs (`EVALS/traces/`, `RUNLOG.md`, `.loop/receipts/*.jsonl`) | plan compliance, repair depth, **premature-stop / false-completion rate** | No (advisory + alarm) |
 | 5 | Security / governance | red-team scenarios, approval tests, prompt-injection probes | escape rate, approval-bypass rate, verifier-gaming detections | **Yes** for high-risk loops |
 | 6 | Regression resistance | repo-native regression dataset + trace-derived cases (`EVALS/regressions/`) | regression failure count (must be 0) | **Yes** once a scorecard is frozen |
 | 7 | Cost / efficiency | token / latency / tool logs from receipts | cost-per-success, wall-clock-to-success | No (budget alarm) |
 
-Layer 1 is the spine: it is exactly the `/verify-slice` / `/verify-milestone` gate (see Reuse below), not a new engine. Layers 2–3 are the judge stack. Layer 4 is where the two first-class metrics in §2 live. Layer 5 is the anti-cheat surface detailed in `reference/safety-and-approvals.md`. Layers 6–7 are the durability and budget guards.
+Layer 1 is the spine: it is exactly the contract's `scripts/verify-fast`→`verify-full` gate (see Reuse below), not a new engine. Layers 2–3 are the judge stack. Layer 4 is where the two first-class metrics in §2 live. Layer 5 is the anti-cheat surface detailed in `reference/safety-and-approvals.md`. Layers 6–7 are the durability and budget guards.
 
 **Why this layering.** Long-horizon agentic-coding work fails first at *self-verification*, not at code generation — SWE-Marathon reports sub-30% success on ultra-long-horizon tasks, dominated by agents declaring victory their own verifier would reject. Deterministic layers 1/6 are the only ones an agent cannot talk its way past, so they gate everything; the judge layers 2/3 add nuance on top but are never permitted to overturn a layer-1 failure.
 
@@ -97,9 +97,9 @@ The regression layer (Layer 6) and the entire eval apparatus live **inside the l
 
 - **Datasets** (`EVALS/dataset/`), **rubrics** (`EVALS/rubrics/`), **regression cases** (`EVALS/regressions/`), and **trace-transform scripts** (`scripts/extract-trace-metrics`) are all committed files. Model calls are used as *grading components* invoked by repo scripts — they are not the system of record.
 - **Why repo-native:** the harness must be reproducible offline, diffable in PRs, runnable in CI with no network dependency on a third-party UI, and durable against vendor churn (consumer eval platforms move fast and go read-only). A vendor eval UI that disappears takes the loop's quality history with it; a committed `EVALS/` tree does not.
-- **Cases come from two sources:** (1) a hand-curated seed dataset of known-good / known-bad inputs, and (2) **trace-derived cases** — every real failure mined from `RUNLOG.md` / `.gsd/audit/receipts/*.jsonl` by [[loop-flywheel]] becomes a permanent regression case so the same failure can never silently return. Regression failure count must be **0** once a scorecard is frozen (§6); a non-zero count blocks.
+- **Cases come from two sources:** (1) a hand-curated seed dataset of known-good / known-bad inputs, and (2) **trace-derived cases** — every real failure mined from `RUNLOG.md` / `.loop/receipts/*.jsonl` by [[loop-flywheel]] becomes a permanent regression case so the same failure can never silently return. Regression failure count must be **0** once a scorecard is frozen (§6); a non-zero count blocks.
 
-**Reuse, do not reimplement.** The deterministic layer (1) *is* the `/verify-slice` (2-iteration fix loop + Codex cross-review + escalate-to-flag) and `/verify-milestone` (Workflow batch) machinery from `claude-code-orchestration`. `loop-evals` **designs** the criteria and the `EVALS/` tree; `loop-run` **calls** the gate. No new verification engine is built.
+**Reuse, do not reimplement.** The deterministic layer (1) *is* the contract's own `scripts/verify-fast`→`verify-full` gate. `loop-evals` **designs** the criteria and the `EVALS/` tree; `loop-run` **calls** the gate. *Optional integration:* with `claude-code-orchestration` installed, `/verify-slice` (2-iteration fix loop + Codex cross-review + escalate-to-flag) and `/verify-milestone` (Workflow batch) run that gate with auto-repair. No new verification engine is built.
 
 A regression batch over many cases is the canonical Workflow fan-out — every dispatched grader names an explicit model:
 
@@ -115,7 +115,7 @@ for (const c of regressionCases) {
 }
 ```
 
-(`read → haiku`, `reason → sonnet`, `write → opus` per the model-routing HARD CONTRACT; receipts land in `.gsd/audit/receipts/`.)
+(`read → haiku`, `reason → sonnet`, `write → opus` per the model-routing rule; the receipts each dispatch appends land in `.loop/receipts/`.)
 
 ---
 
@@ -123,7 +123,7 @@ for (const c of regressionCases) {
 
 Standing up the suite is staged — you do not freeze a scorecard on day one. [[loop-flywheel]] drives these phases; this is the order in which the eval layers come online:
 
-1. **Baseline.** Wire Layer 1 (deterministic gate = `/verify-slice` against `SPEC.md` acceptance criteria) and Layer 7 (cost/latency from receipts). Get a first honest read: pass rate, cost-per-success, and a starting FCR. Do not optimize yet — just measure. This is the minimum a loop needs before `loop-run` is allowed to execute it.
+1. **Baseline.** Wire Layer 1 (deterministic gate = the contract's `scripts/verify-fast`→`verify-full` against `SPEC.md` acceptance criteria; *optionally* `/verify-slice`) and Layer 7 (cost/latency from receipts). Get a first honest read: pass rate, cost-per-success, and a starting FCR. Do not optimize yet — just measure. This is the minimum a loop needs before `loop-run` is allowed to execute it.
 2. **Loop-hardening.** Bring up Layer 4 (trace analysis) and Layer 2 (rubric judge), then add Layer 3 calibration. Now FCR and RP are live; tighten the loop until FCR → 0 and RP trends up. Fix the stopping rule and the repair cap here, where the behavior metrics expose thrash.
 3. **Regression-harness.** Mine accumulated failures (from phases 1–2 traces) into `EVALS/regressions/`, seed the curated dataset, and bring Layer 6 online. From here, every new real failure becomes a permanent case (§5). Add Layer 5 red-team / injection probes for any loop with side-effects.
 4. **Freeze the first scorecard.** Snapshot the current metric set — pass rate, FCR, RP, regression count (0), judge agreement, cost-per-success — as the **baseline scorecard**. After the freeze, Layer 6 is blocking: any regression failure or FCR > 0 fails the loop. The scorecard is what every subsequent change is measured against; [[loop-flywheel]] re-runs it on a cadence and on every harness or model change, and only proposes a new freeze when a change is a verified, broad improvement.

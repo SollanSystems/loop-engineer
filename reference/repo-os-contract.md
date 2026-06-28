@@ -110,7 +110,7 @@ cadence (you tune gates and budgets far more often than you redefine success). R
 | `## Budgets` | `time_budget`, `cost_budget` and the rule: exhausted budget → `FailedBudget`. |
 | `## Repair Cap` | `max_repair_attempts` (default **2**), and what happens at the cap: replan / revert / approve / terminate. |
 | `## Terminal States` | All **7**, verbatim, each with its trigger (see §8). |
-| `## Dispatch` | Routing rule: every dispatched agent / Workflow `agent()` names an explicit `model:` (read→haiku, reason→sonnet, write→opus); receipts land in `.gsd/audit/receipts/*.jsonl`. |
+| `## Dispatch` | Routing rule: every dispatched agent / Workflow `agent()` names an explicit `model:` (read→haiku, reason→sonnet, write→opus); the receipts each dispatch appends land in `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`). |
 
 `WORKFLOW.md` states policy; it never records run status — that is `.loop/state.json`'s job.
 
@@ -198,9 +198,10 @@ Per-iteration fields (`state`, `active_task`, `action`, `dispatch`, `verify`, `s
 **Purpose.** The **source of machine truth** for resume. Serialized after *every* state
 transition so a fresh session reconstitutes the loop exactly: the resume rule is — if
 `state.json` exists, skip intake and continue from the first incomplete state. This is the
-file-backed realization of the Harmony `engine/cli.py` spine pattern (init / next / complete +
-serialize-after-transition); the loop-engineer does **not** ship a new spine — when the
-Python-FSM realization is chosen, it points to Harmony's existing `engine/cli.py`.
+file-backed realization of a portable Python FSM spine pattern (init / next / complete +
+serialize-after-transition; ~100 lines); the loop-engineer does **not** ship a new spine — when the
+Python-FSM realization is chosen, implement the ~100-line pattern or reuse the author's
+`harmony-agent` `engine/cli.py` reference impl.
 
 **Minimal schema (JSON — fields are the spec's State row):**
 

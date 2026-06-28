@@ -25,8 +25,8 @@ Every template writes its output to the repo-OS files (`SPEC.md`, `WORKFLOW.md`,
 `TASKS.json`, `RUNLOG.md`, `.loop/state.json`) so the loop survives compaction
 and cross-session handoff — the "code as agent harness" / externalized-state
 discipline (arXiv 2605.18747; Anthropic, *Effective harnesses for long-running
-agents*). Model routing is explicit in every dispatch example, per the HARD
-CONTRACT: read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop.
+agents*). Model routing is explicit in every dispatch example, per the
+model-routing rule: read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop.
 
 ---
 
@@ -79,7 +79,7 @@ Reflection-pass dispatch (reasoning, not writing → `sonnet`):
 ```text
 Agent(
   subagent_type: "general-purpose",
-  model: "sonnet",                     # reason → sonnet (HARD CONTRACT)
+  model: "sonnet",                     # reason → sonnet (model-routing rule)
   prompt: "Critique this loop plan against SPEC.md success_criteria and WORKFLOW.md
            gates. List unverifiable tasks, over-phasing, and missing approval gates.
            Output a revised task list only — do not implement. [pre-execution reflection]"
@@ -113,8 +113,8 @@ STATE MACHINE (one transition per turn):
 
 FOR THE ACTIVE TASK:
 1. Dispatch the smallest bounded unit of work (use the SHORT-OUTCOME-FIRST prompt).
-2. VERIFY with the contract's gate — call /verify-slice (claude-code-orchestration)
-   when a spec+plan slice exists, else run scripts/verify-fast then verify-full.
+2. VERIFY with the contract's gate — run scripts/verify-fast then verify-full
+   (optionally /verify-slice from claude-code-orchestration when a spec+plan slice exists).
    The deterministic gate is binary and BLOCKING; a rubric judge is advisory only.
 3. If verify PASSES: mark the task done in TASKS.json, append a RUNLOG iteration
    (state-before, action, evidence, state-after), advance state.
@@ -139,7 +139,7 @@ Per-task worker dispatch (writes code → `opus`):
 ```text
 Agent(
   subagent_type: "general-purpose",
-  model: "opus",                       # write → opus (HARD CONTRACT)
+  model: "opus",                       # write → opus (model-routing rule)
   prompt: "<SHORT-OUTCOME-FIRST prompt for TASKS.json[active_task]>"
 )
 ```
@@ -266,7 +266,8 @@ Agent(
 ## Portability note — Codex / cross-engine rollout
 
 The repo-OS contract is engine-neutral, so these templates port to a Codex
-(`AGENTS.md` + Goal mode) or Hermes runner with the same files. One behavioral
+(`AGENTS.md` + Goal mode) or a persistent-memory runner (e.g. the author's Hermes)
+with the same files. One behavioral
 adaptation matters during rollout: **avoid verbose upfront-plan chatter in the
 execution prompts.** OpenAI's Codex/Agents guidance is that long, restated plans
 inside each execution turn add latency and can derail the rollout — the planning
@@ -284,8 +285,8 @@ Concretely, when porting:
   is what keeps the false-completion rate low (arXiv 2606.07682).
 - Engine surfaces move fast; the contract is the durable layer — v1 ships the
   contract-level mapping, not live cross-engine runners (see
-  reference/platform-map.md). Live cross-engine execution is Harmony's job
-  (`engine/cli.py` + `launch-local-agent`), not a new runner here.
+  reference/platform-map.md). Live cross-engine execution is a future adapter's job
+  (a portable `engine/cli.py` spine + `launch-local-agent`), not a new runner here.
 
 ---
 
