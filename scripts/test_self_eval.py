@@ -13,7 +13,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 def test_run_checks_returns_schema():
     r = se.run_checks(REPO_ROOT)
     assert set(r) >= {"checks", "structural_pass_rate", "passed"}
-    assert len(r["checks"]) == 12
+    assert len(r["checks"]) == 13
     for c in r["checks"]:
         assert set(c) >= {"name", "ok", "detail"}
         assert isinstance(c["name"], str) and c["name"]

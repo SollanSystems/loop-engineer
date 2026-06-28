@@ -84,5 +84,9 @@
   "readme_differentiation": {
     "section_heading_pattern": "^#+\\s+.*how (it|this) compares",
     "required_markers": ["false-completion-rate", "repair-productivity"]
+  },
+  "byo_default": {
+    "external_tokens": ["/verify-slice", "/verify-milestone", ".gsd/", "model_routing.py", "workflow_routing.py"],
+    "bundled_tokens": ["verify-fast", "verify-full", "loop verify", ".loop/receipts"]
   }
 }

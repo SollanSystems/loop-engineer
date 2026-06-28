@@ -16,7 +16,7 @@ content in the scanned files.
 | # | Signal | Question | What proves it present |
 |---|---|---|---|
 | 1 | Defines verifiable success | Can the loop state what *done* means, checkably? | A `SPEC.md` with `## Success Criteria` / `success_criteria` — each criterion checkable. |
-| 2 | Independent verification | Is success checked by something other than the worker's claim? | A `verify-fast/full/safety` script, a per-task `"verify"` command, or a `/verify-slice` · `/verify-milestone` delegation. |
+| 2 | Independent verification | Is success checked by something other than the worker's claim? | A `verify-fast/full/safety` script, a per-task `"verify"` command, or an optional `/verify-slice` · `/verify-milestone` delegation. |
 | 3 | Terminal-state coverage | Can the loop end in exactly one explicit terminal state? | How many of the canonical 7 are named in the contract (see §3). |
 | 4 | Approval gates | Do side-effects pause for sign-off? | An `## Approval Gates` section / `approval_gate` / `approval-wait` state naming destructive / secret / production / money boundaries. |
 | 5 | False-completion defense | Is overfitting to visible checks detectable? | A held-out gate (`holdout_gate.py`), an anti-cheat trajectory scan (`anticheat_scan.py`), or an explicit `false_completion` metric. |

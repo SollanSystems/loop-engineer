@@ -14,7 +14,7 @@ it decides, it does not scaffold or run.
 Two separable choices (see `reference/architecture-matrix.md`):
 - **(A) Architecture** — how many agents, how much orchestration.
 - **(B) Realization** — which Claude-Code primitive (Workflow tool / markdown
-  supervisor / Harmony Python spine / delegate to `/verify-slice`).
+  supervisor / portable Python FSM spine / delegate to an acceptance gate such as `/verify-slice`).
 
 ## Prime directive
 
@@ -65,8 +65,8 @@ The core decision table (depth + the 5-candidate ratings live in
 |---|---|---|
 | Bounded, parallelizable, single-session fan-out | Multi-agent / modular | **Workflow tool** — JS spine; every `agent()` names an explicit `model:`; results stay off the main context. |
 | Long-horizon, multi-session, repo-backed, resumable | Repository-OS / supervisor | **Repo-OS contract + markdown supervisor** — state in files; supervisor reads `state.json`, continues from first incomplete state. |
-| Max-determinism / cross-engine resume required | Supervisor + portable spine | **Harmony Python FSM spine** (`engine/cli.py`: init/next/complete + `state.json`). v1 ships **no new spine** — point at Harmony. |
-| Acceptance-gated slice (spec + plan exist) | (delegation) | **`/verify-slice`** + the `engineer` agent — don't reimplement; it already does the 2-iteration fix + Codex cross-review + escalate. |
+| Max-determinism / cross-engine resume required | Supervisor + portable spine | **Portable Python FSM spine** (init/next/complete + `state.json`). v1 ships **no spine code** — implement the ~100-line pattern, or reuse the author's `harmony-agent` `engine/cli.py`. |
+| Acceptance-gated slice (spec + plan exist) | (delegation) | **The contract's `scripts/verify-fast`→`verify-full` gate** + a write agent — don't reimplement. *Optional:* `/verify-slice` (claude-code-orchestration) adds a 2-iteration fix + cross-review. |
 | Early prototype, single maintainer | Single-skill | Inline supervisor, minimal contract — just a SPEC + a verify command. |
 
 These compose: a real system is often row-5 repo-OS substrate, a row-3 supervisor
@@ -107,9 +107,10 @@ to reach an explicit terminal state; never a silent "completed."
 ## Routing note
 
 Any agent dispatch you suggest in the ADR names an explicit `model:` (read → `haiku`,
-reason → `sonnet`, write → `opus`) per the model-routing HARD CONTRACT — a Workflow
-`agent({ model: "sonnet", … })` fan-out, an `engineer` write agent on `opus`. Omitting
-`model:` inherits the costly main-loop model and `workflow_routing.py` blocks it.
+reason → `sonnet`, write → `opus`) per the model-routing rule — a Workflow
+`agent({ model: "sonnet", … })` fan-out, a write agent on `opus`. Omitting
+`model:` inherits the costly main-loop model; the author blocks that with a PreToolUse hook
+(`workflow_routing.py`), but the rule holds on any surface.
 
 ## Hand-off
 

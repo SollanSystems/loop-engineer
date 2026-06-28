@@ -27,7 +27,7 @@ intake → plan → critique-plan → queue-tasks → execute-task → verify
 Serialize `.loop/state.json` **after every transition**. For the active task:
 
 1. **Dispatch** the smallest bounded unit of work using the SHORT-OUTCOME-FIRST prompt (`reference/prompt-templates.md`) — terse, artifact-oriented, no narration.
-2. **Verify** with the contract's gate: call `/verify-slice` (claude-code-orchestration — its 2-iteration fix loop + Codex cross-review + escalate-to-flag) when a spec+plan slice exists; otherwise run `scripts/verify-fast` then `scripts/verify-full`. For a batch of slices use `/verify-milestone`. **The deterministic gate is binary and BLOCKING; a rubric judge is advisory only.** Do not build a new verifier — delegate.
+2. **Verify** with the contract's gate: run the bundled deterministic gate — `scripts/verify-fast` then `scripts/verify-full` (use `python3 -m loop verify` to check contract state). **The deterministic gate is binary and BLOCKING; a rubric judge is advisory only.** Don't build a new verifier — the contract's `verify-*` scripts *are* the gate. *Optional integration:* if you run the `claude-code-orchestration` plugin, `/verify-slice` (its 2-iteration fix loop + cross-review) and `/verify-milestone` (batch) layer auto-repair on top of the same exit codes.
 3. **On PASS:** mark the task done in `TASKS.json`, append a `RUNLOG.md` iteration (state-before, action, evidence, state-after), advance `state`, checkpoint to `.loop/checkpoints/`.
 4. **On FAIL:** hand off to `[[loop-repair]]` (the REPAIR-LOOP prompt). Do **not** patch inline here — repair is bounded and recorded; ad-hoc inline patching is how churn and verifier-gaming start.
 5. **At a side-effect boundary** (destructive command, secret access, production mutation, money movement, external send): set `pending_approval`, write `state.json`, and **PAUSE** (see Approval below).
@@ -40,9 +40,9 @@ Each loop turn emits, to disk, not just to chat:
 - the updated `TASKS.json` task status and the updated `.loop/state.json` (`iteration_id`, `plan_version`, `active_task`, `best_score`, `failure_mode`, `pending_approval`, `budget_remaining`, `checkpoint_path`)
 - on verification, the `verification_bundle` (the actual gate output — the proof, never a prose claim)
 
-## Dispatch with explicit model routing (HARD CONTRACT)
+## Dispatch with explicit model routing
 
-Every `Agent` dispatch and Workflow `agent()` names an explicit `model:` — read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop. Never omit it. Receipts land in `.gsd/audit/receipts/*.jsonl`; `/routing` modes are honored.
+Every `Agent` dispatch and Workflow `agent()` names an explicit `model:` — read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop. Never omit it: explicit routing keeps cost bounded and every dispatch auditable. Append one receipt per dispatch to `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`). *Optional integration:* the author enforces routing with PreToolUse hooks and mirrors receipts into `.gsd/audit/receipts/`; enforce it however your platform allows, or keep the rule as policy text in `WORKFLOW.md`.
 
 Per-task worker (writes code → `opus`):
 

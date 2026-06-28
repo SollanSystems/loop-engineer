@@ -1,6 +1,6 @@
 ---
 name: loop-evals
-description: "Design the evaluation harness for an agent loop — the proof layer that makes a loop trustworthy instead of merely confident. Use when asked to evaluate a loop, build an eval/verification harness or suite, measure how well a loop or agent system works, decide what to test, catch false completions, or grade a long-running agentic run. Lays out the 7-layer eval suite, makes false-completion-rate and repair-productivity first-class metrics, enforces deterministic-first-then-rubric, calibrates the judge, and keeps the regression harness repo-native. Delegates the deterministic gate to /verify-slice and /verify-milestone — it designs the criteria, it does not build a new verification engine."
+description: "Design the evaluation harness for an agent loop — the proof layer that makes a loop trustworthy instead of merely confident. Use when asked to evaluate a loop, build an eval/verification harness or suite, measure how well a loop or agent system works, decide what to test, catch false completions, or grade a long-running agentic run. Lays out the 7-layer eval suite, makes false-completion-rate and repair-productivity first-class metrics, enforces deterministic-first-then-rubric, calibrates the judge, and keeps the regression harness repo-native. Delegates the deterministic gate to the contract's own verify scripts (with /verify-slice as an optional upgrade) — it designs the criteria, it does not build a new verification engine."
 ---
 
 # loop-evals — design the harness that proves the loop
@@ -28,12 +28,12 @@ Full depth, formulas, the calibration cadence, and the Workflow grading example 
 | 1 | Deterministic correctness | tests, lint, typecheck, schema/contract validation (`verify-fast` → `verify-full`) | pass rate, constraint-violation count | **Yes** (hard gate) |
 | 2 | Artifact quality | rubric model judge, fixed schema (`EVALS/rubrics/`) | rubric mean, per-dimension score | No (advisory) |
 | 3 | Human calibration | adjudicated sample review of judge verdicts | judge↔human agreement, false-accept/reject | Gates the *judge* |
-| 4 | Loop behavior | trace analysis (`EVALS/traces/`, `RUNLOG.md`, `.gsd/audit/receipts/*.jsonl`) | plan compliance, repair depth, **false-completion rate** | No (alarm) |
+| 4 | Loop behavior | trace analysis (`EVALS/traces/`, `RUNLOG.md`, `.loop/receipts/*.jsonl`) | plan compliance, repair depth, **false-completion rate** | No (alarm) |
 | 5 | Security / governance | red-team, approval tests, injection probes | escape rate, approval-bypass, verifier-gaming detections | **Yes** for high-risk |
 | 6 | Regression resistance | repo-native dataset + trace-derived cases (`EVALS/regressions/`) | regression failure count (must be 0) | **Yes** once frozen |
 | 7 | Cost / efficiency | token/latency/tool logs from receipts | cost-per-success, wall-clock-to-success | No (budget alarm) |
 
-Layer 1 *is* the `/verify-slice` / `/verify-milestone` gate — not a new engine. Layers 2–3 are the judge stack. Layer 4 carries the two first-class metrics. Layer 5 is the anti-cheat surface in `reference/safety-and-approvals.md`. Layers 6–7 are the durability and budget guards.
+Layer 1 *is* the contract's deterministic verify gate (`scripts/verify-fast`→`verify-full`; optionally `/verify-slice`) — not a new engine. Layers 2–3 are the judge stack. Layer 4 carries the two first-class metrics. Layer 5 is the anti-cheat surface in `reference/safety-and-approvals.md`. Layers 6–7 are the durability and budget guards.
 
 ## The two first-class metrics
 
@@ -61,7 +61,7 @@ The non-negotiable ordering inside every evaluation cycle:
 2. **Only if the gate is green, run the rubric judge** (Layer 2) for quality/nuance a test cannot capture.
 3. **The judge is advisory; the gate is authoritative.** A high rubric score never clears a red deterministic check — a model verdict may only ADD a finding, never subtract a deterministic failure.
 
-This mirrors the `launch-local-agent` grader split (objective binary gate in front of a judged advisory rubric) and the Hermes no-leak grader stance that a model score is never sufficient alone. It is also *why* FCR is anchored to the deterministic layer, not the judge: if a quality rubric could mark a run "done," a confident-but-wrong agent would game it.
+This mirrors the `launch-local-agent` grader split (objective binary gate in front of a judged advisory rubric) and the no-leak grader principle that a model score is never sufficient alone. It is also *why* FCR is anchored to the deterministic layer, not the judge: if a quality rubric could mark a run "done," a confident-but-wrong agent would game it.
 
 ## Judge calibration
 
@@ -76,7 +76,7 @@ A rubric judge is itself a model under test; an uncalibrated judge silently rots
 
 Datasets, rubrics, regression cases, and trace-transform scripts are **committed files inside the loop's repo** — model calls are grading *components* invoked by repo scripts, never the system of record. This keeps the harness reproducible offline, diffable in PRs, CI-runnable with no third-party network dependency, and durable against vendor churn (consumer eval UIs move fast and go read-only; a committed `EVALS/` tree does not lose your quality history). Cases come from a hand-curated seed set **plus** trace-derived cases — every real failure `[[loop-flywheel]]` mines becomes a permanent regression case so the same failure can never silently return.
 
-**Reuse, do not reimplement.** The deterministic layer *is* `/verify-slice` (2-iteration fix loop + Codex cross-review + escalate-to-flag) and `/verify-milestone` (Workflow batch) from `claude-code-orchestration`. `loop-evals` **designs** the criteria + the `EVALS/` tree; `loop-run` **calls** the gate. A regression batch is the canonical Workflow fan-out — every dispatched grader names an explicit `model:` per the routing HARD CONTRACT:
+**Reuse, do not reimplement.** The deterministic layer *is* the contract's own `scripts/verify-fast`→`verify-full` gate. `loop-evals` **designs** the criteria + the `EVALS/` tree; `loop-run` **calls** the gate; neither builds a new engine. *Optional integration:* with `claude-code-orchestration` installed, `/verify-slice` (2-iteration fix loop + cross-review) and `/verify-milestone` (batch) run that gate with auto-repair. A regression batch is the canonical Workflow fan-out — every dispatched grader names an explicit `model:` per the routing rule:
 
 ```js
 // Workflow: grade the regression set — deterministic gate per case, then an advisory judge.
@@ -89,7 +89,7 @@ for (const c of regressionCases) {
   }
 }
 ```
-(`read → haiku`, `reason → sonnet`, `write → opus`; receipts land in `.gsd/audit/receipts/`.)
+(`read → haiku`, `reason → sonnet`, `write → opus`; receipts append to `.loop/receipts/`.)
 
 ## Standing the suite up
 

@@ -5,7 +5,7 @@ description: "Turn a loop's own run history into compounding improvement — min
 
 # loop-flywheel — the loop that improves the loop
 
-A loop that only runs gets no better. `loop-flywheel` is the **improvement engine**: it reads what a loop has already done (its `RUNLOG.md`, `EVALS/traces/`, and `.gsd/audit/receipts/*.jsonl`) and turns that history into three durable outputs — **new eval cases**, **harness-change proposals**, and **compacted memory**. It is the reflect→see step of the self-learning flywheel applied to an agent loop itself.
+A loop that only runs gets no better. `loop-flywheel` is the **improvement engine**: it reads what a loop has already done (its `RUNLOG.md`, `EVALS/traces/`, and `.loop/receipts/*.jsonl`) and turns that history into three durable outputs — **new eval cases**, **harness-change proposals**, and **compacted memory**. It is the reflect→see step of the self-learning flywheel applied to an agent loop itself.
 
 It owns no gate. The deterministic and rubric layers live in [[loop-evals]] and `reference/eval-suite.md`; this skill *feeds* that suite (mines failures into it) and *watches* its two first-class metrics over time. Read [[loop-evals]] first if you are standing the suite up; come here once a loop has run ≥2 iterations and you want it to compound.
 
@@ -20,7 +20,7 @@ It owns no gate. The deterministic and rubric layers live in [[loop-evals]] and 
 
 One turn of the wheel, in order:
 
-1. **Read the history.** Pull the loop's `RUNLOG.md` (per-iteration self-reports), `EVALS/traces/`, and the dispatch/cost receipts in `.gsd/audit/receipts/*.jsonl`. These are evidence, not narration.
+1. **Read the history.** Pull the loop's `RUNLOG.md` (per-iteration self-reports), `EVALS/traces/`, and the dispatch/cost receipts in `.loop/receipts/*.jsonl`. These are evidence, not narration.
 2. **Compute the trend, don't trust the claim.** Recompute the two first-class metrics from [[loop-evals]] across iterations:
    - **false-completion-rate (FCR)** — iterations claiming "Succeeded" that the deterministic layer-1 verify *disagrees* with. Target 0. A rising FCR is the earliest signal the loop is drifting toward verifier-blindness; it is a defect in the **stopping rule**, not the task.
    - **repair-productivity (RP)** — fraction of repair passes where `verification_after > verification_before` (read straight off the [[loop-repair]] record schema). Falling RP = the repair loop is thrashing against its max-N cap and burning budget without converging.
@@ -44,7 +44,7 @@ await agent({ model: "opus",     // write: turn confirmed failures into committe
   prompt: `From the confirmed failures in this proposal, write one EVALS/regressions/<case>.json per distinct real failure (input + expected deterministic verdict). Commit only failures that actually occurred; leave harness-change proposals for human review.` });
 ```
 
-(`read → haiku`, `reason → sonnet`, `write → opus`; receipts land in `.gsd/audit/receipts/`. The haiku+sonnet pass mines and *proposes*; only the opus pass writes the committed regression cases — and even then never reimplements the verify engine, which is `/verify-slice` / `/verify-milestone`.)
+(`read → haiku`, `reason → sonnet`, `write → opus`; receipts append to `.loop/receipts/`. The haiku+sonnet pass mines and *proposes*; only the opus pass writes the committed regression cases — and even then never reimplements the verify engine: the contract's `scripts/verify-*` gate, optionally `/verify-slice`, is the source of truth.)
 
 ## Memory compaction: two stores, never mixed
 
@@ -71,8 +71,8 @@ Rule: a continue-run summary is never promoted to a lesson without evidence (a c
 ## Reuse, don't reimplement
 
 - The suite, gate, and scorecard mechanics are [[loop-evals]] + `reference/eval-suite.md` — this skill consumes them.
-- Verification is `/verify-slice` / `/verify-milestone` (claude-code-orchestration) — never a new engine.
-- Trends are computed from `.gsd/audit/receipts/*.jsonl` and `RUNLOG.md` — the receipts the routing contract already emits.
+- Verification is the contract's `scripts/verify-fast`→`verify-full` gate (optionally `/verify-slice` / `/verify-milestone`) — never a new engine.
+- Trends are computed from `.loop/receipts/*.jsonl` and `RUNLOG.md` — the receipts each dispatch appends.
 - The repair-record fields RP reads come from [[loop-repair]]; the terminal states FCR protects are enforced by [[loop-run]].
 
 ## Cross-links
