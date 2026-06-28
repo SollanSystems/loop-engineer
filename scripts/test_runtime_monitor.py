@@ -40,7 +40,7 @@ def test_stall_flagged_when_same_task_no_progress(tmp_path):
 
     # Assert
     assert report["stalled"] is True
-    assert report["recommendation"] in {"replan", "revert", "approval", "terminate"}
+    assert report["recommendation"] == "replan"
     assert report["evidence"]
 
 
@@ -63,7 +63,7 @@ def test_repair_churn_flagged_when_repairs_dont_improve_score(tmp_path):
 
     # Assert
     assert report["repair_churn"] is True
-    assert report["recommendation"] in {"replan", "revert", "approval", "terminate"}
+    assert report["recommendation"] == "revert"
     assert report["evidence"]
 
 
@@ -83,7 +83,7 @@ def test_budget_overrun_flagged_when_budget_exhausted(tmp_path):
 
     # Assert
     assert report["budget_overrun"] is True
-    assert report["recommendation"] in {"replan", "revert", "approval", "terminate"}
+    assert report["recommendation"] == "approval"
     assert report["evidence"]
 
 
@@ -126,3 +126,49 @@ def test_cli_emits_json(tmp_path, capsys):
     parsed = json.loads(out)
     assert parsed["stalled"] is True
     assert rc == 0
+
+
+def _line(it, task, score_text):
+    return f"- iter {it}: active_task={task} verify=PASS best_score={score_text}"
+
+
+def test_score_parse_scientific_notation(tmp_path):
+    # 1e-3 must parse to 0.001, not stop at the 'e' and read as 1.0.
+    state = {"active_task": "M2", "best_score": 0.001, "iteration_id": "3"}
+    runlog = (
+        "\n".join(
+            ["# RUNLOG", "", _line(1, "M2", "1e-3"), _line(2, "M2", "1e-3"), _line(3, "M2", "1e-3")]
+        )
+        + "\n"
+    )
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    rows = runtime_monitor._parse_runlog((loop_dir / "RUNLOG.md").read_text(encoding="utf-8"))
+
+    assert [r["score"] for r in rows] == [0.001, 0.001, 0.001]
+
+
+def test_score_parse_negative(tmp_path):
+    # -0.5 must keep its sign, not drop the minus and read as +0.5.
+    state = {"active_task": "M2", "best_score": -0.5, "iteration_id": "1"}
+    runlog = "\n".join(["# RUNLOG", "", _line(1, "M2", "-0.5")]) + "\n"
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    rows = runtime_monitor._parse_runlog((loop_dir / "RUNLOG.md").read_text(encoding="utf-8"))
+
+    assert [r["score"] for r in rows] == [-0.5]
+
+
+def test_score_parse_malformed_does_not_crash(tmp_path):
+    # 1.2.3 is not a float — the parser must fail safe (skip the row), never crash.
+    state = {"active_task": "M2", "best_score": 0.5, "iteration_id": "2"}
+    runlog = (
+        "\n".join(["# RUNLOG", "", _line(1, "M2", "1.2.3"), _line(2, "M2", "0.5")]) + "\n"
+    )
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    # Must not raise.
+    report = runtime_monitor.health_report(loop_dir)
+
+    # The malformed row is dropped; the valid 0.5 row survives.
+    assert report["iterations_observed"] == 1

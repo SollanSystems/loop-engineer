@@ -153,3 +153,66 @@ def test_cli_nonzero_exit_on_weak_loop(tmp_path):
     loop = _make_bad_loop(tmp_path)
     # Act / Assert — a weak loop is a non-zero (actionable) verdict
     assert il.main([str(loop)]) != 0
+
+
+def test_deep_tree_is_not_descended_into(tmp_path):
+    # Arrange — a directory chain deeper than the depth bound (>3 parts)
+    loop = tmp_path / "deep"
+    deep = loop / "a" / "b" / "c" / "d" / "e"
+    deep.mkdir(parents=True)
+    (deep / "buried.md").write_text("buriedneedle terminal\n", encoding="utf-8")
+    # Act
+    corpus = il._gather_corpus(loop)
+    # Assert — content below the depth bound never reaches the corpus
+    assert "buriedneedle" not in corpus
+
+
+def test_deep_tree_walk_is_bounded_at_iteration_time(tmp_path, monkeypatch):
+    # Arrange — instrument os.scandir so we can prove the deep dir is never
+    # enumerated (the bound is applied while walking, not via rglob+post-filter,
+    # which would scandir the whole tree first).
+    import os
+
+    loop = tmp_path / "deep"
+    deep = loop / "a" / "b" / "c" / "d" / "e"
+    deep.mkdir(parents=True)
+    (deep / "buried.md").write_text("buried\n", encoding="utf-8")
+
+    scanned: list[str] = []
+    real_scandir = os.scandir
+
+    def _spy_scandir(path=".", *a, **k):
+        try:
+            rel = pathlib.Path(os.fspath(path)).relative_to(loop)
+            scanned.append("." if str(rel) == "." else str(rel))
+        except ValueError:
+            pass
+        return real_scandir(path, *a, **k)
+
+    monkeypatch.setattr(os, "scandir", _spy_scandir)
+    # Act
+    il._gather_corpus(loop)
+    # Assert — directories deeper than the depth bound are never scandir'd
+    assert not any(s.count("/") >= 3 for s in scanned), scanned
+
+
+def test_oversized_file_is_not_fully_read(tmp_path):
+    # Arrange — a file far larger than any contract file, with a sentinel at the tail
+    loop = tmp_path / "big"
+    loop.mkdir()
+    big = loop / "huge.md"
+    big.write_text(("x" * (2 * 1024 * 1024)) + "\ntailsentinel terminal\n", encoding="utf-8")
+    # Act
+    corpus = il._gather_corpus(loop)
+    # Assert — the read is capped, so the tail content never reaches the corpus
+    assert "tailsentinel" not in corpus
+
+
+def test_read_text_honors_size_cap(tmp_path):
+    # Arrange
+    f = tmp_path / "f.txt"
+    f.write_text("y" * (5 * 1024 * 1024), encoding="utf-8")
+    # Act
+    text = il._read_text(f)
+    # Assert — never returns more than the cap
+    assert len(text) <= il._MAX_READ_BYTES

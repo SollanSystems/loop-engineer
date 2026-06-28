@@ -25,8 +25,15 @@ Prints the report as JSON. Exit 0 iff the verdict is non-weak (``strong``/``ok``
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+
+# Bound the read of any single target file: the corpus is substring-matched
+# against fixed signals, so the head of a file is enough and an oversized file
+# can never exhaust memory. The deepest a walk descends is _MAX_DEPTH parts.
+_MAX_READ_BYTES = 256 * 1024
+_MAX_DEPTH = 3
 
 # The canonical 7 terminal states (verbatim) — see reference/repo-os-contract.md §8.
 TERMINAL_STATES = (
@@ -60,9 +67,11 @@ _TERMINAL_WEIGHT = 40  # points for full 7-of-7 terminal-state coverage
 
 def _read_text(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="ignore")
+        with path.open("rb") as fh:
+            raw = fh.read(_MAX_READ_BYTES)
     except OSError:
         return ""
+    return raw.decode("utf-8", errors="ignore")
 
 
 def _gather_corpus(loop: Path) -> str:
@@ -74,17 +83,34 @@ def _gather_corpus(loop: Path) -> str:
     """
     texts: list[str] = []
     names: list[str] = []
-    for path in sorted(loop.rglob("*")):
-        if not path.is_file():
-            continue
+    for path in _walk_bounded(loop):
         rel = path.relative_to(loop)
-        # Keep the scan shallow and deterministic; record filenames as signals too.
-        if len(rel.parts) > 3:
-            continue
         names.append(str(rel).lower())
         if path.suffix.lower() in (".md", ".json", ".txt", ".yaml", ".yml") or "scripts" in rel.parts:
             texts.append(_read_text(path).lower())
     return "\n".join(names) + "\n" + "\n".join(texts)
+
+
+def _walk_bounded(loop: Path):
+    """Yield files within ``_MAX_DEPTH`` parts of ``loop``, sorted, descending
+    no deeper at iteration time.
+
+    A file with N path parts lives in a directory of N-1 parts; pruning
+    directories at depth ``_MAX_DEPTH - 1`` means deeper subtrees are never
+    enumerated (not enumerated-then-discarded). Deterministic order matches the
+    prior ``sorted(rglob)`` walk.
+    """
+    for dirpath, dirnames, filenames in os.walk(loop):
+        here = Path(dirpath)
+        depth = len(here.relative_to(loop).parts)
+        if depth >= _MAX_DEPTH - 1:
+            dirnames[:] = []
+        else:
+            dirnames.sort()
+        for name in sorted(filenames):
+            path = here / name
+            if path.is_file():
+                yield path
 
 
 def _terminal_states_covered(corpus: str) -> int:

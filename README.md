@@ -33,7 +33,7 @@ claude plugin marketplace add /mnt/c/Dev/projects/loop-engineer
 # 2. Install the plugin
 claude plugin install loop-engineer@loop-engineer-local
 
-# 3. Restart Claude Code — all 7 skills are now discoverable
+# 3. Restart Claude Code — all 9 skills are now discoverable
 ```
 
 ---

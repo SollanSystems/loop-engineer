@@ -12,6 +12,8 @@ These tests pin the EXISTING metric definitions from reference/eval-suite.md:
 
 from __future__ import annotations
 
+import pytest
+
 import benchmark_harness as bh
 
 
@@ -190,3 +192,121 @@ def test_empty_denominators_are_zero_not_error():
     assert m["false_completion_rate"] == 0.0
     assert m["repair_productivity"] == 0.0
     assert m["criteria_met_rate"] == 0.0
+
+
+def test_compare_raises_on_missing_task():
+    # Arrange: loop-engineer is missing reference's t4 -> task sets differ.
+    ref = _reference_outcomes()
+    le = [o for o in _loop_engineer_outcomes() if o["task"] != "t4"]
+
+    # Act / Assert: the A/B protocol demands identical task sets; mismatch is
+    # operator error, not a silent delta.
+    with pytest.raises(ValueError):
+        bh.compare(ref, le)
+
+
+def test_compare_raises_on_extra_task():
+    # Arrange: loop-engineer has an extra task not present in reference.
+    ref = _reference_outcomes()
+    le = _loop_engineer_outcomes() + [
+        {
+            "task": "t5",
+            "claimed_done": True,
+            "verification_passed": True,
+            "repairs": 0,
+            "productive_repairs": 0,
+            "criteria_met": 3,
+            "criteria_total": 3,
+        }
+    ]
+
+    # Act / Assert
+    with pytest.raises(ValueError):
+        bh.compare(ref, le)
+
+
+def test_compare_matching_task_sets_does_not_raise():
+    # Arrange: identical task sets (order need not match).
+    ref = _reference_outcomes()
+    le = list(reversed(_loop_engineer_outcomes()))
+
+    # Act / Assert: no exception, both blocks present.
+    report = bh.compare(ref, le)
+    assert "reference" in report
+    assert "loop_engineer" in report
+
+
+def test_non_bool_claimed_done_rejected():
+    # Arrange: a string "false" must NOT be read as truthy.
+    outcomes = [
+        {
+            "task": "t1",
+            "claimed_done": "false",
+            "verification_passed": True,
+            "repairs": 0,
+            "productive_repairs": 0,
+            "criteria_met": 0,
+            "criteria_total": 0,
+        }
+    ]
+
+    # Act / Assert
+    with pytest.raises(ValueError):
+        bh.harness_metrics(outcomes)
+
+
+def test_non_bool_verification_passed_rejected():
+    # Arrange
+    outcomes = [
+        {
+            "task": "t1",
+            "claimed_done": True,
+            "verification_passed": "false",
+            "repairs": 0,
+            "productive_repairs": 0,
+            "criteria_met": 0,
+            "criteria_total": 0,
+        }
+    ]
+
+    # Act / Assert
+    with pytest.raises(ValueError):
+        bh.harness_metrics(outcomes)
+
+
+def test_productive_repairs_exceeding_repairs_rejected():
+    # Arrange: a rate > 1.0 is impossible -> rejected.
+    outcomes = [
+        {
+            "task": "t1",
+            "claimed_done": True,
+            "verification_passed": True,
+            "repairs": 1,
+            "productive_repairs": 2,
+            "criteria_met": 0,
+            "criteria_total": 0,
+        }
+    ]
+
+    # Act / Assert
+    with pytest.raises(ValueError):
+        bh.harness_metrics(outcomes)
+
+
+def test_criteria_met_exceeding_total_rejected():
+    # Arrange
+    outcomes = [
+        {
+            "task": "t1",
+            "claimed_done": True,
+            "verification_passed": True,
+            "repairs": 0,
+            "productive_repairs": 0,
+            "criteria_met": 4,
+            "criteria_total": 3,
+        }
+    ]
+
+    # Act / Assert
+    with pytest.raises(ValueError):
+        bh.harness_metrics(outcomes)

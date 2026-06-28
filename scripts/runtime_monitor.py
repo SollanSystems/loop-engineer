@@ -23,9 +23,22 @@ CHURN_MIN_ATTEMPTS = 3       # repair attempts with no score improvement
 SCORE_EPSILON = 1e-9         # smallest score move counted as "progress"
 
 _ITER_RE = re.compile(
-    r"active_task\s*=\s*(?P<task>\S+).*?best_score\s*=\s*(?P<score>[0-9.]+)",
+    r"active_task\s*=\s*(?P<task>\S+).*?best_score\s*=\s*(?P<score>\S+)",
     re.IGNORECASE,
 )
+
+
+def _parse_score(token: str) -> float | None:
+    """Parse a best_score token as a float. Malformed tokens (e.g. '1.2.3')
+    fail safe to None — the row is dropped, never a crash. Handles signs and
+    scientific notation (`-0.5`, `1e-3`) that the prior `[0-9.]+` capture lost."""
+    try:
+        value = float(token)
+    except ValueError:
+        return None
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return value
 _ATTEMPT_RE = re.compile(r"attempt\s*=\s*(?P<n>\d+)", re.IGNORECASE)
 _PRODUCTIVE_RE = re.compile(r"productive\s*=\s*(?P<v>true|false)", re.IGNORECASE)
 
@@ -37,12 +50,15 @@ def _parse_runlog(text: str) -> list[dict]:
         m = _ITER_RE.search(line)
         if not m:
             continue
+        score = _parse_score(m.group("score"))
+        if score is None:
+            continue
         attempt = _ATTEMPT_RE.search(line)
         productive = _PRODUCTIVE_RE.search(line)
         rows.append(
             {
                 "task": m.group("task"),
-                "score": float(m.group("score")),
+                "score": score,
                 "attempt": int(attempt.group("n")) if attempt else None,
                 "productive": (
                     productive.group("v").lower() == "true" if productive else None
