@@ -37,8 +37,10 @@ guard against the dominant long-horizon failure mode (false completion / weak
 self-verification). Make it mandatory for high-risk, ambiguous, or
 side-effect-bearing goals.
 
-**A/B trigger policy:** the reflection step has a cost/benefit knob (PreFlect, arXiv
-2602.07187: structured reflect-before-act lifts long-horizon success and cuts wasted edits).
+**A/B trigger policy:** the reflection step has a cost/benefit knob — a design choice of
+this suite. PreFlect (arXiv 2602.07187) reflects on every plan unconditionally and shows
+reflect-before-act lifts long-horizon success (with a token-cost-vs-performance analysis,
+§4.7); the conditional knob below is how this suite trades that cost off.
 
 - **Policy A — always reflect:** unconditional pre-execution reflection. Default for
   high-risk / underspecified / production-mutating goals where a wrong first move is

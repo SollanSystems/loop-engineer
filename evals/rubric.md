@@ -20,7 +20,7 @@ mechanisms not present in the spec or research.
 
 | Score | Anchor |
 |-------|--------|
-| 1 | Claims from the research are misrepresented or fabricated; key findings (e.g., sub-30% SWE-Marathon success rate, PreFlect A/B trigger policy) absent or contradicted. |
+| 1 | Claims from the research are misrepresented or fabricated; key findings (e.g., sub-30% SWE-Marathon success rate, PreFlect prospective reflection lifting long-horizon success) absent or contradicted. |
 | 5 | Research findings are cited but imprecisely; one or two mechanisms named but not operationalized in the suite. |
 | 10 | Every mechanism in the spec traceable to a research finding; nothing invented; quantitative claims (e.g., sub-30% LH failure rate) correctly attributed and operationalized (e.g., `FailedSpecGap` directly defends it). |
 

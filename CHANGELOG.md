@@ -6,6 +6,16 @@ All notable changes to `loop-engineer` are documented here.
 
 ## Unreleased
 
+### Changed
+- Citation accuracy: corrected three over-reaching attributions to real sources
+  (no citations removed, no IDs changed). The "A/B trigger policy / cost-benefit
+  knob" and "cuts wasted edits" are reframed as this suite's own design choices
+  rather than PreFlect (arXiv 2602.07187) findings — PreFlect reflects on every
+  plan unconditionally and reports no edit-efficiency metric. The "repo-native
+  run-ledger over a vendor eval UI" is attributed to this suite as its answer to
+  the open challenge posed by Code as Agent Harness (arXiv 2605.18747), not as
+  that paper's claim.
+
 ### Fixed
 - Standalone scripts now resolve the `loop` package when run by path. The
   documented invocations `python3 scripts/runtime_monitor.py <loop>` and
