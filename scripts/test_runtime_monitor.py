@@ -234,3 +234,38 @@ def test_missing_loop_state_returns_structured_error(tmp_path):
     assert report["error"] == "missing_loop_state"
     assert "state.json" in report["missing"]
     assert report["recommendation"] == "replan"
+
+
+def test_documented_cli_by_path_resolves_dotloop_runlog(tmp_path):
+    # Regression: the runtime-monitor skill documents
+    # `python3 scripts/runtime_monitor.py <loop>`. Invoked that way, sys.path[0]
+    # is scripts/ — NOT the repo root — so `from loop.paths import ...` would
+    # fall back to a degraded resolver that only looks for a root RUNLOG.md and
+    # misses the canonical `.loop/RUNLOG.md` layout (returning "missing
+    # RUNLOG.md"). The script must self-bootstrap the repo root so the documented
+    # invocation uses the real dual-location resolver. Exec by path with
+    # PYTHONPATH scrubbed and a neutral cwd to reproduce the real call.
+    import os
+    import subprocess
+    import sys
+
+    state = {"active_task": "M2", "best_score": 0.5, "iteration_id": "4"}
+    _write_loop(
+        tmp_path, state, _runlog([(i, "M2", 0.5) for i in range(1, 5)])
+    )
+
+    script = pathlib.Path(__file__).parent / "runtime_monitor.py"
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    proc = subprocess.run(
+        [sys.executable, str(script), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads(proc.stdout)
+    assert report["status"] == "ok", report
+    assert report["iterations_observed"] == 4, report
+    assert report["stalled"] is True, report

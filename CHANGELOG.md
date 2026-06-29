@@ -6,6 +6,19 @@ All notable changes to `loop-engineer` are documented here.
 
 ## Unreleased
 
+### Fixed
+- Standalone scripts now resolve the `loop` package when run by path. The
+  documented invocations `python3 scripts/runtime_monitor.py <loop>` and
+  `python3 scripts/inspect_loop.py <loop>` put `scripts/` on `sys.path` (not the
+  repo root), so the sibling `loop` package was unimportable and the scripts
+  silently used their degraded fallbacks — `runtime_monitor` reported
+  `missing RUNLOG.md` on the canonical `.loop/RUNLOG.md` layout, and
+  `inspect_loop` could not read `plan_then_execute` from `.loop/manifest.yaml`.
+  Both scripts now self-bootstrap the repo root onto `sys.path` before importing
+  `loop.*`, matching `python -m loop` behaviour. The bug was invisible to CI
+  because `python -m pytest` already places the repo root on `sys.path`; added
+  by-path subprocess regression tests that reproduce the real standalone call.
+
 ## 0.3.2 — 2026-06-28
 
 Loop Contract Core plus a public open-source readiness pass: every skill now runs
