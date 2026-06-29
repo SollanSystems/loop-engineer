@@ -4,7 +4,7 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
-## Unreleased
+## 0.3.3 — 2026-06-29
 
 ### Changed
 - Citation accuracy: corrected three over-reaching attributions to real sources

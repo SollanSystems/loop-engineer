@@ -284,8 +284,8 @@ license, and README differentiation.
 
 ## Status
 
-- Version: `0.3.2`
-- Release tag: `loop-engineer--v0.3.2` (cut at publish)
+- Version: `0.3.3`
+- Release tag: `loop-engineer--v0.3.3` (cut at publish)
 - License: MIT
 - Primary interface: Claude Code plugin
 - Portable core: Python CLI + JSON schemas
