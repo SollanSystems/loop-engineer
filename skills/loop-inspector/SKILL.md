@@ -131,5 +131,5 @@ synthesizing SWE-Marathon (arXiv 2606.07682 — the false-completion failure mod
 checklist scores for), PreFlect (arXiv 2602.07187 — pre-execution reflection as a scored
 signal), Web Agents Plan-Then-Execute (arXiv 2605.14290 — the untrusted-read discipline
 for reading a foreign loop dir), Plan Compliance (arXiv 2604.12147), Code as Agent
-Harness (arXiv 2605.18747 — repo-native loop shapes the inspector reads), and Anthropic
+Harness (arXiv 2605.18747 — the code-as-harness framing; the repo-native loop shapes the inspector reads are this suite's own), and Anthropic
 guidance on long-running agent harnesses (anthropic.com, 2025).

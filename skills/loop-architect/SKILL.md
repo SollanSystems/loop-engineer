@@ -76,7 +76,7 @@ driving it, spawning row-4 fan-out for the one phase that parallelizes. Pick the
 ## Step 4 — select loop patterns
 
 From `reference/loop-patterns.md`, choose the inner control flow (usually 2–3):
-pre-execution reflection (PreFlect — record the A/B trigger policy), milestone loop
+pre-execution reflection (PreFlect — record this suite's A/B trigger policy), milestone loop
 with explicit progress accounting, patch-and-repair, improvement flywheel,
 manager-orchestrator delegation, and **plan-then-execute** (the default for untrusted /
 web environments — precommit the execution graph). Critique any precommitted plan

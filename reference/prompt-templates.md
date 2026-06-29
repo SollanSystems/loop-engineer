@@ -36,7 +36,7 @@ Purpose: turn an underspecified objective into an executable operating contract
 (success criteria, verification method, terminal states, budgets, approval
 gates), then **critique that plan before the first change** — the pre-execution
 reflection step (PreFlect, arXiv 2602.07187: a structured reflect-before-act pass
-lifts long-horizon success and cuts wasted edits). This is the GateGuard against
+lifts long-horizon success). This is the GateGuard against
 false starts: no execution prompt fires until the contract exists.
 
 ```text

@@ -66,4 +66,4 @@ It emits the JSON health report `{active_task, iterations_observed, stalled, rep
 
 ---
 
-Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682 — the stall / no-progress failure mode), the repair-productivity churn signal from the loop-repair record schema, Code as Agent Harness (arXiv 2605.18747 — reading the repo-native run ledger), and Anthropic guidance on monitoring long-running agent harnesses (anthropic.com, 2025).
+Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing SWE-Marathon (arXiv 2606.07682 — the stall / no-progress failure mode), the repair-productivity churn signal from the loop-repair record schema, Code as Agent Harness (arXiv 2605.18747 — the code-as-harness framing; the repo-native run ledger is this suite's own), and Anthropic guidance on monitoring long-running agent harnesses (anthropic.com, 2025).
