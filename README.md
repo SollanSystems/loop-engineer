@@ -55,7 +55,8 @@ python3 -m loop doctor examples/coverage-repair
 python3 -m loop inspect examples/coverage-repair
 ```
 
-`doctor` validates the contract objects:
+`doctor` validates the contract objects (the real output also includes a
+`paths` block listing every resolved contract file; omitted here for brevity):
 
 ```json
 {
@@ -70,12 +71,24 @@ python3 -m loop inspect examples/coverage-repair
 }
 ```
 
-`inspect` scores the higher-level loop contract:
+`inspect` scores the higher-level loop contract and reports what is present and
+what is missing:
 
 ```json
 {
+  "target": "examples/coverage-repair",
   "score": 90,
   "terminal_states_covered": 7,
+  "present": [
+    "defines verifiable success criteria",
+    "independent verification",
+    "approval gates on side-effects",
+    "false-completion defense (held-out / anti-cheat)",
+    "all 7 terminal states reachable"
+  ],
+  "gaps": [
+    "no plan-then-execute discipline for untrusted/web reads (prompt-injection surface)"
+  ],
   "verdict": "strong"
 }
 ```
@@ -119,7 +132,8 @@ The contract split is deliberate:
 - `TASKS.json` defines the executable queue.
 - `RUNLOG.md` records human-readable history.
 - `.loop/state.json` is the machine source of truth while the loop runs.
-- `.loop/terminal_state.json` records the final outcome.
+- `.loop/terminal_state.json` records the final outcome (the resolver also
+  accepts it at the workspace root).
 
 A task is not done because an agent says it is done. A task is done only when it
 maps to a success criterion, its verifier passes, and evidence is recorded.
@@ -165,12 +179,24 @@ never required; every skill runs on the bundled core alone.
 ### Portable validator / inspector
 
 No Claude Code plugin install is required to validate or inspect an existing
-loop contract:
+loop contract. From the cloned repo root:
 
 ```bash
 python3 -m loop doctor /path/to/workspace
 python3 -m loop inspect /path/to/workspace
 ```
+
+To run it against a loop in any other directory, install the core once
+(editable):
+
+```bash
+pip install -e .            # optional faster manifest parsing: pip install -e ".[yaml]"
+python3 -m loop doctor /path/to/workspace
+```
+
+`python3 -m loop` resolves the bundled `loop/` package from the repo root;
+`pip install -e .` puts it on your path so the CLI works from any directory. The
+core is pure-stdlib — PyYAML is an optional extra, not a requirement.
 
 The portable core lives in `loop/` and validates schema-bearing artifacts in
 `schemas/`:
@@ -225,7 +251,7 @@ Not sure which spoke to use? Start with `/loop-engineer`; it routes the task.
 
 ## What ships
 
-- `loop/` — portable contract core and CLI: `doctor`, `validate`, `verify`, `inspect`.
+- `loop/` — portable contract core and CLI: `doctor` (aliases: `validate`, `verify`) and `inspect`.
 - `schemas/` — JSON schemas for contract artifacts.
 - `skills/` — Claude Code skill suite.
 - `reference/` — protocol, architecture, eval, safety, and platform reference docs.
@@ -284,8 +310,8 @@ license, and README differentiation.
 
 ## Status
 
-- Version: `0.3.3`
-- Release tag: `loop-engineer--v0.3.3` (cut at publish)
+- Version: `0.3.4`
+- Release tag: `loop-engineer--v0.3.4` (cut at publish)
 - License: MIT
 - Primary interface: Claude Code plugin
 - Portable core: Python CLI + JSON schemas

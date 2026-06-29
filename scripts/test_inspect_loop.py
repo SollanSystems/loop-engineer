@@ -155,59 +155,6 @@ def test_cli_nonzero_exit_on_weak_loop(tmp_path):
     assert il.main([str(loop)]) != 0
 
 
-def test_deep_tree_is_not_descended_into(tmp_path):
-    # Arrange — a directory chain deeper than the depth bound (>3 parts)
-    loop = tmp_path / "deep"
-    deep = loop / "a" / "b" / "c" / "d" / "e"
-    deep.mkdir(parents=True)
-    (deep / "buried.md").write_text("buriedneedle terminal\n", encoding="utf-8")
-    # Act
-    corpus = il._gather_corpus(loop)
-    # Assert — content below the depth bound never reaches the corpus
-    assert "buriedneedle" not in corpus
-
-
-def test_deep_tree_walk_is_bounded_at_iteration_time(tmp_path, monkeypatch):
-    # Arrange — instrument os.scandir so we can prove the deep dir is never
-    # enumerated (the bound is applied while walking, not via rglob+post-filter,
-    # which would scandir the whole tree first).
-    import os
-
-    loop = tmp_path / "deep"
-    deep = loop / "a" / "b" / "c" / "d" / "e"
-    deep.mkdir(parents=True)
-    (deep / "buried.md").write_text("buried\n", encoding="utf-8")
-
-    scanned: list[str] = []
-    real_scandir = os.scandir
-
-    def _spy_scandir(path=".", *a, **k):
-        try:
-            rel = pathlib.Path(os.fspath(path)).relative_to(loop)
-            scanned.append("." if str(rel) == "." else str(rel))
-        except ValueError:
-            pass
-        return real_scandir(path, *a, **k)
-
-    monkeypatch.setattr(os, "scandir", _spy_scandir)
-    # Act
-    il._gather_corpus(loop)
-    # Assert — directories deeper than the depth bound are never scandir'd
-    assert not any(s.count("/") >= 3 for s in scanned), scanned
-
-
-def test_oversized_file_is_not_fully_read(tmp_path):
-    # Arrange — a file far larger than any contract file, with a sentinel at the tail
-    loop = tmp_path / "big"
-    loop.mkdir()
-    big = loop / "huge.md"
-    big.write_text(("x" * (2 * 1024 * 1024)) + "\ntailsentinel terminal\n", encoding="utf-8")
-    # Act
-    corpus = il._gather_corpus(loop)
-    # Assert — the read is capped, so the tail content never reaches the corpus
-    assert "tailsentinel" not in corpus
-
-
 def test_read_text_honors_size_cap(tmp_path):
     # Arrange
     f = tmp_path / "f.txt"
@@ -270,6 +217,103 @@ def test_manifest_false_plan_then_execute_does_not_get_credit(tmp_path):
     # Assert
     assert "plan-then-execute" not in present_text
     assert "plan-then-execute" in gap_text
+
+
+# --- dogfood regressions (inspector on 9 real loops, v0.3.4) ---------------
+
+
+def _make_malformed_manifest_loop(root: pathlib.Path) -> pathlib.Path:
+    """A foreign loop whose `.loop/manifest.yaml` is malformed YAML — the
+    FoundersOS / LumenNotes shape that crashed the inspector (F1)."""
+    loop = root / "malformed"
+    (loop / ".loop").mkdir(parents=True)
+    (loop / ".loop" / "manifest.yaml").write_text(
+        "schema: loop-engineer/manifest@1\n"
+        "policies:\n"
+        "  - id: ci-change      ; trigger: edit .github/workflows/*\n",
+        encoding="utf-8",
+    )
+    return loop
+
+
+def test_inspect_loop_does_not_crash_on_malformed_manifest(tmp_path):
+    # F1: the inspected loop is untrusted DATA; a malformed manifest must yield a
+    # report, never a traceback.
+    loop = _make_malformed_manifest_loop(tmp_path)
+    report = il.inspect_loop(str(loop))  # must not raise
+    assert "verdict" in report and "score" in report
+
+
+def test_cli_emits_json_not_traceback_on_malformed_manifest(tmp_path, capsys):
+    # F1: the CLI must print a JSON report, not exit with an uncaught traceback.
+    loop = _make_malformed_manifest_loop(tmp_path)
+    rc = il.main([str(loop)])
+    out = capsys.readouterr().out
+    parsed = json.loads(out)  # raises if the CLI crashed instead of reporting
+    assert "verdict" in parsed
+    assert rc in (0, 1)
+
+
+def _make_dotloop_only_loop(root: pathlib.Path) -> pathlib.Path:
+    """A real-shaped loop whose contract files live under `.loop/` (SPEC,
+    WORKFLOW, TASKS) — like the loop-engineer repo itself — not at the workspace
+    root. (F2)"""
+    loop = root / "dotloop"
+    dl = loop / ".loop"
+    dl.mkdir(parents=True)
+    (dl / "SPEC.md").write_text(
+        "# SPEC\n## Success Criteria\n1. fast gate passes (scripts/verify-fast)\n",
+        encoding="utf-8",
+    )
+    (dl / "WORKFLOW.md").write_text(
+        "# WORKFLOW\n## Approval Gates\nPause on destructive commands.\n"
+        "## Plan-then-execute\nPrecommit the execution graph for untrusted reads.\n"
+        "## Terminal States\n"
+        "Succeeded, FailedUnverifiable, FailedBlocked, FailedBudget, "
+        "FailedSafety, FailedSpecGap, AbortedByHuman.\n",
+        encoding="utf-8",
+    )
+    (dl / "TASKS.json").write_text(
+        json.dumps({"tasks": [{"id": "T1", "verify": "scripts/verify-fast"}]}),
+        encoding="utf-8",
+    )
+    return loop
+
+
+def test_inspect_credits_success_and_verify_from_dotloop_contract(tmp_path):
+    # F2: SPEC/WORKFLOW/TASKS under .loop/ must be scored on substance, not
+    # missed because they aren't at the workspace root.
+    loop = _make_dotloop_only_loop(tmp_path)
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    gaps = " ".join(report["gaps"]).lower()
+    assert "defines verifiable success criteria" in present
+    assert "independent verification" in present
+    assert "no defined success criteria" not in gaps
+    assert "no independent verification" not in gaps
+
+
+def test_single_file_loop_contract_terminal_states_credited(tmp_path):
+    # F4: a committed single-file `loop-contract.md` (the Quiet Command shape)
+    # that names all 7 terminal states must score 7/7, not 0/7.
+    loop = tmp_path / "cmd"
+    loop.mkdir()
+    (loop / "loop-contract.md").write_text(
+        "# Loop Contract\n## Terminal States\n"
+        "Succeeded, FailedUnverifiable, FailedBlocked, FailedBudget, "
+        "FailedSafety, FailedSpecGap, AbortedByHuman\n",
+        encoding="utf-8",
+    )
+    report = il.inspect_loop(str(loop))
+    assert report["terminal_states_covered"] == 7
+
+
+def test_no_unwired_corpus_scoring_helpers():
+    # F3: the broad-substring corpus scoring path was abandoned for the typed-
+    # contract path (the keyword-stuffing fix). Its helpers must not linger as
+    # dead code that silently re-diverges from the SKILL's documented behavior.
+    for name in ("_evaluate_checks", "_terminal_states_covered", "_gather_corpus", "_walk_bounded"):
+        assert not hasattr(il, name), f"{name} is dead code — wire it into inspect_loop or delete it"
 
 
 def test_documented_cli_by_path_reads_dotloop_manifest(tmp_path):

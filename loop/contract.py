@@ -107,7 +107,13 @@ def read_manifest(path: Path) -> dict[str, Any] | None:
     except Exception:
         data = _fallback_yaml(text)
     else:
-        loaded = yaml.safe_load(text)
+        # The manifest may come from an untrusted/foreign loop dir; a malformed
+        # document must fail safe to {} (parseable-as-empty), mirroring the
+        # json.JSONDecodeError guard in _read_json — never propagate a traceback.
+        try:
+            loaded = yaml.safe_load(text)
+        except yaml.YAMLError:
+            loaded = None
         data = loaded if isinstance(loaded, dict) else {}
     return data
 

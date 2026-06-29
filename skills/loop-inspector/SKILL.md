@@ -99,13 +99,19 @@ non-zero exit (something to fix), `ok`/`strong` exit clean. The gaps become the 
 list for [[loop-contract]] (scaffold what's missing) or [[loop-evals]] (add the
 false-completion defense the loop lacks).
 
-## How to read a foreign harness shape
+## What the inspector reads
 
-Not every loop uses this suite's filenames. `reference/patterns.md` maps common foreign
-shapes onto the checklist: a superpowers harness's per-skill `SKILL.md` + plan files, a
-ruflo loop's run dir, a bare `scripts/` + `Makefile` CI loop. The signals are
-*semantic* — "is there an independent verify surface?" — so a loop scores on substance,
-not on whether it copied this suite's directory names.
+The inspector scores a **fixed, named, typed contract file set** — `SPEC.md`,
+`WORKFLOW.md`, `TASKS.json`, `.loop/manifest.yaml`, `.loop/terminal_state.json`, the
+`scripts/verify-*` / `holdout_gate.py` / `anticheat_scan.py` gate scripts, and a
+single-file `loop-contract.md` — each resolved **dual-location** (`.loop/` ∪ the workspace
+root), so a loop whose contract lives under `.loop/` scores the same as one with the files
+at the root. It deliberately does **not** crawl the tree or score README / `SKILL.md`
+prose: matching fixed signals against a few *named* contract files is what keeps the score
+robust to keyword stuffing (a README full of the right words is not a contract).
+`reference/patterns.md` §4 lists exactly which file each signal is read from. A harness
+that records its contract only in a shape outside this set scores low — a faithful signal
+that the contract is not machine-checkable in the recognized form, not a false negative.
 
 ## Hand-off
 

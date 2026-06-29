@@ -4,6 +4,64 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
+## 0.3.4 — 2026-06-29
+
+Dogfood-driven hardening: ran `loop-inspector` + `loop-runtime-monitor` against 9 real
+on-disk loops (foreign and in-house). The tools had been built and tested only against
+this suite's own well-formed loops, so first contact with foreign/edge-case inputs exposed
+six defects — all fixed here under TDD, each pinned by a regression test.
+
+### Fixed
+- **(P1) `inspect_loop` no longer crashes on a malformed `manifest.yaml`.** `read_manifest`
+  (`loop/contract.py`) ran `yaml.safe_load` without a guard — the one read path missing the
+  `json.JSONDecodeError` guard every JSON read already had — so a malformed manifest in an
+  untrusted/foreign loop dir killed the inspector with a traceback instead of returning a
+  report. It now fails safe to `{}`, fixing the crash for `inspect_loop`, `validate_contract`,
+  and `doctor_report` at once.
+- **`inspect_loop` now scores `SPEC.md` / `WORKFLOW.md` / `TASKS.json` dual-location** (`.loop/`
+  ∪ workspace root), like `manifest`/`state` already resolved. Previously SPEC/WORKFLOW were
+  hard-coded to the workspace root, so a loop whose contract lives under `.loop/` (including
+  loop-engineer's own repo) was falsely scored as having "no success criteria" / "no
+  independent verification." Scores on substance, not on where the file sits.
+- **`inspect_loop` recognizes a single-file `loop-contract.md`** as a contract-owned source
+  for success criteria, approval gates, plan-then-execute, and terminal-state coverage — a
+  committed minimal-contract loop that names all 7 terminal states is no longer scored 0/7.
+- **`runtime_monitor` is terminal-state-aware.** It now reads `terminal_state` / `state ==
+  "terminal"` and reports `recommendation: "done"` (surfacing the terminal state) instead of
+  advising `continue` on a loop that has already finished.
+- **`runtime_monitor` no longer reports an unparseable RUNLOG as healthy.** A non-empty
+  RUNLOG that yields zero parseable iteration records now returns `status: "degraded"` /
+  `recommendation: "replan"` (with evidence) instead of the benign `ok`/`continue`/`[]` that
+  was byte-identical to a healthy loop — making the silent inertness of stall/repair-churn
+  detection on prose RUNLOGs visible.
+
+### Changed
+- Removed the unreferenced broad-substring corpus scoring path from `scripts/inspect_loop.py`
+  (`_gather_corpus`, `_walk_bounded`, `_evaluate_checks`, `_terminal_states_covered`) — dead
+  code since the keyword-stuffing fix replaced it with the typed-contract path. Corrected
+  `loop-inspector/SKILL.md` and `reference/patterns.md` §4 to describe the actual named,
+  typed, dual-located contract file set the inspector reads, rather than a "reads any foreign
+  harness shape semantically" claim the implementation never honored.
+
+### Added
+- **`pyproject.toml`** — the portable core is now installable with `pip install -e .`
+  (optional `pip install -e ".[yaml]"` for faster manifest parsing), so
+  `python3 -m loop doctor|inspect <workspace>` runs from any directory rather than only the
+  repo root. The core stays pure-stdlib; PyYAML remains an optional extra. A new
+  `test_docs_version` check pins the `pyproject.toml` version to `.claude-plugin/plugin.json`.
+
+### Documentation
+- README: the *Portable validator / inspector* section documents the editable install for
+  running outside the repo root; the 30-second `inspect` demo now shows the full
+  `target` / `present` / `gaps` report; the `doctor` block notes the omitted `paths` object;
+  `validate` / `verify` are documented as `doctor` aliases; `terminal_state.json` is noted as
+  resolving in either `.loop/` or the workspace root.
+- `examples/coverage-repair` records receipts at the canonical `.loop/receipts/*.jsonl` (was the
+  stale pre-decoupling `.gsd/audit/receipts/` path, inconsistent with the example's own `.loop/`
+  layout).
+- `loop-runtime-monitor/SKILL.md` frames its position generically ("vs a loop-driving operator")
+  instead of naming a private plugin agent.
+
 ## 0.3.3 — 2026-06-29
 
 ### Changed

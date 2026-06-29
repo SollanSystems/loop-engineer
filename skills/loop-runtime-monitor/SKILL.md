@@ -9,9 +9,9 @@ The **observer**. While [[loop-run]] advances the state machine and [[loop-repai
 
 This is the in-flight complement to the post-hoc [[loop-flywheel]] (which mines a *finished* run's history) and the gap-scoring loop-inspector (which audits a loop's *contract*). loop-runtime-monitor watches the run *as it happens*, so a stuck run gets caught at iteration 4 instead of at the budget wall.
 
-## Position vs `ecc:loop-operator`
+## Position vs a loop-driving operator
 
-`ecc:loop-operator` (and the broader continuous-agent-loop machinery) *drives* a loop — it dispatches the next step and keeps the thing running. loop-runtime-monitor does the opposite job: it is the **circuit-breaker that watches the driver.** An operator optimizes for "keep going"; left alone, that bias is exactly how a loop spins on the same task or churns repairs until the budget is gone. This skill is the independent progress signal that says *stop going, intervene* — separation of "run it" from "is it still worth running" is the whole point, the same way a verifier must not be the agent it grades.
+A loop **operator** — [[loop-run]], or any continuous-agent-loop driver — *drives* a loop: it dispatches the next step and keeps the thing running. loop-runtime-monitor does the opposite job: it is the **circuit-breaker that watches the driver.** An operator optimizes for "keep going"; left alone, that bias is exactly how a loop spins on the same task or churns repairs until the budget is gone. This skill is the independent progress signal that says *stop going, intervene* — separation of "run it" from "is it still worth running" is the whole point, the same way a verifier must not be the agent it grades.
 
 ## What it reads (evidence, not claims)
 

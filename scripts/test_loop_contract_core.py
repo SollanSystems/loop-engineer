@@ -163,6 +163,45 @@ def test_loop_doctor_resolves_same_contract_from_dot_loop_dir(tmp_path):
     assert report["paths"]["state"] == str(workspace / ".loop" / "state.json")
 
 
+def test_read_manifest_returns_dict_on_malformed_yaml(tmp_path):
+    # F1 (root cause): read_manifest feeds inspect_loop, validate_contract, and
+    # doctor_report. Its yaml.safe_load was the one read path without the guard
+    # every JSON read already has — a malformed manifest in an untrusted loop dir
+    # crashed with a YAMLError instead of returning an (empty) report.
+    from loop.contract import read_manifest
+
+    bad = tmp_path / "manifest.yaml"
+    bad.write_text(
+        "schema: loop-engineer/manifest@1\n"
+        "policies:\n"
+        "  - id: ci-change      ; trigger: edit .github/workflows/*\n",
+        encoding="utf-8",
+    )
+
+    result = read_manifest(bad)  # must not raise
+
+    assert isinstance(result, dict)
+
+
+def test_doctor_does_not_crash_on_malformed_manifest(tmp_path):
+    # F1 (blast radius): the doctor CLI validates a foreign contract via the same
+    # read_manifest; a malformed manifest must produce an actionable report, not a
+    # traceback.
+    workspace = _write_valid_loop(tmp_path)
+    (workspace / ".loop" / "manifest.yaml").write_text(
+        "schema: loop-engineer/manifest@1\n"
+        "policies:\n"
+        "  - id: ci-change      ; trigger: edit .github/workflows/*\n",
+        encoding="utf-8",
+    )
+
+    result = _run_loop_cli("doctor", str(workspace))
+
+    assert result.returncode in (0, 1), result.stderr + result.stdout
+    report = json.loads(result.stdout)  # raises if it crashed
+    assert "ok" in report
+
+
 def test_loop_doctor_flags_stub_verify_scripts(tmp_path):
     workspace = _write_valid_loop(tmp_path)
     (workspace / "scripts" / "verify-fast").write_text(

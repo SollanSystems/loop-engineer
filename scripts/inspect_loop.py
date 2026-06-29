@@ -25,7 +25,6 @@ Prints the report as JSON. Exit 0 iff the verdict is non-weak (``strong``/``ok``
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -65,14 +64,16 @@ except ImportError:  # pragma: no cover - direct script copy outside repo root
             tasks = Path(target) / "TASKS.json"
             runlog = Path(target) / "RUNLOG.md"
             terminal = loop_dir / "terminal_state.json"
+            spec = Path(target) / "SPEC.md"
+            workflow = Path(target) / "WORKFLOW.md"
+            contract = Path(target) / "loop-contract.md"
 
         return _Paths()
 
 # Bound the read of any single target file: the corpus is substring-matched
 # against fixed signals, so the head of a file is enough and an oversized file
-# can never exhaust memory. The deepest a walk descends is _MAX_DEPTH parts.
+# can never exhaust memory.
 _MAX_READ_BYTES = 256 * 1024
-_MAX_DEPTH = 3
 
 # The prime-directive checklist. Each check: (key, label, weight, gap message).
 # Weights sum to the non-terminal budget (60); the terminal-state coverage owns
@@ -100,24 +101,6 @@ def _read_text(path: Path) -> str:
     except OSError:
         return ""
     return raw.decode("utf-8", errors="ignore")
-
-
-def _gather_corpus(loop: Path) -> str:
-    """Concatenate the text of the contract-bearing files, lowercased.
-
-    Bounded, shallow read: the repo-OS contract files plus any top-level and
-    one-level-nested ``*.md`` / ``*.json`` / ``scripts/*``. The target is DATA;
-    we only ever substring-match fixed signals against it.
-    """
-    texts: list[str] = []
-    names: list[str] = []
-    for path in _walk_bounded(loop):
-        rel = path.relative_to(loop)
-        names.append(str(rel).lower())
-        if path.suffix.lower() in (".md", ".json", ".txt", ".yaml", ".yml") or "scripts" in rel.parts:
-            texts.append(_read_text(path).lower())
-    return "\n".join(names) + "\n" + "\n".join(texts)
-
 
 
 def _read_json_object(path: Path) -> dict:
@@ -154,7 +137,7 @@ def _terminal_states_covered_from_contract(loop: Path) -> int:
 
     contract_text = "\n".join(
         _read_text(path).lower()
-        for path in (paths.workspace / "WORKFLOW.md", paths.manifest)
+        for path in (paths.workflow, paths.manifest, paths.contract)
         if path.exists()
     )
     return sum(1 for state in TERMINAL_STATES if state.lower() in contract_text)
@@ -168,8 +151,12 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, bool]:
     """
 
     paths = resolve_loop_paths(loop)
-    spec = _read_text(paths.workspace / "SPEC.md").lower()
-    workflow = _read_text(paths.workspace / "WORKFLOW.md").lower()
+    # SPEC/WORKFLOW resolve dual-location (.loop/ ∪ root) via resolve_loop_paths;
+    # a committed single-file loop-contract.md is folded in as a contract-owned
+    # source for the same signals.
+    contract = _read_text(paths.contract).lower()
+    spec = _read_text(paths.spec).lower() + "\n" + contract
+    workflow = _read_text(paths.workflow).lower() + "\n" + contract
     tasks = _read_json_object(paths.tasks)
     terminal = _read_json_object(paths.terminal)
     manifest = read_manifest(paths.manifest) or {}
@@ -209,62 +196,6 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, bool]:
     else:
         has_plan_then_execute = "plan-then-execute" in workflow or "plan_then_execute: true" in workflow
 
-    return {
-        "defines_success": has_spec_criteria,
-        "independent_verification": has_verify,
-        "approval_gates": has_approval,
-        "false_completion_defense": has_false_completion,
-        "plan_then_execute": has_plan_then_execute,
-    }
-
-
-def _walk_bounded(loop: Path):
-    """Yield files within ``_MAX_DEPTH`` parts of ``loop``, sorted, descending
-    no deeper at iteration time.
-
-    A file with N path parts lives in a directory of N-1 parts; pruning
-    directories at depth ``_MAX_DEPTH - 1`` means deeper subtrees are never
-    enumerated (not enumerated-then-discarded). Deterministic order matches the
-    prior ``sorted(rglob)`` walk.
-    """
-    for dirpath, dirnames, filenames in os.walk(loop):
-        here = Path(dirpath)
-        depth = len(here.relative_to(loop).parts)
-        if depth >= _MAX_DEPTH - 1:
-            dirnames[:] = []
-        else:
-            dirnames.sort()
-        for name in sorted(filenames):
-            path = here / name
-            if path.is_file():
-                yield path
-
-
-def _terminal_states_covered(corpus: str) -> int:
-    return sum(1 for s in TERMINAL_STATES if s.lower() in corpus)
-
-
-def _evaluate_checks(corpus: str) -> dict[str, bool]:
-    has_spec_criteria = "success criteria" in corpus or "success_criteria" in corpus
-    has_verify = (
-        "verify-fast" in corpus
-        or "verify-full" in corpus
-        or "verify-safety" in corpus
-        or "scripts/verify" in corpus
-        or '"verify"' in corpus
-        or "verify-slice" in corpus
-        or "verify-milestone" in corpus
-    )
-    has_approval = "approval gate" in corpus or "approval_gate" in corpus or "approval-wait" in corpus
-    has_false_completion = (
-        "holdout" in corpus
-        or "held-out" in corpus
-        or "anticheat" in corpus
-        or "anti-cheat" in corpus
-        or "false-completion" in corpus
-        or "false_completion" in corpus
-    )
-    has_plan_then_execute = "plan-then-execute" in corpus or "plan_then_execute" in corpus
     return {
         "defines_success": has_spec_criteria,
         "independent_verification": has_verify,
@@ -324,7 +255,7 @@ def inspect_loop(loop_dir: str) -> dict:
         else:
             contract_text = "\n".join(
                 _read_text(path).lower()
-                for path in (paths.workspace / "WORKFLOW.md", paths.manifest)
+                for path in (paths.workflow, paths.manifest, paths.contract)
                 if path.exists()
             )
             missing = [s for s in TERMINAL_STATES if s.lower() not in contract_text]
