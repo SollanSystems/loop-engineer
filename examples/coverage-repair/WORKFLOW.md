@@ -67,7 +67,7 @@ When a terminal state is reached, write `.loop/terminal_state.json` and stop. Ne
 
 Every dispatched agent / Workflow `agent()` names an explicit `model:` — read→`haiku`,
 reason→`sonnet`, write→`opus`, orchestrate→main loop. Receipts land in
-`.gsd/audit/receipts/*.jsonl`; `/routing` modes are honored. In this run the coverage status
+`.loop/receipts/*.jsonl`; `/routing` modes are honored. In this run the coverage status
 read used `haiku` and the test-writing repair used `opus` (see `RUNLOG.md`).
 
 ## Verification

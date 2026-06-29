@@ -16,6 +16,8 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+# uv resolution lock — the core declares no required runtime deps; CI uses pip, not `uv sync`
+uv.lock
 
 # Node
 node_modules/

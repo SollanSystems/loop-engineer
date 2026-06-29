@@ -164,13 +164,67 @@ def _missing_report(paths, missing: list[str]) -> dict:
     }
 
 
+def _terminal_disposition(state: dict) -> str | None:
+    """The loop's terminal state, if it has reached one. A finished loop must
+    not be told to `continue` — the in-flight detectors don't apply to it."""
+    terminal = state.get("terminal_state")
+    if terminal:
+        return terminal
+    if state.get("state") == "terminal":
+        return "terminal"
+    return None
+
+
+def _terminal_report(paths, state: dict, terminal: str) -> dict:
+    return {
+        "status": "ok",
+        "active_task": state.get("active_task"),
+        "iterations_observed": 0,
+        "stalled": False,
+        "repair_churn": False,
+        "budget_overrun": False,
+        "terminal_state": terminal,
+        "recommendation": "done",
+        "evidence": [f"loop already terminal ({terminal}) — nothing to monitor"],
+        "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
+    }
+
+
+def _runlog_has_content(text: str) -> bool:
+    """True if the RUNLOG records something — a non-blank, non-heading line —
+    vs a freshly-created/empty log where 0 parsed iterations is legitimate."""
+    return any(line.strip() and not line.strip().startswith("#") for line in text.splitlines())
+
+
+def _unparseable_runlog_report(paths, state: dict, line_count: int) -> dict:
+    return {
+        "status": "degraded",
+        "error": "unparseable_runlog",
+        "active_task": state.get("active_task"),
+        "iterations_observed": 0,
+        "stalled": False,
+        "repair_churn": False,
+        "budget_overrun": False,
+        "recommendation": "replan",
+        "evidence": [
+            f"RUNLOG.md has {line_count} lines but 0 parseable iteration records "
+            "(expected `active_task=<id>` and `best_score=<float>`); stall and "
+            "repair-churn detection are inert against this RUNLOG — reconcile the "
+            "ledger format with loop-run's output"
+        ],
+        "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
+    }
+
+
 def health_report(loop_dir) -> dict:
     """Read loop state + RUNLOG.md → a JSON health report.
 
     Accepts either the workspace root or the `.loop/` directory. Canonical
     repo-OS layout stores RUNLOG.md at workspace root and state under `.loop/`.
     Missing/partial state returns an actionable structured report, not a
-    traceback.
+    traceback. A loop that has reached a terminal state is reported as `done`
+    (not `continue`); a non-empty RUNLOG that yields no parseable iteration
+    records is reported `degraded` (not a benign `ok`/`continue`).
     """
     paths = resolve_loop_paths(loop_dir)
     missing = [str(p.name) for p in (paths.state, paths.runlog) if not p.exists()]
@@ -206,8 +260,14 @@ def health_report(loop_dir) -> dict:
             "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
         }
 
+    terminal = _terminal_disposition(state)
+    if terminal is not None:
+        return _terminal_report(paths, state, terminal)
+
     runlog = paths.runlog.read_text(encoding="utf-8")
     rows = _parse_runlog(runlog)
+    if not rows and _runlog_has_content(runlog):
+        return _unparseable_runlog_report(paths, state, len(runlog.splitlines()))
 
     stalled, stall_ev = _detect_stall(rows)
     churn, churn_ev = _detect_repair_churn(rows)

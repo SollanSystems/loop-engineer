@@ -51,7 +51,7 @@ Succeeded`.
    the repo-OS realization of the Harmony spine pattern.
 4. **Reuse, not reinvention.** Acceptance verification delegates to `/verify-slice`; every dispatch
    in `RUNLOG.md`/`WORKFLOW.md` names an explicit `model:` (read→`haiku`, write→`opus`) per the
-   model-routing HARD CONTRACT; receipts land in `.gsd/audit/receipts/*.jsonl`. The suite added no
+   model-routing HARD CONTRACT; receipts land in `.loop/receipts/*.jsonl`. The suite added no
    verifier of its own.
 5. **An explicit terminal state, always.** The run ends in exactly one of the canonical seven
    (`Succeeded`), written once to `terminal_state.json`.

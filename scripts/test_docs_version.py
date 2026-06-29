@@ -15,13 +15,22 @@ def test_readme_has_no_stale_seven_skills():
     assert "all 9 skills" in readme
 
 
-def test_plugin_version_is_0_3_3():
+def test_plugin_version_is_0_3_4():
     plugin = json.loads(_read(".claude-plugin/plugin.json"))
-    assert plugin["version"] == "0.3.3"
+    assert plugin["version"] == "0.3.4"
+
+
+def test_pyproject_version_matches_plugin():
+    plugin = json.loads(_read(".claude-plugin/plugin.json"))
+    pyproject = _read("pyproject.toml")
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject)
+    assert match, "pyproject.toml has no version field"
+    assert match.group(1) == plugin["version"]
 
 
 def test_changelog_has_current_and_historical_entries():
     changelog = _read("CHANGELOG.md")
+    assert "## 0.3.4" in changelog
     assert "## 0.3.3" in changelog
     assert "## 0.3.2" in changelog
     assert "## 0.3.1" in changelog

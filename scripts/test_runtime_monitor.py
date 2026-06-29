@@ -236,6 +236,60 @@ def test_missing_loop_state_returns_structured_error(tmp_path):
     assert report["recommendation"] == "replan"
 
 
+# --- dogfood regressions (monitor on real loops, v0.3.4) -------------------
+
+
+def test_terminal_loop_is_not_told_to_continue(tmp_path):
+    # F5: health_report never read terminal_state, so a finished loop
+    # (RevenueOS FailedBlocked, the suite's own .loop Succeeded) got
+    # recommendation="continue". A monitor must not advise continuing a
+    # loop that has already reached a terminal state.
+    state = {
+        "active_task": None,
+        "state": "terminal",
+        "terminal_state": "FailedBlocked",
+        "iteration_id": 7,
+    }
+    runlog = _runlog([(1, "T1", 0.5)])
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    report = runtime_monitor.health_report(loop_dir)
+
+    assert report["recommendation"] != "continue"
+    assert report.get("terminal_state") == "FailedBlocked"
+
+
+def test_unparseable_prose_runlog_is_not_reported_healthy(tmp_path):
+    # F6: real loop-run RUNLOGs are prose ('## Iteration N', '- **active_task:**
+    # `T1`'), which _ITER_RE does not match -> 0 rows. The monitor must NOT then
+    # return the benign ok/continue/[] that is byte-identical to a healthy loop;
+    # stall/repair-churn detection is silently inert on every real RUNLOG.
+    state = {
+        "active_task": "T2",
+        "state": "execute",
+        "iteration_id": 3,
+        "best_score": 0.8,
+    }
+    runlog = (
+        "# RUNLOG\n\n"
+        "## Iteration 1\n"
+        "- **state:** execute-task -> verify\n"
+        "- **active_task:** `T1` -- do the thing\n"
+        "- **score:** line_coverage 0.61 -> 0.74\n\n"
+        "## Iteration 2\n"
+        "- **active_task:** `T2`\n"
+        "- **score:** 0.80\n"
+    )
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    report = runtime_monitor.health_report(loop_dir)
+
+    assert report["iterations_observed"] == 0
+    assert report["recommendation"] != "continue"
+    assert report["status"] != "ok"
+    assert report["evidence"]
+
+
 def test_documented_cli_by_path_resolves_dotloop_runlog(tmp_path):
     # Regression: the runtime-monitor skill documents
     # `python3 scripts/runtime_monitor.py <loop>`. Invoked that way, sys.path[0]

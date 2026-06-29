@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "loop-engineer"
+version = "0.3.4"
+description = "Portable Loop Contract Core: validate and inspect repo-native operating contracts for agent loops."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Sollan Systems" }]
+keywords = ["agent", "loop", "agentic", "verification", "harness", "orchestration", "self-improvement", "claude-code", "eval", "repair"]
+
+# The core is pure-stdlib. PyYAML is an optional extra: when present it parses
+# the manifest; when absent, loop/contract.py falls back to a stdlib subset
+# parser. So `pip install -e .` pulls in zero third-party runtime dependencies.
+[project.optional-dependencies]
+yaml = ["pyyaml>=6"]
+
+[project.urls]
+Homepage = "https://github.com/SollanSystems/loop-engineer"
+Repository = "https://github.com/SollanSystems/loop-engineer"
+
+# Editable install is the supported mode: `python3 -m loop inspect` resolves the
+# bundled scripts/ dir relative to the repo, so install with `pip install -e .`
+# to run the CLI from any directory.
+[tool.hatch.build.targets.wheel]
+packages = ["loop"]

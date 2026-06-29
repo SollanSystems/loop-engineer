@@ -66,7 +66,7 @@ states are missing.
 ## 3. The 7 terminal states (verbatim)
 
 Coverage is counted by presence of these exact tokens (case-insensitive) anywhere in the
-contract corpus:
+named contract files (`WORKFLOW.md`, `.loop/manifest.yaml`, `loop-contract.md`):
 
 `Succeeded`, `FailedUnverifiable`, `FailedBlocked`, `FailedBudget`, `FailedSafety`,
 `FailedSpecGap`, `AbortedByHuman`.
@@ -77,23 +77,34 @@ failure — it cannot distinguish *succeeded* from *unverifiable* from *aborted*
 
 ---
 
-## 4. Reading a foreign harness shape
+## 4. What the inspector reads (and what it doesn't)
 
-Not every loop uses this suite's filenames. The signals are semantic, so map the foreign
-shape onto the checklist rather than expecting `.loop/`:
+The inspector scores a **fixed, named, typed contract file set** — not an open crawl of
+the tree, and not README / `SKILL.md` prose. Each file is resolved **dual-location**: the
+workspace root *and* `.loop/`, so a loop whose contract lives under `.loop/` (this suite's
+own shape) scores the same as one with the files at the workspace root.
 
-| Foreign shape | Where each signal lives |
+| Signal | Files the inspector reads (root ∪ `.loop/`) |
 |---|---|
-| **This suite's repo-OS contract** | `SPEC.md` (success), `WORKFLOW.md` (approval/terminal/plan-then-execute), `scripts/verify-*` (verification), `holdout_gate.py`/`anticheat_scan.py` (false-completion), `.loop/state.json` (state). |
-| **A superpowers / `docs/superpowers/` harness** | Success + plan in the `specs/` and `plans/` markdown; verification in the per-skill `SKILL.md` verify command or a `verify-slice` delegation; terminal states in the plan's done-criteria. Read the **per-skill subdir** — each spoke's `SKILL.md` + its `reference/`. |
-| **A ruflo / run-dir loop** | A `runs/<id>/` dir with a `state.json` + per-state outputs + `receipt.json`; success in the run contract, verification in the grader/verifier output. |
-| **A bare `scripts/` + `Makefile` / CI loop** | Verification in the CI target (`make verify`, a workflow yaml); success often only implicit — frequently a real gap to flag, not a pass. |
-| **A single-prompt agent** | Usually scores `weak` honestly: no externalized success, no independent verify, no terminal taxonomy. The low score is the correct signal, not a false negative. |
+| Success criteria | `SPEC.md` (`## Success Criteria` / `success_criteria`) or a single-file `loop-contract.md`. |
+| Independent verification | a `scripts/verify-fast/full/safety` script **or** a per-task `"verify"` command in `TASKS.json`. |
+| Approval gates | an `## Approval Gates` section in `WORKFLOW.md` / `loop-contract.md`, or an `approval_policy` / `approval_gates` manifest key. |
+| False-completion defense | `scripts/holdout_gate.py` / `anticheat_scan.py`, a `false_completion: false` terminal record, or a `verifier_gaming` manifest policy. |
+| Plan-then-execute | a `plan_then_execute` manifest policy, or the declared discipline in `WORKFLOW.md` / `loop-contract.md`. |
+| Terminal-state coverage | the 7 tokens named in `WORKFLOW.md`, `.loop/manifest.yaml` (`terminal_states:`), or `loop-contract.md` (see §3). |
 
-The corpus the scanner reads is intentionally shallow (top-level + one or two nested
-levels of `*.md`/`*.json`/`scripts/*`) and bounded — enough to find the contract, never a
-deep crawl of an untrusted tree. Filenames themselves are signals (a `holdout_gate.py`
-present in `scripts/` counts even without reading it).
+Reading only **named** contract files (never arbitrary prose) is deliberate: it is what
+makes the score robust to keyword stuffing — a README full of the right words is not a
+contract. Filenames themselves are signals (a `holdout_gate.py` in `scripts/` counts even
+without reading it).
+
+A harness that records its success criteria, verify surface, or terminal taxonomy *only*
+in a shape outside this set — a bare prose `SKILL.md`, a `Makefile` / CI target, a
+`runs/<id>/` layout, a superpowers `specs/`+`plans/` pair — will score low. That is a
+faithful signal that the loop's contract is not machine-checkable **in the recognized
+form**, not a false negative; the remedy is to add the named contract files
+([[loop-contract]] scaffolds them) or to extend the reader's file set. A single-prompt
+agent with none of these scores `weak` honestly — the low score is the correct signal.
 
 ---
 
