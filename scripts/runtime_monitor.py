@@ -17,6 +17,16 @@ import pathlib
 import re
 import sys
 
+# When run as a documented standalone script (`python3 scripts/runtime_monitor.py
+# <loop>`), sys.path[0] is scripts/ — not the repo root — so the sibling `loop`
+# package is not importable and we would silently use the degraded fallback
+# resolver below (which only finds a root RUNLOG.md, missing the canonical
+# `.loop/RUNLOG.md` layout). Put the repo root on sys.path first so the real
+# dual-location resolver is used whenever the package ships alongside.
+_REPO_ROOT = str(pathlib.Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 try:
     from loop.paths import resolve_loop_paths
 except ImportError:  # pragma: no cover - direct script copy outside repo root

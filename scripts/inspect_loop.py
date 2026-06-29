@@ -29,6 +29,16 @@ import os
 import sys
 from pathlib import Path
 
+# When run as a documented standalone script (`python3 scripts/inspect_loop.py
+# <loop>`), sys.path[0] is scripts/ — not the repo root — so the sibling `loop`
+# package is not importable and we would silently use the degraded fallbacks
+# below (read_manifest -> None, root-only path resolution). Put the repo root on
+# sys.path first so the real loop.contract / loop.paths are used when the package
+# ships alongside.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 try:
     from loop.contract import TERMINAL_STATES, read_manifest
     from loop.paths import resolve_loop_paths

@@ -270,3 +270,51 @@ def test_manifest_false_plan_then_execute_does_not_get_credit(tmp_path):
     # Assert
     assert "plan-then-execute" not in present_text
     assert "plan-then-execute" in gap_text
+
+
+def test_documented_cli_by_path_reads_dotloop_manifest(tmp_path):
+    # Regression: run via `python3 scripts/inspect_loop.py <loop>` (sys.path[0]
+    # is scripts/, not the repo root). Without a self-bootstrap, the real
+    # loop.contract.read_manifest is unimportable and the degraded fallback stub
+    # returns None — so the inspector cannot read `plan_then_execute: false` from
+    # `.loop/manifest.yaml` and instead substring-credits the "Plan-then-execute"
+    # heading in WORKFLOW.md. Exec by path with PYTHONPATH scrubbed to reproduce.
+    import os
+    import subprocess
+    import sys
+
+    loop = _make_good_loop(tmp_path)
+    (loop / ".loop" / "manifest.yaml").write_text(
+        "schema: loop-engineer/manifest@1\n"
+        "loop: sample\n"
+        "policies:\n"
+        "  plan_then_execute: false\n"
+        "  verifier_gaming: hard_terminate_as_security_failure\n"
+        "terminal_states:\n"
+        "  - Succeeded\n"
+        "  - FailedUnverifiable\n"
+        "  - FailedBlocked\n"
+        "  - FailedBudget\n"
+        "  - FailedSafety\n"
+        "  - FailedSpecGap\n"
+        "  - AbortedByHuman\n",
+        encoding="utf-8",
+    )
+
+    script = pathlib.Path(__file__).parent / "inspect_loop.py"
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    proc = subprocess.run(
+        [sys.executable, str(script), str(loop)],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+    )
+
+    # 0 (not weak) or 1 (weak) are both valid runs; anything else is a crash.
+    assert proc.returncode in (0, 1), proc.stderr
+    report = json.loads(proc.stdout)
+    present_text = " ".join(report["present"]).lower()
+    gap_text = " ".join(report["gaps"]).lower()
+    assert "plan-then-execute" not in present_text, report
+    assert "plan-then-execute" in gap_text, report
