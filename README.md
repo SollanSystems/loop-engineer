@@ -1,5 +1,7 @@
 # Loop Engineer
 
+*Your agent says it's done. Loop Engineer makes it prove it.*
+
 Executable operating contracts for AI agent loops.
 
 Loop Engineer turns long-running AI work from a fragile chat transcript into a
@@ -12,7 +14,7 @@ It ships as:
 - a Python validator and inspector,
 - and a Claude Code reference skill suite.
 
-The prime directive is simple:
+The prime directive:
 
 > If a loop cannot define success, verification, or a terminal state, it stops
 > as `FailedSpecGap` instead of pretending the next completion is done.
@@ -30,18 +32,8 @@ Long-running agents fail in predictable ways:
 - they have no typed way to say blocked, unsafe, unverifiable, or underspecified.
 
 Loop Engineer makes those failure modes explicit contract states instead of
-vibes. It is a concrete, gate-backed reference implementation of the emerging
-discipline of **loop engineering**.
-
----
-
-## Core guarantees
-
-- **Typed termination:** every run exits through exactly one of 7 terminal states.
-- **Evidence before completion:** tasks require verifier-backed evidence.
-- **Externalized state:** loop status lives in files, not chat memory.
-- **Bounded repair:** repair attempts are capped and measured.
-- **False-completion defense:** held-out gates and anti-cheat scans catch verifier gaming.
+vibes — a concrete, gate-backed reference implementation of **loop engineering**:
+contracts, typed termination, and health metrics for long-running agent loops.
 
 ---
 
@@ -71,8 +63,8 @@ python3 -m loop inspect examples/coverage-repair
 }
 ```
 
-`inspect` scores the higher-level loop contract and reports what is present and
-what is missing:
+`inspect` is a static contract linter: it scores the loop contract's structure —
+what proof machinery is present and what is missing — without running the loop:
 
 ```json
 {
@@ -97,10 +89,21 @@ Both commands accept either a workspace root or its `.loop/` directory.
 
 ---
 
+## Core guarantees
+
+- **Typed termination:** every run exits through exactly one of 7 terminal states.
+- **Evidence before completion:** a task is done only when it maps to a success criterion, a verifier passes, and evidence is recorded — not when the agent stops talking.
+- **Externalized state:** loop status lives in files, not chat memory.
+- **Bounded repair:** repair attempts are capped and measured.
+- **False-completion defense:** held-out gates and anti-cheat scans designed to catch verifier gaming.
+
+---
+
 ## Contract anatomy
 
-A loop contract is a small repo-OS that externalizes intent, queue state,
-runtime state, verification, approvals, and terminal outcome:
+A loop contract is a repo-native directory — a small on-disk "repo-OS" — that
+externalizes intent, queue state, runtime state, verification, approvals, and
+terminal outcome:
 
 ```text
 <workspace>/
@@ -153,7 +156,7 @@ exactly one named state:
 | `FailedUnverifiable` | Success or failure cannot be confirmed because verification is insufficient. |
 | `FailedBlocked` | The loop cannot proceed because of a tool, permission, dependency, or external blocker. |
 | `FailedBudget` | Time or cost budget is exhausted. |
-| `FailedSafety` | Safety, policy, or approval risk is detected; the loop hard-terminates. |
+| `FailedSafety` | Safety, policy, or approval risk is detected. |
 | `FailedSpecGap` | The objective is underspecified; success criteria cannot be defined. |
 | `AbortedByHuman` | The operator explicitly stops the run. |
 
@@ -161,25 +164,10 @@ exactly one named state:
 
 ## Install
 
-### Claude Code plugin
-
-```bash
-claude plugin marketplace add SollanSystems/loop-engineer
-claude plugin install loop-engineer@loop-engineer
-```
-
-Restart Claude Code; all 9 skills should be discoverable. (Local dev: clone the
-repo and run `claude plugin marketplace add "$PWD"` instead.)
-
-**Requirements:** Python 3.10+ for the portable validator/inspector; Claude Code
-for the plugin — no other dependencies. Optional integrations (e.g.
-`claude-code-orchestration` for `/verify-slice`) are layered on when present and
-never required; every skill runs on the bundled core alone.
-
 ### Portable validator / inspector
 
-No Claude Code plugin install is required to validate or inspect an existing
-loop contract. From the cloned repo root:
+No Claude Code plugin is required to validate or inspect a loop contract. From
+the cloned repo root:
 
 ```bash
 python3 -m loop doctor /path/to/workspace
@@ -205,6 +193,21 @@ The portable core lives in `loop/` and validates schema-bearing artifacts in
 - `loop-engineer/state@1`
 - `loop-engineer/tasks@1`
 - `loop-engineer/terminal@1`
+
+### Claude Code plugin
+
+```bash
+claude plugin marketplace add SollanSystems/loop-engineer
+claude plugin install loop-engineer@loop-engineer
+```
+
+Restart Claude Code to load all 9 skills. (Local dev: clone the repo and run
+`claude plugin marketplace add "$PWD"` instead.)
+
+**Requirements:** Python 3.10+ for the portable validator/inspector; Claude Code
+for the plugin — no other dependencies. Optional integrations (e.g.
+`claude-code-orchestration` for `/verify-slice`) are layered on when present and
+never required; every skill runs on the bundled core alone.
 
 ---
 
@@ -276,11 +279,11 @@ terminate.
 
 What this suite owns:
 
-- **7 typed terminal states** as a contract primitive; no silent "completed."
-- **`false-completion-rate`**, measured with held-out verification and anti-cheat trajectory scanning.
-- **`repair-productivity`**, the fraction of repair attempts that measurably move verification forward.
-- **Repo-native loop state** that survives compaction, crashes, and handoff.
-- **Deterministic-gate-before-rubric ordering** so model judges are advisory, not the first line of proof.
+- **7 typed terminal states** — a contract primitive, so no run ends in a silent "completed."
+- **`false-completion-rate`** — measurable with the bundled held-out gate and anti-cheat scan (computed from real runs; no baseline ships yet).
+- **`repair-productivity`** — the fraction of repair attempts that measurably move verification forward.
+- **Repo-native loop state** — survives compaction, crashes, and handoff.
+- **Deterministic-gate-before-rubric ordering** — model judges are advisory, not the first line of proof.
 
 What is table-stakes rather than oversold: on-disk contracts, bounded repair
 caps, and deterministic verification gates are shared with mature harnesses.
@@ -330,6 +333,19 @@ Deep content lives in `reference/` and is loaded on demand by the skills:
 - `reference/eval-suite.md` — 7-layer eval suite, first-class metrics, flywheel schedule.
 - `reference/safety-and-approvals.md` — escalation ladder, approval lifecycle, anti-cheat.
 - `reference/platform-map.md` — portable-core mapping across Claude, Codex, Hermes, and Google.
+
+---
+
+## Get started
+
+```bash
+git clone https://github.com/SollanSystems/loop-engineer.git
+cd loop-engineer
+python3 -m loop inspect examples/coverage-repair
+```
+
+Then scaffold a contract for your own loop with `/loop-contract`, or read
+`reference/repo-os-contract.md` for the artifact schemas.
 
 ---
 
