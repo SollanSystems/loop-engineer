@@ -83,7 +83,7 @@ The cap is `repair.max_attempts`, **default N=2**, configurable in `WORKFLOW.md`
 
 ## Dispatching a repair to a subagent
 
-For a bounded, isolated fix, [[loop-run]] may dispatch the repair to a write-tier agent. Per the model-routing rule, the dispatch **must** name an explicit `model:` — repairs write production code, so they route to `opus`:
+For a bounded, isolated fix, [[loop-run]] may dispatch the repair to a write-tier agent. Per the model-routing rule (tier table: `reference/model-routing.md`), the dispatch **must** name an explicit `model:` — repairs write production code, so they route to `opus`:
 
 ```
 Agent(

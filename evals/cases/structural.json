@@ -18,7 +18,8 @@
     "prompt-templates.md",
     "eval-suite.md",
     "safety-and-approvals.md",
-    "platform-map.md"
+    "platform-map.md",
+    "model-routing.md"
   ],
   "terminal_states": [
     "Succeeded",

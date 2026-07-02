@@ -50,7 +50,7 @@ The monitor recommends the rung; it never *takes* the side-effecting action itse
 python3 scripts/runtime_monitor.py path/to/.loop
 ```
 
-It emits the JSON health report `{active_task, iterations_observed, stalled, repair_churn, budget_overrun, recommendation, evidence}`. `evidence` is the concrete reason for each fired flag (the spinning task, the flat score, the exhausted budget key) — never a prose claim, always the read-off fact. Import `health_report(loop_dir)` to fold the same report into a Workflow or a watch poll. A read-only monitor poll routes to `model: "haiku"` per the model-routing rule; the report is data, the intervention decision is the operator's.
+It emits the JSON health report `{active_task, iterations_observed, stalled, repair_churn, budget_overrun, recommendation, evidence}`. `evidence` is the concrete reason for each fired flag (the spinning task, the flat score, the exhausted budget key) — never a prose claim, always the read-off fact. Import `health_report(loop_dir)` to fold the same report into a Workflow or a watch poll. A read-only monitor poll routes to `model: "haiku"` per the model-routing rule (tier table: `reference/model-routing.md`); the report is data, the intervention decision is the operator's.
 
 ## Boundaries
 

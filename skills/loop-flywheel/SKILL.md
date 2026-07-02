@@ -44,7 +44,7 @@ await agent({ model: "opus",     // write: turn confirmed failures into committe
   prompt: `From the confirmed failures in this proposal, write one EVALS/regressions/<case>.json per distinct real failure (input + expected deterministic verdict). Commit only failures that actually occurred; leave harness-change proposals for human review.` });
 ```
 
-(`read → haiku`, `reason → sonnet`, `write → opus`; receipts append to `.loop/receipts/`. The haiku+sonnet pass mines and *proposes*; only the opus pass writes the committed regression cases — and even then never reimplements the verify engine: the contract's `scripts/verify-*` gate, optionally `/verify-slice`, is the source of truth.)
+(`read → haiku`, `reason → sonnet`, `write → opus` per the model-routing rule — canonical table in `reference/model-routing.md`; receipts append to `.loop/receipts/`. The haiku+sonnet pass mines and *proposes*; only the opus pass writes the committed regression cases — and even then never reimplements the verify engine: the contract's `scripts/verify-*` gate, optionally `/verify-slice`, is the source of truth.)
 
 ## Memory compaction: two stores, never mixed
 

@@ -109,9 +109,9 @@ to reach an explicit terminal state; never a silent "completed."
 
 Any agent dispatch you suggest in the ADR names an explicit `model:` (read → `haiku`,
 reason → `sonnet`, write → `opus`) per the model-routing rule — a Workflow
-`agent({ model: "sonnet", … })` fan-out, a write agent on `opus`. Omitting
-`model:` inherits the costly main-loop model; the author blocks that with a PreToolUse hook
-(`workflow_routing.py`), but the rule holds on any surface.
+`agent({ model: "sonnet", … })` fan-out, a write agent on `opus`. Never omit it: omitting
+`model:` inherits the costly main-loop model. The full tier table + rationale (and the
+optional `workflow_routing.py` enforcement) are in `reference/model-routing.md`.
 
 ## Hand-off
 

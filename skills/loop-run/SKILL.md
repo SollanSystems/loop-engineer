@@ -42,7 +42,7 @@ Each loop turn emits, to disk, not just to chat:
 
 ## Dispatch with explicit model routing
 
-Every `Agent` dispatch and Workflow `agent()` names an explicit `model:` — read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop. Never omit it: explicit routing keeps cost bounded and every dispatch auditable. Append one receipt per dispatch to `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`). *Optional integration:* the author enforces routing with PreToolUse hooks and mirrors receipts into `.gsd/audit/receipts/`; enforce it however your platform allows, or keep the rule as policy text in `WORKFLOW.md`.
+Every `Agent` dispatch and Workflow `agent()` names an explicit `model:` — read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop; never omit it. Append one receipt per dispatch to `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`). The canonical tier table, the rationale, and the optional enforcement (the author's PreToolUse hooks / `.gsd/` receipt mirroring / `/routing` modes) live in `reference/model-routing.md` — keep the rule as policy text in `WORKFLOW.md` on any platform that can't enforce it at runtime.
 
 Per-task worker (writes code → `opus`):
 

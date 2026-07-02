@@ -89,7 +89,7 @@ for (const c of regressionCases) {
   }
 }
 ```
-(`read → haiku`, `reason → sonnet`, `write → opus`; receipts append to `.loop/receipts/`.)
+(`read → haiku`, `reason → sonnet`, `write → opus` per the model-routing rule — tier table + rationale in `reference/model-routing.md`; receipts append to `.loop/receipts/`.)
 
 ## Standing the suite up
 
