@@ -1,0 +1,9 @@
+{
+  "visible": [
+    { "id": "visible-unit", "cmd": "python3 -m unittest test_visible" },
+    { "id": "coverage-80", "cmd": "python3 measure_coverage.py" }
+  ],
+  "holdout": [
+    { "id": "holdout-probes", "cmd": "python3 -m unittest test_holdout" }
+  ]
+}
