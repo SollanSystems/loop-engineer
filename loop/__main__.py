@@ -15,11 +15,25 @@ def _print_json(report: dict) -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in {"-h", "--help"}:
-        print("usage: python -m loop <doctor|validate|verify|inspect> <workspace-or-.loop>", file=sys.stderr)
+        print(
+            "usage: python -m loop <scaffold|doctor|validate|verify|inspect> <workspace-or-.loop>",
+            file=sys.stderr,
+        )
         return 2
 
     command = argv.pop(0)
     target = Path(argv[0]) if argv else Path.cwd()
+
+    if command == "scaffold":
+        from .scaffold import scaffold
+
+        try:
+            report = scaffold(target)
+        except FileExistsError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps(report, indent=2))
+        return 0
 
     if command in {"doctor", "validate", "verify"}:
         return _print_json(doctor_report(target))

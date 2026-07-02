@@ -222,7 +222,12 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     manifest = read_manifest(paths.manifest)
     state = _read_json(paths.state, issues)
     tasks = _read_json(paths.tasks, issues)
-    terminal = _read_json(paths.terminal, issues)
+    if not paths.terminal.exists() and isinstance(state, dict) and state.get("terminal_state") is None:
+        # In-flight loop: terminal_state.json is written once, at loop end. Its
+        # absence is valid while state.json still declares terminal_state: null.
+        terminal = None
+    else:
+        terminal = _read_json(paths.terminal, issues)
 
     _validate_manifest(manifest, paths.manifest, issues)
     _validate_state(state, paths.state, issues)
