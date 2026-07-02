@@ -12,6 +12,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -149,6 +151,11 @@ def test_loop_doctor_accepts_valid_contract_from_workspace_root(tmp_path):
         "loop-engineer/tasks@1",
         "loop-engineer/terminal@1",
     ]
+    # schemas_checked names the schemas; validation_mode reports what actually
+    # ran — real jsonschema validation when the library is present, the stdlib
+    # structural hand checks otherwise. It must never imply validation that did
+    # not happen.
+    assert report["validation_mode"] in {"jsonschema", "structural-fallback"}
 
 
 def test_loop_doctor_resolves_same_contract_from_dot_loop_dir(tmp_path):
@@ -200,6 +207,125 @@ def test_doctor_does_not_crash_on_malformed_manifest(tmp_path):
     assert result.returncode in (0, 1), result.stderr + result.stdout
     report = json.loads(result.stdout)  # raises if it crashed
     assert "ok" in report
+
+
+def _terminal_issues(data):
+    from loop.contract import _validate_terminal
+
+    issues: list[dict] = []
+    _validate_terminal(data, pathlib.Path("terminal_state.json"), issues)
+    return issues
+
+
+def test_g1_contradictory_succeeded_terminal_emits_issue():
+    # G1: a Succeeded terminal is the loop's strongest claim. The validator must
+    # reject the two ways it can outrun its evidence — a self-declared false
+    # completion, or no criterion actually met — instead of validating clean.
+    from loop.contract import _validate_terminal  # noqa: F401
+
+    base = {"schema": "loop-engineer/terminal@1", "state": "Succeeded", "evidence": []}
+
+    false_completion_issues = _terminal_issues(
+        {**base, "criteria_met": {"1": True}, "false_completion": True}
+    )
+    assert any(i["code"] == "contradictory_terminal" for i in false_completion_issues)
+    assert any(
+        "false_completion" in i["message"]
+        for i in false_completion_issues
+        if i["code"] == "contradictory_terminal"
+    )
+
+    empty_criteria_issues = _terminal_issues(
+        {**base, "criteria_met": {}, "false_completion": False}
+    )
+    assert any(i["code"] == "contradictory_terminal" for i in empty_criteria_issues)
+    assert any(
+        "criteria_met" in i["message"]
+        for i in empty_criteria_issues
+        if i["code"] == "contradictory_terminal"
+    )
+
+    all_false_issues = _terminal_issues(
+        {**base, "criteria_met": {"1": False, "2": False}, "false_completion": False}
+    )
+    assert any(i["code"] == "contradictory_terminal" for i in all_false_issues)
+
+    happy_issues = _terminal_issues(
+        {**base, "criteria_met": {"1": True}, "false_completion": False}
+    )
+    assert not any(i["code"] == "contradictory_terminal" for i in happy_issues)
+    assert happy_issues == []
+
+
+def test_jsonschema_mode_rejects_schema_violating_artifact(tmp_path):
+    # M1-SCHEMAS: when jsonschema is installed the doctor must run REAL schema
+    # validation, not just the weaker structural hand checks — a state.json
+    # missing a schema-required field must be rejected.
+    pytest.importorskip("jsonschema")
+    from loop.contract import doctor_report
+
+    workspace = _write_valid_loop(tmp_path)
+    clean = doctor_report(str(workspace))
+    assert clean["validation_mode"] == "jsonschema"
+    assert clean["ok"] is True, clean["issues"]
+
+    state_path = workspace / ".loop" / "state.json"
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+    del data["iteration_id"]
+    state_path.write_text(json.dumps(data), encoding="utf-8")
+
+    report = doctor_report(str(workspace))
+    assert report["validation_mode"] == "jsonschema"
+    assert report["ok"] is False
+    assert any(issue["code"] == "schema_violation" for issue in report["issues"])
+
+
+def test_jsonschema_mode_enforces_every_schema_required_field(tmp_path):
+    # Field-agreement: for every required field the schemas/*.json files declare,
+    # jsonschema-mode doctor must reject an artifact that omits it. This is the
+    # honesty guarantee behind validation_mode == "jsonschema".
+    pytest.importorskip("jsonschema")
+    yaml = pytest.importorskip("yaml")
+    from loop.contract import _load_schema, doctor_report
+
+    locators = {
+        "state": lambda ws: ws / ".loop" / "state.json",
+        "tasks": lambda ws: ws / "TASKS.json",
+        "terminal": lambda ws: ws / ".loop" / "terminal_state.json",
+        "manifest": lambda ws: ws / ".loop" / "manifest.yaml",
+    }
+
+    case = 0
+    for name, locate in locators.items():
+        for field in _load_schema(name).get("required", []):
+            case += 1
+            workspace = _write_valid_loop(tmp_path / f"case_{case}")
+            path = locate(workspace)
+            if path.suffix == ".yaml":
+                doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+                doc.pop(field, None)
+                path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+            else:
+                doc = json.loads(path.read_text(encoding="utf-8"))
+                doc.pop(field, None)
+                path.write_text(json.dumps(doc), encoding="utf-8")
+            report = doctor_report(str(workspace))
+            assert report["validation_mode"] == "jsonschema"
+            assert report["ok"] is False, f"{name} missing {field!r} should fail"
+            assert any(i["code"] == "schema_violation" for i in report["issues"]), (name, field)
+
+    task_item_required = _load_schema("tasks")["properties"]["tasks"]["items"]["required"]
+    for field in task_item_required:
+        case += 1
+        workspace = _write_valid_loop(tmp_path / f"case_{case}")
+        path = workspace / "TASKS.json"
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc["tasks"][0].pop(field, None)
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        report = doctor_report(str(workspace))
+        assert report["validation_mode"] == "jsonschema"
+        assert report["ok"] is False, f"task missing {field!r} should fail"
+        assert any(i["code"] == "schema_violation" for i in report["issues"]), field
 
 
 def test_loop_doctor_flags_stub_verify_scripts(tmp_path):

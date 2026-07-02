@@ -143,6 +143,28 @@ def _validate_state(data: dict[str, Any] | None, path: Path, issues: list[dict])
         issues.append(ContractIssue("invalid_terminal_state", f"invalid terminal_state {terminal!r}", path))
 
 
+def _check_tasks_semantics(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
+    """Cross-task rules JSON Schema cannot express: id uniqueness and the
+    evidence-before-done invariant. Runs in both validation modes."""
+
+    if not isinstance(data, dict):
+        return
+    tasks = data.get("tasks")
+    if not isinstance(tasks, list):
+        return
+    seen: set[str] = set()
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        task_id = task.get("id")
+        if isinstance(task_id, str) and task_id:
+            if task_id in seen:
+                issues.append(ContractIssue("duplicate_task", f"duplicate task id {task_id!r}", path))
+            seen.add(task_id)
+        if task.get("status") == "done" and not task.get("evidence"):
+            issues.append(ContractIssue("done_without_evidence", f"task {task_id!r} done without evidence", path))
+
+
 def _validate_tasks(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
     _require_schema(data, "loop-engineer/tasks@1", path, issues)
     if data is None:
@@ -151,7 +173,6 @@ def _validate_tasks(data: dict[str, Any] | None, path: Path, issues: list[dict])
     if not isinstance(tasks, list):
         issues.append(ContractIssue("invalid_tasks", "tasks must be a list", path))
         return
-    seen: set[str] = set()
     for task in tasks:
         if not isinstance(task, dict):
             issues.append(ContractIssue("invalid_task", "task must be an object", path))
@@ -159,11 +180,28 @@ def _validate_tasks(data: dict[str, Any] | None, path: Path, issues: list[dict])
         task_id = task.get("id")
         if not isinstance(task_id, str) or not task_id:
             issues.append(ContractIssue("invalid_task", "task id must be a non-empty string", path))
-        elif task_id in seen:
-            issues.append(ContractIssue("duplicate_task", f"duplicate task id {task_id!r}", path))
-        seen.add(str(task_id))
-        if task.get("status") == "done" and not task.get("evidence"):
-            issues.append(ContractIssue("done_without_evidence", f"task {task_id!r} done without evidence", path))
+    _check_tasks_semantics(data, path, issues)
+
+
+def _check_terminal_contradiction(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
+    """G1: a Succeeded terminal must not contradict its own evidence.
+
+    Runs in both validation modes because JSON Schema cannot express the
+    cross-field rule that a success claim requires false_completion=false AND at
+    least one met criterion.
+    """
+
+    if not isinstance(data, dict) or data.get("state") != "Succeeded":
+        return
+    if data.get("false_completion") is True:
+        issues.append(
+            ContractIssue("contradictory_terminal", "Succeeded terminal declares false_completion=true", path)
+        )
+    criteria = data.get("criteria_met")
+    if not isinstance(criteria, dict) or not any(v is True for v in criteria.values()):
+        issues.append(
+            ContractIssue("contradictory_terminal", "Succeeded terminal has no met (true) entry in criteria_met", path)
+        )
 
 
 def _validate_terminal(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
@@ -178,6 +216,7 @@ def _validate_terminal(data: dict[str, Any] | None, path: Path, issues: list[dic
         issues.append(ContractIssue("invalid_terminal", "evidence must be a list", path))
     if not isinstance(data.get("false_completion"), bool):
         issues.append(ContractIssue("invalid_terminal", "false_completion must be bool", path))
+    _check_terminal_contradiction(data, path, issues)
 
 
 def _validate_manifest(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
@@ -216,6 +255,41 @@ def _check_stub_verify_scripts(paths: LoopPaths, issues: list[dict]) -> None:
             issues.append(ContractIssue("stub_verify_script", f"{script.name} still contains stub markers", script))
 
 
+_SCHEMA_FILES = {
+    "manifest": "manifest.schema.json",
+    "state": "state.schema.json",
+    "tasks": "tasks.schema.json",
+    "terminal": "terminal.schema.json",
+}
+
+
+def _schemas_dir() -> Path:
+    # Resolve schemas/ relative to the loop package's repo root, the same pattern
+    # the pyproject comment describes for scripts/ (editable install is supported).
+    return Path(__file__).resolve().parent.parent / "schemas"
+
+
+def _load_schema(name: str) -> dict[str, Any]:
+    return json.loads((_schemas_dir() / _SCHEMA_FILES[name]).read_text(encoding="utf-8"))
+
+
+def _validation_mode() -> str:
+    try:
+        import jsonschema  # type: ignore  # noqa: F401
+    except Exception:
+        return "structural-fallback"
+    return "jsonschema"
+
+
+def _jsonschema_validate(data: dict[str, Any], name: str, path: Path, issues: list[dict]) -> None:
+    import jsonschema  # type: ignore
+
+    validator = jsonschema.Draft202012Validator(_load_schema(name))
+    for err in validator.iter_errors(data):
+        location = "/".join(str(p) for p in err.absolute_path) or "<root>"
+        issues.append(ContractIssue("schema_violation", f"{path.name}: {location}: {err.message}", path))
+
+
 def validate_contract(target: str | Path) -> dict[str, Any]:
     paths = resolve_loop_paths(target)
     issues: list[dict] = []
@@ -224,10 +298,28 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     tasks = _read_json(paths.tasks, issues)
     terminal = _read_json(paths.terminal, issues)
 
-    _validate_manifest(manifest, paths.manifest, issues)
-    _validate_state(state, paths.state, issues)
-    _validate_tasks(tasks, paths.tasks, issues)
-    _validate_terminal(terminal, paths.terminal, issues)
+    mode = _validation_mode()
+    if mode == "jsonschema":
+        if manifest is None:
+            issues.append(ContractIssue("missing_file", "missing manifest.yaml", paths.manifest))
+        else:
+            _jsonschema_validate(manifest, "manifest", paths.manifest, issues)
+        for data, name, path in (
+            (state, "state", paths.state),
+            (tasks, "tasks", paths.tasks),
+            (terminal, "terminal", paths.terminal),
+        ):
+            if data is not None:
+                _jsonschema_validate(data, name, path, issues)
+        # Cross-field rules JSON Schema cannot express, run in both modes.
+        _check_tasks_semantics(tasks, paths.tasks, issues)
+        _check_terminal_contradiction(terminal, paths.terminal, issues)
+    else:
+        _validate_manifest(manifest, paths.manifest, issues)
+        _validate_state(state, paths.state, issues)
+        _validate_tasks(tasks, paths.tasks, issues)
+        _validate_terminal(terminal, paths.terminal, issues)
+
     if not paths.runlog.exists():
         issues.append(ContractIssue("missing_file", "missing RUNLOG.md", paths.runlog))
     _check_stub_verify_scripts(paths, issues)
@@ -235,6 +327,7 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     return {
         "ok": not issues,
         "paths": paths.to_json(),
+        "validation_mode": mode,
         "schemas_checked": list(SCHEMA_IDS),
         "issues": issues,
     }
