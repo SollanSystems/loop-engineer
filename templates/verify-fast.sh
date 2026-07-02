@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# verify-fast.sh — quick deterministic gate
-# Run after every task iteration. Must complete in <30s.
-# Replace the echo stubs below with real checks for this loop.
+# verify-fast — quick deterministic gate. Run after every task; keep it under ~30s.
+# Ships with one real, dependency-free check: the operating contract's own files
+# are present. Extend it with this loop's fast checks (lint, typecheck, unit
+# subset) as the SPEC criteria earn them — [[loop-evals]] owns the proof surface.
 
 WORKSPACE="${1:-$(pwd)}"
 
 echo "[verify-fast] workspace: $WORKSPACE"
 
+for f in SPEC.md WORKFLOW.md TASKS.json .loop/state.json; do
+  if [ ! -f "$WORKSPACE/$f" ]; then
+    echo "[verify-fast] FAIL: contract file missing: $f"
+    exit 1
+  fi
+done
+
 # --- CHECK: lint / typecheck ---
-# e.g. cd "$WORKSPACE" && npm run typecheck
-echo "[verify-fast] STUB: lint/typecheck — replace with real command"
+# e.g. (cd "$WORKSPACE" && npm run typecheck)
 
 # --- CHECK: unit tests (fast subset) ---
 # e.g. uv run pytest tests/unit/ -q --tb=short
-echo "[verify-fast] STUB: unit tests — replace with real command"
-
-# --- CHECK: schema / contract validation ---
-# e.g. python3 scripts/validate_frontmatter.py
-echo "[verify-fast] STUB: schema validation — replace with real command"
 
 echo "[verify-fast] PASS"
 exit 0
