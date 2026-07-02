@@ -38,6 +38,12 @@ def test_empty_holdout_cannot_certify():
     assert v["false_completion"] is False
 
 
+def test_empty_visible_set_returns_not_ready():
+    v = hg.decide([], [_r("h", True)])
+    assert v["verdict"] == "NotReady"
+    assert v["false_completion"] is False
+
+
 def test_run_manifest_executes_commands():
     manifest = {
         "visible": [{"id": "v", "cmd": "true"}],
