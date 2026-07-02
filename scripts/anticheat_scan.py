@@ -24,8 +24,16 @@ Run::
     python3 anticheat_scan.py --diff changes.diff --trajectory trace.json
 
 ``--trajectory`` is a JSON array of strings (tool calls / paths the loop touched).
-Prints findings as JSON. Exit 0 = clean, 1 = downgrade (FailedUnverifiable),
-2 = gate tampering (FailedSafety).
+Prints findings as JSON. The exit code splits the scan's *outcome* from an
+*operational* failure so a broken invocation is never read as a clean scan or as
+findings:
+
+  * 0 — clean: the scan ran and found nothing.
+  * 1 — findings: a downgrade to FailedUnverifiable, or review-only findings.
+  * 2 — gate tampering: a critical finding -> FailedSafety.
+  * 3 — operational error: the scan could not run at all (unreadable ``--diff`` /
+        ``--trajectory`` file, malformed ``--trajectory`` JSON, failed
+        ``--self-check`` git call, or a bad argument).
 """
 
 from __future__ import annotations
@@ -34,7 +42,16 @@ import argparse
 import json
 import pathlib
 import re
+import subprocess
 import sys
+
+# Exit codes. Findings (1, 2) and the scan's severity live apart from an
+# operational failure (3), so a broken invocation never masquerades as a clean
+# scan (0) or as a downgrade finding (1).
+EXIT_CLEAN = 0
+EXIT_FINDINGS = 1
+EXIT_GATE_TAMPERING = 2
+EXIT_OPERATIONAL_ERROR = 3
 
 # Path markers for a gate file. A bare name (e.g. "self_eval.py") matches by
 # BASENAME / path-segment, never by raw substring — so a test file whose name
@@ -411,8 +428,19 @@ def scan(
     return {"findings": findings, "clean": not findings, "downgrade_to": downgrade}
 
 
+class _ArgParser(argparse.ArgumentParser):
+    """Argparse variant that exits with the operational-error code on a bad
+    argument, instead of argparse's default 2 (which would collide with the
+    gate-tampering finding code)."""
+
+    def error(self, message: str):  # noqa: D401 - argparse override
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        raise SystemExit(EXIT_OPERATIONAL_ERROR)
+
+
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Anti-cheat trajectory scan.")
+    ap = _ArgParser(description="Anti-cheat trajectory scan.")
     ap.add_argument("--diff", help="path to a unified diff file (else read stdin)")
     ap.add_argument("--files", help="comma-separated changed files (overrides diff parse)")
     ap.add_argument("--trajectory", help="path to a JSON array of trajectory strings")
@@ -423,34 +451,39 @@ def main(argv: list[str]) -> int:
     )
     args = ap.parse_args(argv)
 
-    if args.self_check:
-        import subprocess
+    # Gathering inputs is where a *broken invocation* surfaces (unreadable file,
+    # malformed JSON, failed git). Fail with the distinct operational code so it
+    # is never confused with a clean scan or a findings downgrade.
+    try:
+        if args.self_check:
+            here = pathlib.Path(__file__).resolve().parent
+            diff_text = subprocess.run(
+                ["git", "diff", "--", "scripts/anticheat_scan.py",
+                 "scripts/test_anticheat_scan.py"],
+                cwd=here.parent, capture_output=True, text=True, check=True,
+            ).stdout
+        elif args.diff:
+            with open(args.diff, encoding="utf-8") as fh:
+                diff_text = fh.read()
+        elif not sys.stdin.isatty():
+            diff_text = sys.stdin.read()
+        else:
+            diff_text = ""
 
-        here = pathlib.Path(__file__).resolve().parent
-        diff_text = subprocess.run(
-            ["git", "diff", "--", "scripts/anticheat_scan.py",
-             "scripts/test_anticheat_scan.py"],
-            cwd=here.parent, capture_output=True, text=True, check=True,
-        ).stdout
-    elif args.diff:
-        with open(args.diff, encoding="utf-8") as fh:
-            diff_text = fh.read()
-    elif not sys.stdin.isatty():
-        diff_text = sys.stdin.read()
-    else:
-        diff_text = ""
-
-    files = args.files.split(",") if args.files else None
-    trajectory = None
-    if args.trajectory:
-        with open(args.trajectory, encoding="utf-8") as fh:
-            trajectory = json.load(fh)
+        files = args.files.split(",") if args.files else None
+        trajectory = None
+        if args.trajectory:
+            with open(args.trajectory, encoding="utf-8") as fh:
+                trajectory = json.load(fh)
+    except (OSError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
+        print(f"{ap.prog}: operational error: {exc}", file=sys.stderr)
+        return EXIT_OPERATIONAL_ERROR
 
     result = scan(diff_text=diff_text, changed_files=files, trajectory=trajectory)
     print(json.dumps(result, indent=2))
     if result["downgrade_to"] == "FailedSafety":
-        return 2
-    return 0 if result["clean"] else 1
+        return EXIT_GATE_TAMPERING
+    return EXIT_CLEAN if result["clean"] else EXIT_FINDINGS
 
 
 if __name__ == "__main__":
