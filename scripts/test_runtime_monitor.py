@@ -125,7 +125,8 @@ def test_cli_emits_json(tmp_path, capsys):
     # Assert
     parsed = json.loads(out)
     assert parsed["stalled"] is True
-    assert rc == 0
+    # A stalled loop recommends intervention (replan) -> nonzero exit (item 8).
+    assert rc == 1
 
 
 def _line(it, task, score_text):
@@ -318,8 +319,100 @@ def test_documented_cli_by_path_resolves_dotloop_runlog(tmp_path):
         env=env,
     )
 
-    assert proc.returncode == 0, proc.stderr
+    # The loop is stalled, so the CLI exits 1 (intervention) rather than crashing
+    # (a path-resolution failure would give a traceback + non-JSON stdout).
+    assert proc.returncode == 1, proc.stderr
     report = json.loads(proc.stdout)
     assert report["status"] == "ok", report
     assert report["iterations_observed"] == 4, report
     assert report["stalled"] is True, report
+
+
+# --- M4-CLI item 8: explicit CLI exit codes per outcome ---------------------
+
+
+def test_cli_exit_zero_when_healthy(tmp_path):
+    state = {
+        "active_task": "M5",
+        "best_score": 0.95,
+        "iteration_id": "4",
+        "budget_remaining": {"iterations": 6, "cost": 100},
+    }
+    runlog = _runlog([(1, "M1", 0.4), (2, "M2", 0.6), (3, "M3", 0.8), (4, "M5", 0.95)])
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    assert runtime_monitor.main([str(loop_dir)]) == 0
+
+
+def test_cli_exit_one_when_stalled(tmp_path):
+    state = {"active_task": "M2", "best_score": 0.5, "iteration_id": "4"}
+    runlog = _runlog([(1, "M2", 0.5), (2, "M2", 0.5), (3, "M2", 0.5), (4, "M2", 0.5)])
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    # A loop that needs intervention (replan) must not exit 0.
+    assert runtime_monitor.main([str(loop_dir)]) == 1
+
+
+def test_cli_exit_one_when_repair_churn(tmp_path):
+    state = {"active_task": "M3", "best_score": 0.6, "iteration_id": "5"}
+    runlog = "\n".join(
+        [
+            "# RUNLOG",
+            "",
+            "- iter 1: active_task=M3 verify=FAIL best_score=0.6 repair attempt=1 productive=false",
+            "- iter 2: active_task=M3 verify=FAIL best_score=0.6 repair attempt=2 productive=false",
+            "- iter 3: active_task=M3 verify=FAIL best_score=0.6 repair attempt=3 productive=false",
+        ]
+    ) + "\n"
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    assert runtime_monitor.main([str(loop_dir)]) == 1
+
+
+def test_cli_exit_one_when_budget_overrun(tmp_path):
+    state = {
+        "active_task": "M4",
+        "best_score": 0.7,
+        "iteration_id": "9",
+        "budget_remaining": {"iterations": 0, "cost": 0},
+    }
+    runlog = _runlog([(i, "M4", 0.7) for i in range(1, 10)])
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    assert runtime_monitor.main([str(loop_dir)]) == 1
+
+
+def test_cli_exit_two_when_state_missing(tmp_path):
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+
+    # A precondition/operational error (no state.json) is distinct from an
+    # intervention recommendation.
+    assert runtime_monitor.main([str(loop_dir)]) == 2
+
+
+def test_cli_exit_one_when_runlog_unparseable(tmp_path):
+    state = {"active_task": "T2", "state": "execute", "iteration_id": 3, "best_score": 0.8}
+    runlog = (
+        "# RUNLOG\n\n"
+        "## Iteration 1\n"
+        "- **active_task:** `T1`\n"
+        "- **score:** 0.61\n"
+    )
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    assert runtime_monitor.main([str(loop_dir)]) == 1
+
+
+def test_cli_exit_zero_when_terminal(tmp_path):
+    state = {
+        "active_task": None,
+        "state": "terminal",
+        "terminal_state": "Succeeded",
+        "iteration_id": 7,
+    }
+    runlog = _runlog([(1, "T1", 0.5)])
+    loop_dir = _write_loop(tmp_path, state, runlog)
+
+    # A finished loop is a clean exit, not an intervention.
+    assert runtime_monitor.main([str(loop_dir)]) == 0

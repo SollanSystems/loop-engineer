@@ -287,6 +287,22 @@ def health_report(loop_dir) -> dict:
     }
 
 
+def _exit_code(report: dict) -> int:
+    """Map a health report to an explicit exit code so a script/CI can react
+    without re-parsing the JSON:
+
+      * 0 — healthy or already terminal: recommendation ``continue``/``done``.
+      * 1 — intervention recommended (``replan``/``revert``/``approval``) or a
+            ``degraded`` RUNLOG whose detectors are inert.
+      * 2 — precondition/operational error (missing or invalid loop state).
+    """
+    if report.get("status") == "error":
+        return 2
+    if report.get("recommendation") in {"continue", "done"}:
+        return 0
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
@@ -294,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     report = health_report(argv[0])
     print(json.dumps(report, indent=2))
-    return 0
+    return _exit_code(report)
 
 
 if __name__ == "__main__":
