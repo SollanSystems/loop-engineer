@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/manifest@1",
   "title": "Loop Engineer Manifest @1",
+  "description": "Reconciled with the shipped contracts. Loosened from the original: a permissions entry may be a string OR an object (roadmap/v1.0 annotates each tier as `- read-only: <scope>`, which YAML parses to a mapping).",
   "type": "object",
   "required": ["schema", "loop", "policies", "terminal_states"],
   "properties": {
@@ -9,7 +10,7 @@
     "loop": { "type": "string", "minLength": 1 },
     "inputs": { "type": "object" },
     "outputs": { "type": "object" },
-    "permissions": { "type": "array", "items": { "type": "string" } },
+    "permissions": { "type": "array", "items": { "type": ["string", "object"] } },
     "approval_gates": { "type": "array", "items": { "type": "string" } },
     "policies": {
       "type": "object",

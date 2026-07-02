@@ -11,6 +11,22 @@ two things that separate a robust loop from one that can only *claim* completion
   * the 7 canonical terminal states — are they all reachable, or does the loop
     end in a silent "completed"?
 
+**False-completion defense is graded on invocation evidence, not claims.** A
+self-asserted ``false_completion: false`` flag, a ``verifier_gaming`` manifest
+key, or the phrase "false-completion" in prose earns *nothing* — those are
+assertions the loop makes about itself. The three grades are:
+
+  * **invoked** (full credit) — a ``scripts/verify-*`` gate invokes a holdout /
+    anti-cheat gate on an executable (non-comment) line, OR ``RUNLOG.md`` /
+    ``.loop/receipts/*.jsonl`` records an actual run (a ``holdout_gate`` verdict
+    / anti-cheat scan result).
+  * **wired** (partial credit, half the weight) — a gate script file exists
+    (``scripts/holdout_gate.py`` / ``anticheat_scan.py`` / ``anti_cheat.py``)
+    and is referenced from the contract's verify surface (SPEC / WORKFLOW /
+    verify-* scripts), but no run is recorded yet.
+  * **none** (zero) — only a self-asserted terminal flag, a prose mention, or an
+    unreferenced script file.
+
 It is **read-only** over the target: the scanned dir is treated as DATA only
 (plan-then-execute) — file content is matched against fixed signals, never
 interpreted as instructions. It writes nothing into the target.
@@ -85,13 +101,22 @@ _CHECKS = (
      "no independent verification (verify-* script / TASKS verify command) — success is self-asserted"),
     ("approval_gates", "approval gates on side-effects", 10,
      "no approval gates declared for side-effects (destructive / secret / production / money)"),
-    ("false_completion_defense", "false-completion defense (held-out / anti-cheat)", 14,
-     "no false-completion defense (held-out gate / anti-cheat scan) — overfitting to visible checks is undetectable"),
+    ("false_completion_defense", "false-completion defense", 14,
+     "no false-completion defense: no recorded holdout/anti-cheat invocation "
+     "(a self-asserted false_completion flag or prose mention earns no credit)"),
     ("plan_then_execute", "plan-then-execute for untrusted input", 10,
      "no plan-then-execute discipline for untrusted/web reads (prompt-injection surface)"),
 )
 
 _TERMINAL_WEIGHT = 40  # points for full 7-of-7 terminal-state coverage
+
+# False-completion-defense evidence signals. Gate scripts are matched by name;
+# their tokens (underscored, script-specific) discriminate a real invocation /
+# recorded run from mere prose ("anti-cheat", "false-completion").
+_GATE_TOKENS = ("holdout_gate", "anticheat_scan", "anti_cheat")
+_GATE_SCRIPTS = ("holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
+_GATE_RUN_WORDS = ("verdict", "scan", "result", "passed", "failed", "ran", "clean", "flagged")
+_FALSE_COMPLETION_PARTIAL_DIVISOR = 2  # wired-but-unrun earns half the weight
 
 
 def _read_text(path: Path) -> str:
@@ -143,7 +168,66 @@ def _terminal_states_covered_from_contract(loop: Path) -> int:
     return sum(1 for state in TERMINAL_STATES if state.lower() in contract_text)
 
 
-def _evaluate_contract_checks(loop: Path) -> dict[str, bool]:
+def _verify_scripts(workspace: Path) -> list[Path]:
+    scripts = workspace / "scripts"
+    if not scripts.is_dir():
+        return []
+    return sorted(p for p in scripts.glob("verify-*") if p.is_file())
+
+
+def _gate_invoked_in_verify(workspace: Path) -> bool:
+    """A verify-* script runs a holdout/anti-cheat gate on an executable line."""
+    for script in _verify_scripts(workspace):
+        for line in _read_text(script).splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if any(token in stripped for token in _GATE_TOKENS):
+                return True
+    return False
+
+
+def _gate_run_recorded(paths) -> bool:
+    """RUNLOG.md / .loop/receipts/*.jsonl record an actual gate run."""
+    texts = [_read_text(paths.runlog)]
+    receipts = paths.loop_dir / "receipts"
+    if receipts.is_dir():
+        texts.extend(_read_text(p) for p in sorted(receipts.glob("*.jsonl")))
+    for text in texts:
+        for line in text.splitlines():
+            low = line.lower()
+            if any(token in low for token in _GATE_TOKENS):
+                return True
+            if ("holdout" in low or "anticheat" in low or "anti-cheat" in low) and any(
+                word in low for word in _GATE_RUN_WORDS
+            ):
+                return True
+    return False
+
+
+def _gate_script_referenced(paths) -> bool:
+    """A gate script file exists and is named from the contract's verify surface."""
+    if not _script_exists(paths.workspace, *_GATE_SCRIPTS):
+        return False
+    surface = _read_text(paths.spec).lower() + "\n" + _read_text(paths.workflow).lower()
+    for script in _verify_scripts(paths.workspace):
+        surface += "\n" + _read_text(script).lower()
+    return any(token in surface for token in _GATE_TOKENS)
+
+
+def _false_completion_credit(paths) -> str:
+    """Graded false-completion-defense credit (see module docstring).
+
+    Returns "invoked" (full), "wired" (partial), or "none" (zero).
+    """
+    if _gate_invoked_in_verify(paths.workspace) or _gate_run_recorded(paths):
+        return "invoked"
+    if _gate_script_referenced(paths):
+        return "wired"
+    return "none"
+
+
+def _evaluate_contract_checks(loop: Path) -> dict[str, object]:
     """Evaluate the checklist against typed/owned contract artifacts.
 
     Positive credit comes from SPEC/WORKFLOW/TASKS/scripts/.loop, not broad
@@ -158,7 +242,6 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, bool]:
     spec = _read_text(paths.spec).lower() + "\n" + contract
     workflow = _read_text(paths.workflow).lower() + "\n" + contract
     tasks = _read_json_object(paths.tasks)
-    terminal = _read_json_object(paths.terminal)
     manifest = read_manifest(paths.manifest) or {}
 
     policies = manifest.get("policies") if isinstance(manifest, dict) else None
@@ -184,13 +267,6 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, bool]:
         or "approval_policy" in str(manifest).lower()
         or "approval_gates" in str(manifest).lower()
     )
-    has_false_completion = (
-        _script_exists(paths.workspace, "holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
-        or terminal.get("false_completion") is False
-        or "verifier_gaming" in str(manifest).lower()
-        or "false-completion" in workflow
-        or "false_completion" in workflow
-    )
     if manifest_declares_plan:
         has_plan_then_execute = policies.get("plan_then_execute") is True
     else:
@@ -200,9 +276,24 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, bool]:
         "defines_success": has_spec_criteria,
         "independent_verification": has_verify,
         "approval_gates": has_approval,
-        "false_completion_defense": has_false_completion,
+        "false_completion_defense": _false_completion_credit(paths),
         "plan_then_execute": has_plan_then_execute,
     }
+
+
+def _grade_false_completion(grade, weight, label, none_gap, present, gaps) -> int:
+    if grade == "invoked":
+        present.append(f"{label} (invoked)")
+        return weight
+    if grade == "wired":
+        present.append(f"{label} (wired, no recorded run)")
+        gaps.append(
+            "false-completion gate wired but never run — no recorded "
+            "holdout/anti-cheat invocation yet (RUNLOG.md / .loop/receipts)"
+        )
+        return round(weight / _FALSE_COMPLETION_PARTIAL_DIVISOR)
+    gaps.append(none_gap)
+    return 0
 
 
 def _verdict(score: int) -> str:
@@ -236,7 +327,11 @@ def inspect_loop(loop_dir: str) -> dict:
     gaps: list[str] = []
     score = 0
     for key, label, weight, gap_msg in _CHECKS:
-        if results[key]:
+        value = results[key]
+        if key == "false_completion_defense":
+            score += _grade_false_completion(value, weight, label, gap_msg, present, gaps)
+            continue
+        if value:
             score += weight
             present.append(label)
         else:

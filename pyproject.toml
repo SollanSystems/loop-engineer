@@ -12,11 +12,15 @@ license = { file = "LICENSE" }
 authors = [{ name = "Sollan Systems" }]
 keywords = ["agent", "loop", "agentic", "verification", "harness", "orchestration", "self-improvement", "claude-code", "eval", "repair"]
 
-# The core is pure-stdlib. PyYAML is an optional extra: when present it parses
-# the manifest; when absent, loop/contract.py falls back to a stdlib subset
-# parser. So `pip install -e .` pulls in zero third-party runtime dependencies.
+# The core is pure-stdlib. Two optional extras enrich validation when present:
+#   yaml     — PyYAML parses the manifest; absent, loop/contract.py falls back to
+#              a stdlib subset parser.
+#   schemas  — jsonschema runs real JSON-Schema validation against schemas/*.json;
+#              absent, loop/contract.py falls back to structural hand checks.
+# So `pip install -e .` pulls in zero third-party runtime dependencies.
 [project.optional-dependencies]
 yaml = ["pyyaml>=6"]
+schemas = ["jsonschema>=4"]
 
 [project.urls]
 Homepage = "https://github.com/SollanSystems/loop-engineer"

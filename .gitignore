@@ -11,6 +11,10 @@
 # Local session memory / private build narrative (not plugin content)
 memory/
 
+# Workbench dirs (review scratch + roadmap drafts; not plugin content)
+review/
+roadmap/
+
 # Python
 __pycache__/
 *.pyc

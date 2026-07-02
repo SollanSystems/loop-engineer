@@ -86,9 +86,11 @@ def test_test_file_named_like_a_gate_is_test_mutation_not_gate_tampering():
     assert out["clean"] is False
 
 
-def test_scanner_self_edit_is_not_gate_tampering():
-    # A diff that modifies the scanner's OWN source must not flag the scanner
-    # against its own correction (M1b self-exclusion).
+def test_scanner_self_edit_with_code_is_flagged_not_gate_tampering():
+    # A diff that modifies the scanner's OWN source with a code change is NOT
+    # graded as file-level gate-tampering (critical), but IS surfaced as a
+    # scanner_self_edit (high) requiring human review — the scanner must never
+    # certify a change to its own decision logic as clean.
     diff = (
         "--- a/scripts/anticheat_scan.py\n"
         "+++ b/scripts/anticheat_scan.py\n@@\n"
@@ -97,7 +99,8 @@ def test_scanner_self_edit_is_not_gate_tampering():
     out = acs.scan(diff_text=diff)
     sigs = {f["signature"] for f in out["findings"]}
     assert "gate-tampering" not in sigs
-    assert out["downgrade_to"] is None
+    assert "scanner_self_edit" in sigs
+    assert out["downgrade_to"] == "FailedUnverifiable"
 
 
 def test_real_gate_script_named_in_path_segment_still_critical():
@@ -277,8 +280,11 @@ def test_additive_vs_evisceration_self_edit():
     )
     evisc_sigs = {f["signature"] for f in acs.scan(diff_text=evisc)["findings"]}
     additive_out = acs.scan(diff_text=additive)
+    additive_sigs = {f["signature"] for f in additive_out["findings"]}
     assert "gate-evisceration" in evisc_sigs
-    assert additive_out["clean"] is True
+    # A net-add of gate entries does not trip the evisceration net-shrink check.
+    # (It IS a scanner_self_edit — every gate-collection edit gets human eyes.)
+    assert "gate-evisceration" not in additive_sigs
 
 
 def test_semantic_weakening_of_scanner_severity_mapping_is_critical():
@@ -309,3 +315,49 @@ def test_semantic_weakening_of_downgrade_mapping_is_critical():
     sigs = {f["signature"] for f in out["findings"]}
     assert "semantic-gate-weakening" in sigs
     assert out["downgrade_to"] == "FailedSafety"
+
+
+# --- D-cluster: scanner self-edit of its own gate-decision logic ---
+
+
+def test_self_neuter_of_gate_matcher_is_detected():
+    # The verified attack: a diff that neuters _is_gate_path by inserting
+    # `return False` as the first line of its body slips past the collection-
+    # shape and severity-mapping self-checks and returns clean:true. The diff-
+    # layer invariant must flag ANY non-cosmetic self-edit of the scanner.
+    neuter = (
+        "--- a/scripts/anticheat_scan.py\n"
+        "+++ b/scripts/anticheat_scan.py\n@@\n"
+        " def _is_gate_path(path, gate_paths):\n"
+        "+    return False\n"
+        "     if _basename(path) in _SELF_FILES:\n"
+    )
+    out = acs.scan(diff_text=neuter)
+    sigs = {f["signature"] for f in out["findings"]}
+    assert "scanner_self_edit" in sigs
+    assert out["clean"] is False
+    assert out["downgrade_to"] == "FailedUnverifiable"
+
+    # Cosmetic-only self-edit (a comment change) stays clean — legitimate doc
+    # touch-ups do not need human review.
+    cosmetic = (
+        "--- a/scripts/anticheat_scan.py\n"
+        "+++ b/scripts/anticheat_scan.py\n@@\n"
+        "-# old note about gate paths\n"
+        "+# clearer note about gate paths\n"
+    )
+    cosmetic_out = acs.scan(diff_text=cosmetic)
+    cosmetic_sigs = {f["signature"] for f in cosmetic_out["findings"]}
+    assert "scanner_self_edit" not in cosmetic_sigs
+    assert cosmetic_out["clean"] is True
+
+    # Path-variant: a full `diff --git a/.. b/..` header form is still detected.
+    prefixed = (
+        "diff --git a/scripts/anticheat_scan.py b/scripts/anticheat_scan.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/scripts/anticheat_scan.py\n"
+        "+++ b/scripts/anticheat_scan.py\n@@\n"
+        "+    return False\n"
+    )
+    prefixed_sigs = {f["signature"] for f in acs.scan(diff_text=prefixed)["findings"]}
+    assert "scanner_self_edit" in prefixed_sigs

@@ -53,6 +53,7 @@ python3 -m loop inspect examples/coverage-repair
 ```json
 {
   "ok": true,
+  "validation_mode": "structural-fallback",
   "schemas_checked": [
     "loop-engineer/manifest@1",
     "loop-engineer/state@1",
@@ -63,27 +64,39 @@ python3 -m loop inspect examples/coverage-repair
 }
 ```
 
+`validation_mode` reports what actually ran: the pure-stdlib structural checks by
+default, or real JSON-Schema validation against `schemas/*.json` when the
+optional `jsonschema` dependency is present (`pip install -e ".[schemas]"`), in
+which case it reads `"jsonschema"`.
+
 `inspect` is a static contract linter: it scores the loop contract's structure —
 what proof machinery is present and what is missing — without running the loop:
 
 ```json
 {
   "target": "examples/coverage-repair",
-  "score": 90,
+  "score": 76,
   "terminal_states_covered": 7,
   "present": [
     "defines verifiable success criteria",
     "independent verification",
     "approval gates on side-effects",
-    "false-completion defense (held-out / anti-cheat)",
     "all 7 terminal states reachable"
   ],
   "gaps": [
+    "no false-completion defense: no recorded holdout/anti-cheat invocation (a self-asserted false_completion flag or prose mention earns no credit)",
     "no plan-then-execute discipline for untrusted/web reads (prompt-injection surface)"
   ],
-  "verdict": "strong"
+  "verdict": "ok"
 }
 ```
+
+Note: `false-completion defense` credit is graded on *invocation evidence*, not
+self-assertion. This example declares `false_completion: false` and an anti-cheat
+policy in prose but records no holdout/anti-cheat run, so it earns no credit and
+the gap is flagged honestly — wire a `scripts/verify-*` gate that invokes a
+holdout / anti-cheat check (or record a run in `RUNLOG.md` / `.loop/receipts`) to
+earn it.
 
 Both commands accept either a workspace root or its `.loop/` directory.
 

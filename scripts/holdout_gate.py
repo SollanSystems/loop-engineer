@@ -54,15 +54,18 @@ def decide(visible: list[dict], holdout: list[dict]) -> dict:
     ``visible`` / ``holdout`` are lists of ``{"id": str, "passed": bool}``.
 
     Rules:
+      * visible empty                -> NotReady  (nothing was optimized against)
       * visible not all green        -> NotReady  (loop shouldn't certify yet)
       * holdout empty                -> NotReady  (cannot certify without holdout)
       * visible green + holdout green -> Succeeded
       * visible green + holdout red   -> FailedUnverifiable (false completion)
     """
-    passed_visible = _all_passed(visible)
+    passed_visible = bool(visible) and _all_passed(visible)
     passed_holdout = bool(holdout) and _all_passed(holdout)
 
-    if not passed_visible:
+    if not visible:
+        verdict, reason = NOT_READY, "no visible checks defined — cannot certify Succeeded"
+    elif not passed_visible:
         verdict, reason = NOT_READY, "visible gate not green — keep working or repair"
     elif not holdout:
         verdict, reason = NOT_READY, "no holdout checks defined — cannot certify Succeeded"

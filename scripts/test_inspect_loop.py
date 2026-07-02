@@ -42,6 +42,11 @@ def _make_good_loop(root: pathlib.Path) -> pathlib.Path:
     (loop / "scripts" / "holdout_gate.py").write_text(
         "# holdout / anti-cheat false-completion defense\n", encoding="utf-8"
     )
+    # Invocation evidence: a verify-* gate actually runs the holdout gate, so the
+    # defense earns FULL credit (the mere script file alone would earn nothing).
+    (loop / "scripts" / "verify-safety").write_text(
+        "#!/bin/sh\npython3 scripts/holdout_gate.py --strict\n", encoding="utf-8"
+    )
     return loop
 
 
@@ -217,6 +222,79 @@ def test_manifest_false_plan_then_execute_does_not_get_credit(tmp_path):
     # Assert
     assert "plan-then-execute" not in present_text
     assert "plan-then-execute" in gap_text
+
+
+# --- false-completion defense requires invocation evidence -----------------
+
+
+def test_bare_terminal_flag_earns_no_defense_credit(tmp_path):
+    # A self-asserted `false_completion: false` in terminal_state.json is a
+    # claim, not evidence — it must earn ZERO false-completion-defense credit.
+    loop = tmp_path / "flagonly"
+    (loop / ".loop").mkdir(parents=True)
+    (loop / ".loop" / "terminal_state.json").write_text(
+        json.dumps({"false_completion": False}), encoding="utf-8"
+    )
+
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    gaps = " ".join(report["gaps"]).lower()
+
+    assert "false-completion defense" not in present
+    assert "no recorded holdout/anti-cheat invocation" in gaps
+
+
+def test_defense_credit_requires_invocation_evidence(tmp_path):
+    # Graded credit: a recorded invocation earns FULL credit, a wired-but-unrun
+    # gate earns PARTIAL, and a bare prose mention earns ZERO. All three share an
+    # identical base (a verify-fast gate) so only the defense signal varies.
+    def _base(name):
+        d = tmp_path / name
+        (d / "scripts").mkdir(parents=True)
+        (d / "scripts" / "verify-fast").write_text("#!/bin/sh\n", encoding="utf-8")
+        return d
+
+    # FULL — a verify-* script invokes the holdout gate on an executable line.
+    full = _base("full")
+    (full / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+    (full / "scripts" / "verify-safety").write_text(
+        "#!/bin/sh\npython3 scripts/holdout_gate.py --strict\n", encoding="utf-8"
+    )
+    full_report = il.inspect_loop(str(full))
+
+    # WIRED — the gate script exists and is referenced from the verify surface,
+    # but nothing recorded a run of it.
+    wired = _base("wired")
+    (wired / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+    (wired / "WORKFLOW.md").write_text(
+        "# WORKFLOW\n## Anti-cheat\nHigh-value tasks are gated by "
+        "scripts/holdout_gate.py.\n",
+        encoding="utf-8",
+    )
+    wired_report = il.inspect_loop(str(wired))
+
+    # PROSE — only a prose mention plus a self-asserted terminal flag; no script.
+    prose = _base("prose")
+    (prose / ".loop").mkdir()
+    (prose / "WORKFLOW.md").write_text(
+        "# WORKFLOW\nWe have false-completion defense and anti-cheat discipline.\n",
+        encoding="utf-8",
+    )
+    (prose / ".loop" / "terminal_state.json").write_text(
+        json.dumps({"false_completion": False}), encoding="utf-8"
+    )
+    prose_report = il.inspect_loop(str(prose))
+
+    full_present = " ".join(full_report["present"]).lower()
+    wired_present = " ".join(wired_report["present"]).lower()
+    prose_present = " ".join(prose_report["present"]).lower()
+
+    assert "false-completion defense (invoked)" in full_present
+    assert "false-completion defense (wired, no recorded run)" in wired_present
+    assert "false-completion defense" not in prose_present
+
+    # Graded points: full > wired > zero (the only varying signal is defense).
+    assert full_report["score"] > wired_report["score"] > prose_report["score"]
 
 
 # --- dogfood regressions (inspector on 9 real loops, v0.3.4) ---------------
