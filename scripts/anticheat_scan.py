@@ -293,6 +293,59 @@ def _semantic_gate_weakening_findings(diff_text: str) -> list[dict]:
     return findings
 
 
+def _is_cosmetic_change(content: str) -> bool:
+    """Whether a changed scanner line carries no decision logic.
+
+    Only blank lines and ``#`` comments are cosmetic. Docstring/prose lines are
+    NOT special-cased: telling a docstring body from executable code in a diff
+    alone is unreliable, and a triple-quote-state heuristic would itself be a
+    bypass vector (a real code line like ``SEP = '\"\"\"'`` could toggle the
+    state to hide a following ``return``). So the scanner conservatively treats
+    any non-blank, non-comment change as code — a false-positive on a
+    docstring-only touch-up is acceptable, it merely asks for human review.
+    """
+    s = content.strip()
+    return (not s) or s.startswith("#")
+
+
+def _scanner_self_edit_findings(diff_text: str) -> list[dict]:
+    """Flag any self-edit to anticheat_scan.py that changes a code line (P1.6).
+
+    The collection-shape and severity-mapping self-checks only catch two known
+    shapes; a diff that rewrites the decision LOGIC itself (e.g. inserting
+    ``return False`` into ``_is_gate_path``) slips past them and certifies clean.
+    The diff-layer invariant closes this: any hunk touching the scanner's own
+    source that adds/removes a non-comment, non-blank line is a finding.
+    Cosmetic-only edits stay clean; a false-positive on genuine scanner
+    maintenance is intended — maintenance should get human eyes.
+    """
+    in_self = False
+    pending_minus = None
+    for line in diff_text.splitlines():
+        m = _MINUS_HDR_RE.match(line)
+        if m:
+            pending_minus = m.group("a")
+            continue
+        m = _PLUS_HDR_RE.match(line)
+        if m:
+            target = m.group("b") or pending_minus
+            in_self = bool(target) and _basename(target) == "anticheat_scan.py"
+            pending_minus = None
+            continue
+        if not in_self:
+            continue
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if (line.startswith("+") or line.startswith("-")) and not _is_cosmetic_change(line[1:]):
+            return [{
+                "signature": "scanner_self_edit",
+                "severity": "high",
+                "message": "self-edits to the scanner require human review",
+                "evidence": line[1:].strip()[:120],
+            }]
+    return []
+
+
 def scan(
     diff_text: str = "",
     changed_files: list[str] | None = None,
@@ -337,6 +390,7 @@ def scan(
 
     findings.extend(_gate_evisceration_findings(diff_text))
     findings.extend(_semantic_gate_weakening_findings(diff_text))
+    findings.extend(_scanner_self_edit_findings(diff_text))
 
     for entry in trajectory:
         if _ANSWER_PATH_RE.search(str(entry)):
