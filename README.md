@@ -53,6 +53,7 @@ python3 -m loop inspect examples/coverage-repair
 ```json
 {
   "ok": true,
+  "validation_mode": "structural-fallback",
   "schemas_checked": [
     "loop-engineer/manifest@1",
     "loop-engineer/state@1",
@@ -62,6 +63,11 @@ python3 -m loop inspect examples/coverage-repair
   "issues": []
 }
 ```
+
+`validation_mode` reports what actually ran: the pure-stdlib structural checks by
+default, or real JSON-Schema validation against `schemas/*.json` when the
+optional `jsonschema` dependency is present (`pip install -e ".[schemas]"`), in
+which case it reads `"jsonschema"`.
 
 `inspect` is a static contract linter: it scores the loop contract's structure —
 what proof machinery is present and what is missing — without running the loop:

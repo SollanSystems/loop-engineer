@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/terminal@1",
   "title": "Loop Engineer Terminal State @1",
+  "description": "Reconciled with loop/contract.py and the shipped contracts. Loosened from the original: iteration_id, reason and lessons_ref moved from required to optional because a real terminal (roadmap/v1.0) records the equivalent under other keys — the load-bearing cross-field rule (a Succeeded terminal needs false_completion=false and a met criterion) is enforced in code, not the required list. reason keeps minLength:1 so, when present, it must be non-empty.",
   "type": "object",
-  "required": ["schema", "state", "iteration_id", "criteria_met", "evidence", "false_completion", "reason", "lessons_ref"],
+  "required": ["schema", "state", "criteria_met", "evidence", "false_completion"],
   "properties": {
     "schema": { "const": "loop-engineer/terminal@1" },
     "state": { "enum": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"] },

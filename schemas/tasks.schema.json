@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/tasks@1",
   "title": "Loop Engineer Tasks @1",
+  "description": "Reconciled with the shipped contracts. Loosened from the original: a task's evidence may be a string, a null, OR an array of strings (roadmap/v1.0 lists multiple evidence paths per task). Cross-task rules JSON Schema cannot express (id uniqueness, evidence-before-done) are enforced in loop/contract.py.",
   "type": "object",
   "required": ["schema", "tasks"],
   "properties": {
@@ -19,7 +20,7 @@
           "verify": { "type": "string", "minLength": 1 },
           "depends_on": { "type": "array", "items": { "type": "string" } },
           "attempts": { "type": "integer", "minimum": 0 },
-          "evidence": { "type": ["string", "null"] }
+          "evidence": { "type": ["string", "array", "null"], "items": { "type": "string" } }
         },
         "additionalProperties": true
       }
