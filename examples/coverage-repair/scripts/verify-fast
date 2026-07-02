@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# verify-fast — cheap per-iteration gate: criterion 2 (typed input validation).
+# Runs the visible unit tests for the toy target (../target). Pure stdlib; ~0.1s.
+set -euo pipefail
+EX="$(cd "$(dirname "$0")/.." && pwd)"
+
+( cd "$EX/target" && python3 -m unittest -v test_visible )
+echo "verify-fast: PASS (criterion 2 — parse_request rejects malformed input)"
