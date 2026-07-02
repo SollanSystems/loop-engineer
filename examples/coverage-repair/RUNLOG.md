@@ -72,4 +72,20 @@ cases are promoted into the permanent regression set.
 
 ---
 
+## Reproducible verification (not an iteration)
+
+The terminal `Succeeded` above is reproducible, not narrated. `scripts/run-example` re-runs the
+real held-out gate `scripts/holdout_gate.py` over the toy target in `target/` and records the
+result:
+
+- **gate:** `scripts/holdout_gate.py target/manifest.json` → verdict `Succeeded`; both the visible
+  suite and the held-out probes passed; `false_completion: false`.
+- **evidence:** `.loop/artifacts/holdout-verdict.json` (verdict JSON) + `.loop/artifacts/holdout-run.txt`
+  (captured transcript).
+- **cross-check:** `run-example` fails nonzero unless the committed `terminal_state.json`
+  `false_completion: false` is backed by that independent `Succeeded` verdict.
+
+This is why `python3 -m loop inspect examples/coverage-repair` grades false-completion defense as
+*invoked* — a real holdout_gate run, not a self-asserted flag.
+
 <!-- Add new iterations above this line. Do not edit past entries. -->
