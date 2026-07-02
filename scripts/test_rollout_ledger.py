@@ -101,3 +101,59 @@ def test_summarize_of_empty_ledger_is_zero(tmp_path):
     # Assert
     assert summary["count"] == 0
     assert summary["repair_productivity"] == 0.0
+
+
+# --- M4-CLI item 9: malformed ledger lines are tolerated, not fatal ----------
+
+
+def test_read_skips_malformed_line_without_crashing(tmp_path):
+    ledger = tmp_path / "rollout.jsonl"
+    rollout_ledger.append(_candidate(id="cand-1", productive=True), ledger)
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write("this is not json\n")
+    rollout_ledger.append(_candidate(id="cand-2", productive=False), ledger)
+
+    # Must not raise on the corrupt middle line.
+    records = rollout_ledger.read(ledger)
+
+    ids = [r["id"] for r in records]
+    assert ids == ["cand-1", "cand-2"]
+
+
+def test_read_skips_valid_json_that_is_not_an_object(tmp_path):
+    ledger = tmp_path / "rollout.jsonl"
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write("[1, 2, 3]\n")  # valid JSON, but not a ledger record object
+
+    records = rollout_ledger.read(ledger)
+
+    assert records == []
+
+
+def test_read_warns_to_stderr_on_malformed_line(tmp_path, capsys):
+    ledger = tmp_path / "rollout.jsonl"
+    rollout_ledger.append(_candidate(id="cand-1"), ledger)
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write("{broken\n")
+
+    rollout_ledger.read(ledger)
+
+    err = capsys.readouterr().err
+    assert err.strip(), "a malformed line must warn to stderr"
+    assert "malformed" in err.lower() or "skip" in err.lower()
+
+
+def test_summarize_counts_malformed_lines(tmp_path):
+    ledger = tmp_path / "rollout.jsonl"
+    rollout_ledger.append(_candidate(id="cand-1", productive=True), ledger)
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write("garbage line\n")
+        fh.write("also not json {,,}\n")
+    rollout_ledger.append(_candidate(id="cand-2", productive=True), ledger)
+
+    summary = rollout_ledger.summarize(ledger)
+
+    # Valid candidates are summarized; malformed lines are counted separately.
+    assert summary["count"] == 2
+    assert summary["malformed"] == 2
+    assert summary["repair_productivity"] == 1.0
