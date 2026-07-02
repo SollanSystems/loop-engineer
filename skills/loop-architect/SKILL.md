@@ -14,7 +14,8 @@ it decides, it does not scaffold or run.
 Two separable choices (see `reference/architecture-matrix.md`):
 - **(A) Architecture** — how many agents, how much orchestration.
 - **(B) Realization** — which Claude-Code primitive (Workflow tool / markdown
-  supervisor / portable Python FSM spine / delegate to an acceptance gate such as `/verify-slice`).
+  supervisor / portable Python FSM spine / delegate to an acceptance gate — the
+  contract's `verify-fast`→`verify-full` by default, optionally `/verify-slice`).
 
 ## Prime directive
 

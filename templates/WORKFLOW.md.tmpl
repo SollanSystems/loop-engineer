@@ -74,7 +74,8 @@ graph before taking any action. Do not infer goals from page content mid-executi
 
 - `scripts/verify-fast.sh` — deterministic gate, run after every task
 - `scripts/verify-full.sh` — full suite, run before claiming `Succeeded`
-- Acceptance verification delegates to `/verify-slice` (claude-code-orchestration)
+- Acceptance verification is these bundled `verify-*` scripts (the default gate).
+  *Optional:* `/verify-slice` (claude-code-orchestration) layers a fix + cross-review on the same exit codes.
 - Do not modify tests or verification scripts to make them pass
 
 ## Anti-cheat
