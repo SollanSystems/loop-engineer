@@ -4,6 +4,16 @@ All notable changes to `loop-engineer` are documented here.
 
 ---
 
+## Errata
+
+- **2026-06-30 — receipts claim corrected (M1 credibility slice).** The 0.3.4
+  *Documentation* note below overstated `examples/coverage-repair`: it implied the
+  frozen example ships a receipts trail. In reality a live run appends receipts to
+  `.loop/receipts/*.jsonl`, but this example ships the contract artifacts only —
+  `find examples/coverage-repair -iname '*receipt*'` returns nothing. The example's
+  `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
+  history is left intact.
+
 ## 0.3.4 — 2026-06-29
 
 Dogfood-driven hardening: ran `loop-inspector` + `loop-runtime-monitor` against 9 real
