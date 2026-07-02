@@ -5,6 +5,8 @@ description: "Watch a RUNNING agent loop from outside and call the intervention 
 
 # loop-runtime-monitor — watch the run, call the intervention
 
+> **Base directory.** This skill's own `reference/patterns.md` sits in this folder. `reference/model-routing.md` and the bundled `scripts/runtime_monitor.py` are **plugin-root-relative** (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-runtime-monitor/` folder). The `.loop/…` state and `RUNLOG.md` it reads belong to the *watched loop*, not this plugin.
+
 The **observer**. While [[loop-run]] advances the state machine and [[loop-repair]] reacts to a red gate, this skill stands *outside* an in-flight run and answers one question: **is the loop still making progress, or is it spinning?** It reads the loop's externalized state — `.loop/state.json` + `RUNLOG.md` — recomputes progress from evidence (never from the agent's prose), and when a run has gone bad it surfaces a single intervention recommendation. It is read-only over the run; it recommends, it never mutates.
 
 This is the in-flight complement to the post-hoc [[loop-flywheel]] (which mines a *finished* run's history) and the gap-scoring loop-inspector (which audits a loop's *contract*). loop-runtime-monitor watches the run *as it happens*, so a stuck run gets caught at iteration 4 instead of at the budget wall.

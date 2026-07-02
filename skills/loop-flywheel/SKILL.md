@@ -5,6 +5,8 @@ description: "Turn a loop's own run history into compounding improvement — min
 
 # loop-flywheel — the loop that improves the loop
 
+> **Base directory.** `reference/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/reference/…`, i.e. `../../reference/…` from this `skills/loop-flywheel/` folder), where the shared docs ship. `EVALS/…` and `.loop/…` are inside the *improved loop's* own repo, not this plugin.
+
 A loop that only runs gets no better. `loop-flywheel` is the **improvement engine**: it reads what a loop has already done (its `RUNLOG.md`, `EVALS/traces/`, and `.loop/receipts/*.jsonl`) and turns that history into three durable outputs — **new eval cases**, **harness-change proposals**, and **compacted memory**. It is the reflect→see step of the self-learning flywheel applied to an agent loop itself.
 
 It owns no gate. The deterministic and rubric layers live in [[loop-evals]] and `reference/eval-suite.md`; this skill *feeds* that suite (mines failures into it) and *watches* its two first-class metrics over time. Read [[loop-evals]] first if you are standing the suite up; come here once a loop has run ≥2 iterations and you want it to compound.

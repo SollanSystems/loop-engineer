@@ -1,5 +1,7 @@
 # loop-runtime-monitor — detection heuristics, thresholds, and the intervention ladder
 
+> **Base directory.** The bundled `scripts/runtime_monitor.py` named below is **plugin-root-relative** (`${CLAUDE_PLUGIN_ROOT}/scripts/…`, i.e. `../../../scripts/…` from this `skills/loop-runtime-monitor/reference/` folder). The `.loop/` state and `RUNLOG.md` it reads belong to the *watched loop*, not this plugin.
+
 The detail behind `SKILL.md`. This file is the spec the runnable check (`scripts/runtime_monitor.py`) implements: the exact signals, their thresholds, the evidence each one emits, and the rung each maps to. Tune the thresholds here; keep them conservative — a monitor that cries wolf trains the operator to ignore it.
 
 ## Inputs

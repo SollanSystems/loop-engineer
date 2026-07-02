@@ -5,6 +5,8 @@ description: "Scaffold the repo-OS operating contract for an agent loop — SPEC
 
 # loop-contract — scaffold the repo-OS operating contract
 
+> **Base directory.** `reference/…` and `templates/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-contract/` folder), where the shared docs and scaffold templates ship. The `scripts/verify-*` you scaffold land in the *new loop's* own workspace, not this plugin.
+
 Turn an architecture decision into the **on-disk operating contract** an agent loop reads its
 truth from every turn. State lives in files, not chat context, so the loop survives compaction,
 a crashed session, and even a different engine. This is the externalized-state ("code as agent

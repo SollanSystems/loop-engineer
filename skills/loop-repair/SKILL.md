@@ -5,6 +5,8 @@ description: "Patch-and-repair loop for a failing agent run — use when a loop 
 
 # loop-repair
 
+> **Base directory.** `reference/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/reference/…`, i.e. `../../reference/…` from this `skills/loop-repair/` folder), where the shared docs ship. The `scripts/verify-*` gate and `.loop/…` are inside the *operated loop's* workspace, not this plugin.
+
 The repair lane. When verification disagrees with the work, **this skill is what reacts — bounded, recorded, and capped.** It does not own running the loop ([[loop-run]] does) or defining the checks ([[loop-evals]] does); it owns the disciplined response to a *failing* check so the loop converges instead of thrashing. Every rule here is downstream of the escalation ladder, the repair cap, and the verifier-gaming guard in `reference/safety-and-approvals.md` — read that for the full safety model; this is the operating procedure.
 
 **When this fires:** a deterministic check (test / lint / typecheck / schema) failed, the rubric judge fell below threshold, or [[loop-run]] reached the `repair` state. Inputs: the failing `verification_bundle`, the best prior `.loop/state.json`, and the diff since that best state. Output: a structured **repair record** (below) + an updated state, then control back to [[loop-run]] to re-verify.

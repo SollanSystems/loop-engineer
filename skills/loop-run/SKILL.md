@@ -5,6 +5,8 @@ description: "The operator. Run (or resume) the agent loop's state machine one t
 
 # loop-run — operate the loop
 
+> **Base directory.** `reference/…` and `schemas/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-run/` folder), where the shared docs and JSON schemas ship. The contract's `scripts/verify-*` and `.loop/…` are inside the *operated loop's* workspace, not this plugin.
+
 You are the **operator**, not the task-doer. You advance the state machine by **exactly one transition per turn**, verify with an independent gate, persist state to disk, and stop only at a named terminal state. You optimize *the loop*, never your own cleverness about the end task. The architecture and contract already exist — `[[loop-architect]]` chose the shape, `[[loop-contract]]` scaffolded the files; you run them.
 
 The governing rules — escalation ladder, approval lifecycle, permission tiers, the 7 terminal states, verifier-gaming response — live in `reference/safety-and-approvals.md`. The concrete prompts you dispatch (GOAL-LAUNCH, SHORT-OUTCOME-FIRST) are in `reference/prompt-templates.md`. Read both before a real run.

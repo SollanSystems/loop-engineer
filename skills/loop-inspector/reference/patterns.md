@@ -1,5 +1,10 @@
 # loop-inspector — inspection checklist, scoring rubric, and foreign-harness reading
 
+> **Base directory.** The bundled `scripts/inspect_loop.py` and `reference/repo-os-contract.md`
+> named below are **plugin-root-relative** (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../../` from this
+> `skills/loop-inspector/reference/` folder). The `scripts/verify-*` / `holdout_gate.py` /
+> `anticheat_scan.py` names are *signals read from the inspected loop*, not files in this plugin.
+
 This is the depth behind [[loop-inspector]]: the exact checklist, how the score is
 computed, and how to read a loop that does **not** use this suite's filenames. The
 runnable core is `scripts/inspect_loop.py`; this file is the rubric it encodes.

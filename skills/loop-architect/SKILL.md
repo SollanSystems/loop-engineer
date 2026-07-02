@@ -5,6 +5,8 @@ description: "Classify an agent-loop task and choose its architecture + realizat
 
 # loop-architect
 
+> **Base directory.** `reference/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/reference/…`, i.e. `../../reference/…` from this `skills/loop-architect/` folder), where the shared docs ship, not inside this skill's own folder. (The `scripts/verify-*` gate named below is the operated loop's own workspace script.)
+
 The **brain** of the [[loop-engineer]] suite. It does **not** do the end task — it
 turns an underspecified objective into a decision: *what shape should this loop be,
 and what Claude-Code primitive physically runs it?* The output is an **architecture

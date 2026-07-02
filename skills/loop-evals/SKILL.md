@@ -5,6 +5,8 @@ description: "Design the evaluation harness for an agent loop — the proof laye
 
 # loop-evals — design the harness that proves the loop
 
+> **Base directory.** `reference/…` and this plugin's bundled tools (`scripts/holdout_gate.py`, `scripts/anticheat_scan.py`) are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-evals/` folder). The `scripts/verify-*` gate and the `EVALS/…` tree live inside the *graded loop's* own repo, not this plugin.
+
 A loop without measurement is a loop that *claims* success. This skill designs the evaluation harness for a loop — what to check, in what order, with which metric — so a "Succeeded" terminal state is backed by evidence, not narration. It is the **designer** of the suite; `[[loop-run]]` is the caller that runs the gate each iteration, and `[[loop-flywheel]]` feeds real failures back into it.
 
 **In → out.** In: the loop's `SPEC.md` (success criteria, constraints, evidence rules) + its artifacts. Out: `scripts/verify-*` skeletons, an `EVALS/{dataset,rubrics,regressions,traces}/` tree, and the metric definitions — all committed inside the loop's own repo. This skill is read-only/advisory toward the loop it grades; it authors the harness, it does not run the task.

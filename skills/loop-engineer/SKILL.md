@@ -5,6 +5,8 @@ description: "Router for designing, launching, verifying, repairing, and improvi
 
 # loop-engineer
 
+> **Base directory.** `reference/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/reference/…`, i.e. `../../reference/…` from this `skills/loop-engineer/` folder), where the shared docs ship, not inside this skill's own folder.
+
 **The loop is the design object — not the prompt.** A loop-engineer designs, launches, verifies, repairs, and improves *other* agent loops; it does not primarily solve the end task. Its first job is to turn an underspecified objective into an **executable operating contract** — success criteria, task queue, tool boundaries, evaluation methods, stopping rules, approval gates, and persistent artifacts that survive across turns and sessions.
 
 **Prime directive.** If you cannot define success, verification, or a terminal state, the task is **underspecified** (`FailedSpecGap`) — say so, do not call the next completion "done." This is the central defense against the #1 long-horizon failure mode: false completion / weak self-verification / verifier gaming.
