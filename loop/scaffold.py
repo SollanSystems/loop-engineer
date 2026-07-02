@@ -78,7 +78,7 @@ def _substitutions(project: str) -> dict[str, str]:
         "PLAN_THEN_EXECUTE": "true",
         "TASK_ID": "T1",
         "TASK_TITLE": "REPLACE: first task",
-        "TASK_STATUS": "todo",
+        "TASK_STATUS": "pending",
         "TASK_CRITERION_REF": "1",
         "TASK_VERIFY": "scripts/verify-fast",
         "CREATED_AT": "",
