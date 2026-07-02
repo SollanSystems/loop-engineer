@@ -66,9 +66,10 @@ When a terminal state is reached, write `.loop/terminal_state.json` and stop. Ne
 ## Dispatch (model-routing HARD CONTRACT)
 
 Every dispatched agent / Workflow `agent()` names an explicit `model:` — read→`haiku`,
-reason→`sonnet`, write→`opus`, orchestrate→main loop. Receipts land in
-`.loop/receipts/*.jsonl`; `/routing` modes are honored. In this run the coverage status
-read used `haiku` and the test-writing repair used `opus` (see `RUNLOG.md`).
+reason→`sonnet`, write→`opus`, orchestrate→main loop. A live run appends receipts to
+`.loop/receipts/*.jsonl` and honors `/routing` modes; this frozen example ships the
+contract artifacts, not a receipts trail. The `model:` tiers used here (coverage read →
+`haiku`, test-writing repair → `opus`) are recorded in `RUNLOG.md`.
 
 ## Verification
 
