@@ -46,6 +46,11 @@ outputs / permissions / approval_gates / terminal_states) and an **iteration-0 R
 recording the pre-execution reflection. Each artifact has exactly one owner concern — no file
 carries two jobs (rationale: `reference/repo-os-contract.md` §9).
 
+The two deterministic gates `verify-fast` and `verify-full` scaffold as runnable stubs; the
+three deeper proof-surface scripts (`verify-safety`, `judge-rubric`, `extract-trace-metrics`)
+ship in `templates/` as stubs you copy into `scripts/` and wire as the SPEC criteria earn them —
+`[[loop-evals]]` owns that proof logic, not this spoke.
+
 ## How to fill each template
 
 Map the ADR + goal onto the templates in `templates/` (the `{{PLACEHOLDER}}` tokens are the fill

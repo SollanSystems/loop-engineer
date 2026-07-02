@@ -21,14 +21,14 @@ bash "$fast" "$WORKSPACE"
 # --- GATE 3: coverage threshold ---
 # e.g. uv run pytest --cov=src --cov-fail-under=80
 
-# --- GATE 4: artifact quality check ---
-# e.g. python3 scripts/judge-rubric.py --artifacts artifacts/ --rubric EVALS/rubrics/main.md
+# --- GATE 4: artifact quality check (advisory — never blocks) ---
+# e.g. bash scripts/judge-rubric "$WORKSPACE" EVALS/rubrics/main.md
 
 # --- GATE 5: secret scan ---
 # e.g. grep -rE '(api_key|password|secret)\s*=' src/ && exit 1 || true
 
-# --- GATE 6: regression suite ---
-# e.g. python3 scripts/extract-trace-metrics.py EVALS/traces/ | python3 scripts/verify-safety.py
+# --- GATE 6: regression + safety suite ---
+# e.g. bash scripts/extract-trace-metrics "$WORKSPACE" && bash scripts/verify-safety "$WORKSPACE"
 
 echo "[verify-full] PASS — all gates green"
 exit 0
