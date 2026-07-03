@@ -22,6 +22,14 @@ keywords = ["agent", "loop", "agentic", "verification", "harness", "orchestratio
 yaml = ["pyyaml>=6"]
 schemas = ["jsonschema>=4"]
 
+# Console entry point. `loop.__main__:main` resolves the bundled scripts/ dir
+# relative to its own __file__, so this is EDITABLE-INSTALL ONLY: `pip install -e .`
+# keeps loop/ pointing at the repo (where scripts/ lives). A non-editable wheel
+# does not ship scripts/, so `inspect`/`metrics` would not resolve — see the
+# [tool.hatch.build.targets.wheel] note below.
+[project.scripts]
+loop = "loop.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/SollanSystems/loop-engineer"
 Repository = "https://github.com/SollanSystems/loop-engineer"
