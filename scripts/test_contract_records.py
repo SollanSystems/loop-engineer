@@ -92,6 +92,31 @@ def test_present_valid_receipt_jsonl_passes(tmp_path):
     assert _optional_issues(tmp_path) == []
 
 
+def test_schemas_checked_reports_repair_when_a_repair_record_is_validated():
+    # P3: schemas_checked must not under-report — a loop with repair records shows
+    # the repair schema id, not just the 4 core contract schemas.
+    report = validate_contract(ROOT / "examples" / "coverage-repair")
+    assert "loop-engineer/repair@1" in report["schemas_checked"]
+    assert report["schemas_checked"][:4] == [
+        "loop-engineer/manifest@1",
+        "loop-engineer/state@1",
+        "loop-engineer/tasks@1",
+        "loop-engineer/terminal@1",
+    ]
+
+
+def test_schemas_checked_omits_record_schemas_when_no_record_files(tmp_path):
+    (tmp_path / ".loop").mkdir()
+    (tmp_path / "RUNLOG.md").write_text("# RUNLOG\n", encoding="utf-8")
+    report = validate_contract(tmp_path)
+    assert report["schemas_checked"] == [
+        "loop-engineer/manifest@1",
+        "loop-engineer/state@1",
+        "loop-engineer/tasks@1",
+        "loop-engineer/terminal@1",
+    ]
+
+
 def test_flagship_example_contract_validates_clean_with_repair_record():
     report = validate_contract(ROOT / "examples" / "coverage-repair")
     assert report["ok"] is True, report["issues"]

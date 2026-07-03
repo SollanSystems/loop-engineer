@@ -300,6 +300,14 @@ _RECORD_SCHEMA_FILES = {
     "receipt": "receipt.schema.json",
 }
 
+# The $id each record schema publishes, reported under schemas_checked when the
+# corresponding record files were present and validated (deterministic order).
+_RECORD_SCHEMA_IDS = (
+    ("repair", "loop-engineer/repair@1"),
+    ("rollout", "loop-engineer/rollout@1"),
+    ("receipt", "loop-engineer/receipt@1"),
+)
+
 
 def _load_schema_file(filename: str) -> dict[str, Any]:
     return json.loads((_schemas_dir() / filename).read_text(encoding="utf-8"))
@@ -351,19 +359,27 @@ def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) 
         _validate_record(data, schema_key, path, mode, issues)
 
 
-def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) -> None:
+def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) -> set[str]:
+    """Validate record files that are present; return the set of record schema
+    keys actually checked (``repair``/``rollout``/``receipt``) so ``doctor`` can
+    report them under ``schemas_checked`` instead of under-counting its coverage."""
+    checked: set[str] = set()
     repair_dir = paths.loop_dir / "repair"
     if repair_dir.is_dir():
         for record_path in sorted(repair_dir.glob("*.json")):
             data = _read_json(record_path, issues)
             if data is not None:
                 _validate_record(data, "repair", record_path, mode, issues)
+                checked.add("repair")
     for ledger_path in sorted(paths.loop_dir.glob("*.jsonl")):
         _validate_jsonl(ledger_path, "rollout", mode, issues)
+        checked.add("rollout")
     receipts_dir = paths.loop_dir / "receipts"
     if receipts_dir.is_dir():
         for receipt_path in sorted(receipts_dir.glob("*.jsonl")):
             _validate_jsonl(receipt_path, "receipt", mode, issues)
+            checked.add("receipt")
+    return checked
 
 
 def validate_contract(target: str | Path) -> dict[str, Any]:
@@ -404,13 +420,17 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     if not paths.runlog.exists():
         issues.append(ContractIssue("missing_file", "missing RUNLOG.md", paths.runlog))
     _check_stub_verify_scripts(paths, issues)
-    _validate_optional_records(paths, mode, issues)
+    records_checked = _validate_optional_records(paths, mode, issues)
+
+    schemas_checked = list(SCHEMA_IDS) + [
+        schema_id for key, schema_id in _RECORD_SCHEMA_IDS if key in records_checked
+    ]
 
     return {
         "ok": not issues,
         "paths": paths.to_json(),
         "validation_mode": mode,
-        "schemas_checked": list(SCHEMA_IDS),
+        "schemas_checked": schemas_checked,
         "issues": issues,
     }
 
