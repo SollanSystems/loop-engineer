@@ -63,6 +63,22 @@ def _repair_record(before: float, after: float, productive: bool) -> dict:
     }
 
 
+def _holdout_verdict(*, false_completion: bool = False) -> dict:
+    """A structurally-valid held-out verdict in ``holdout_gate.decide`` shape —
+    per-check visible/holdout arrays plus flags re-derivable from them."""
+    holdout_passed = not false_completion
+    return {
+        "verdict": "FailedUnverifiable" if false_completion else "Succeeded",
+        "reason": "fixture",
+        "passed_visible": True,
+        "passed_holdout": holdout_passed,
+        "false_completion": false_completion,
+        "visible": [{"id": "unit", "passed": True, "returncode": 0}],
+        "holdout": [{"id": "probe", "passed": holdout_passed,
+                     "returncode": 0 if holdout_passed else 1}],
+    }
+
+
 # --- recheck_productive (AC2) -------------------------------------------------
 
 
@@ -183,8 +199,7 @@ def test_evidence_backed_true_when_holdout_verdict_present(tmp_path):
         tmp_path,
         runlog=_RUNLOG_ONE_CLAIM,
         verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
-        gate_verdict={"verdict": "Succeeded", "passed_visible": True,
-                      "passed_holdout": True, "false_completion": False},
+        gate_verdict=_holdout_verdict(),
     )
     sc = metrics.compute_metrics(ws)
     assert sc["evidence_backed"] is True
@@ -239,8 +254,7 @@ def test_scorecard_is_byte_identical_across_runs(tmp_path):
         runlog=_RUNLOG_ONE_CLAIM,
         verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
         repair={"iter-001.json": prod},
-        gate_verdict={"verdict": "Succeeded", "passed_visible": True,
-                      "passed_holdout": True, "false_completion": False},
+        gate_verdict=_holdout_verdict(),
         receipts=[{"schema": "loop-engineer/receipt@1", "iteration_id": 1,
                    "role": "write", "model": "opus", "outcome": "ok", "cost_usd": 0.4}],
     )
@@ -282,8 +296,7 @@ def test_baseline_refuses_when_a_record_is_rejected(tmp_path):
         runlog=_RUNLOG_ONE_CLAIM,
         verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
         repair={"iter-001.json": liar},
-        gate_verdict={"verdict": "Succeeded", "passed_visible": True,
-                      "passed_holdout": True, "false_completion": False},
+        gate_verdict=_holdout_verdict(),
     )
     ok, _sc, reasons = metrics.build_baseline(ws, "ws")
     assert ok is False
@@ -295,10 +308,12 @@ def test_baseline_writes_scorecard_over_gate_backed_run(tmp_path):
     ws = _make_loop(
         tmp_path,
         runlog=_RUNLOG_ONE_CLAIM,
-        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+        # The claim's own green evidence (0.8) plus a red pre-repair bundle (0.5)
+        # anchor the repair record's before/after scores to real verify evidence.
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 0.8},
+                "verify-before.json": {"task": "A", "outcome": "FAIL", "score": 0.5}},
         repair={"iter-001.json": prod},
-        gate_verdict={"verdict": "Succeeded", "passed_visible": True,
-                      "passed_holdout": True, "false_completion": False},
+        gate_verdict=_holdout_verdict(),
     )
     out = tmp_path / "docs" / "metrics-baseline.json"
     rc = metrics.write_baseline(ws, out, loop_label="ws")
@@ -318,4 +333,206 @@ def test_metrics_on_flagship_example_is_clean_and_evidence_backed():
     assert sc["repair_productivity"] == 1.0
     assert sc["evidence_backed"] is True
     assert sc["provenance"]["rejected_records"] == []
+    assert sc["provenance"]["unanchored_records"] == []
+    assert sc["provenance"]["unrecognized_outcomes"] == []
     assert sc["provenance"]["fcr_methods_agree"] is True
+
+
+# --- evidence_backed honesty (P1/P2): comment/prose/stub are NOT invocations ---
+
+
+def test_runlog_prose_mention_of_gate_is_not_evidence(tmp_path):
+    # Exploit A: a bare RUNLOG mention (even a negation) is not a gate invocation.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n"
+        "- note: we never ran holdout_gate.py here; TODO wire it up.\n",
+    )
+    assert metrics.compute_metrics(ws)["evidence_backed"] is False
+
+
+def test_hand_authored_verdict_without_check_arrays_is_not_evidence(tmp_path):
+    # Exploit A2: a 4-field stub carries no per-check visible/holdout results a
+    # real holdout_gate.decide emits — it is not a gate run.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+        gate_verdict={"verdict": "Succeeded", "passed_visible": True,
+                      "passed_holdout": True, "false_completion": False},
+    )
+    sc = metrics.compute_metrics(ws)
+    assert sc["evidence_backed"] is False
+    assert sc["provenance"]["holdout_verdicts"] == []
+    ok, _sc, _reasons = metrics.build_baseline(ws, "ws")
+    assert ok is False
+
+
+def test_valid_verdict_is_evidence_and_sha256_recorded(tmp_path):
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+        gate_verdict=_holdout_verdict(),
+    )
+    prov = metrics.compute_metrics(ws)["provenance"]
+    assert len(prov["holdout_verdicts"]) == 1
+    assert len(prov["holdout_verdicts"][0]["sha256"]) == 64
+
+
+def test_comment_only_gate_line_in_verify_script_is_not_evidence(tmp_path):
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+    )
+    (ws / "scripts").mkdir()
+    (ws / "scripts" / "verify-full").write_text(
+        "#!/bin/sh\n# TODO: someday call scripts/holdout_gate.py here\necho PASS\n",
+        encoding="utf-8",
+    )
+    assert metrics.compute_metrics(ws)["evidence_backed"] is False
+
+
+def test_executed_gate_line_in_verify_script_is_evidence(tmp_path):
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+    )
+    (ws / "scripts").mkdir()
+    (ws / "scripts" / "verify-full").write_text(
+        "#!/bin/sh\npython3 scripts/holdout_gate.py manifest.json\n", encoding="utf-8"
+    )
+    assert metrics.compute_metrics(ws)["evidence_backed"] is True
+
+
+# --- FCR cross-join laundering (P2) -------------------------------------------
+
+
+def test_unrelated_green_bundle_does_not_launder_a_red_claimed_task(tmp_path):
+    # Exploit F: the claimed task's gate is RED; an unrelated green must not clear it.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 3 — t\n\n- **outcome:** advanced\n"
+        "- refs: .loop/artifacts/verify-T3.json and .loop/artifacts/verify-unrelated.json\n",
+        verify={
+            "verify-T3.json": {"task": "T3", "outcome": "FAIL", "score": 0.1},
+            "verify-unrelated.json": {"task": "T1", "outcome": "PASS", "score": 1.0},
+        },
+    )
+    sc = metrics.compute_metrics(ws)
+    assert sc["false_completions"] == 1
+    assert sc["false_completion_rate"] == 1.0
+
+
+def test_honest_intermediate_red_later_repaired_is_not_a_false_completion(tmp_path):
+    # The flagship shape: a red bundle whose OWN task later reaches green is an
+    # honestly-repaired intermediate, not a laundered false completion.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** advanced\n"
+        "- refs: .loop/artifacts/verify-T2-iter1.json and .loop/artifacts/verify-T2.json\n",
+        verify={
+            "verify-T2-iter1.json": {"task": "T2", "outcome": "FAIL", "score": 0.74},
+            "verify-T2.json": {"task": "T2", "outcome": "PASS", "score": 0.83},
+        },
+    )
+    assert metrics.compute_metrics(ws)["false_completions"] == 0
+
+
+# --- success-token allow-list surfacing + vacuous refusal (P2) -----------------
+
+
+def test_unrecognized_outcome_token_is_surfaced_and_not_a_claim(tmp_path):
+    # Exploit B: a synonym escapes the denominator but is surfaced, not silent.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** shipped\n"
+        "- refs: .loop/artifacts/verify-red.json\n",
+        verify={"verify-red.json": {"iteration_id": 1, "outcome": "FAIL", "score": 0.0}},
+    )
+    sc = metrics.compute_metrics(ws)
+    assert "shipped" in sc["provenance"]["unrecognized_outcomes"]
+    assert sc["iterations_claiming_success"] == 0
+
+
+def test_baseline_refuses_vacuous_zero_claim_run(tmp_path):
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** shipped\n",
+        gate_verdict=_holdout_verdict(),
+    )
+    ok, _sc, reasons = metrics.build_baseline(ws, "ws")
+    assert ok is False
+    assert any("claim" in r.lower() for r in reasons)
+
+
+# --- two-way FCR disagreement refusal (P1) ------------------------------------
+
+
+def test_baseline_refuses_when_fcr_methods_disagree(tmp_path):
+    # A clean deterministic cross-join (fcr_a=0) over a run whose held-out gate
+    # flags a false completion (fcr_b=1) must not publish a laundered 0.0.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+        gate_verdict=_holdout_verdict(false_completion=True),
+    )
+    sc = metrics.compute_metrics(ws)
+    assert sc["provenance"]["fcr_methods_agree"] is False
+    ok, _sc, reasons = metrics.build_baseline(ws, "ws")
+    assert ok is False
+    assert any("agree" in r.lower() for r in reasons)
+
+
+# --- RP anchoring against verify bundles (P2) ---------------------------------
+
+
+def test_rp_record_with_fabricated_scores_is_rejected_when_bundles_exist(tmp_path):
+    # Exploit C: before/after unrelated to any real verify bundle score → rejected.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 0.9}},
+        repair={"iter-001.json": _repair_record(0.0, 1.0, True)},
+    )
+    sc = metrics.compute_metrics(ws)
+    rejected = sc["provenance"]["rejected_records"]
+    assert any(r["record"].endswith("iter-001.json") for r in rejected)
+    assert sc["repair_productivity"] is None
+
+
+def test_rp_record_anchors_cleanly_against_matching_bundles(tmp_path):
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={
+            "verify-before.json": {"task": "T2", "outcome": "FAIL", "score": 0.74},
+            "verify-after.json": {"task": "T2", "outcome": "PASS", "score": 0.83},
+        },
+        repair={"iter-001.json": _repair_record(0.74, 0.83, True)},
+    )
+    sc = metrics.compute_metrics(ws)
+    assert sc["provenance"]["rejected_records"] == []
+    assert sc["provenance"]["unanchored_records"] == []
+    assert sc["repair_productivity"] == 1.0
+
+
+def test_baseline_refuses_when_a_counted_rp_record_is_unanchored(tmp_path):
+    # A green claim-backing bundle with no numeric score leaves nothing to anchor
+    # the repair record's before/after against → unanchored → baseline refuses.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS"}},
+        repair={"iter-001.json": _repair_record(0.5, 0.8, True)},
+        gate_verdict=_holdout_verdict(),
+    )
+    sc = metrics.compute_metrics(ws)
+    unanchored = sc["provenance"]["unanchored_records"]
+    assert len(unanchored) == 1 and unanchored[0].endswith("iter-001.json")
+    ok, _sc, reasons = metrics.build_baseline(ws, "ws")
+    assert ok is False
+    assert any("anchor" in r.lower() for r in reasons)
