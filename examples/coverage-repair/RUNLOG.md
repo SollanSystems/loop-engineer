@@ -39,7 +39,7 @@ Then advanced to `T2` (coverage) in the same iteration's verify step:
   exist. **No** test-harness assertion edits or fixture relaxations to manufacture the pass.
 - **attempt:** 1 of 2
 - **measurable improvement:** pending re-verify (see Iteration 2) — full record in
-  `repair-record.json`
+  `.loop/repair/iter-002.json`
 
 ---
 
@@ -61,7 +61,7 @@ Then advanced to `T2` (coverage) in the same iteration's verify step:
 - **repair action:** the two added production branches lifted coverage past the gate.
 - **attempt:** 1 of 2 (cap not reached — one productive pass)
 - **measurable improvement:** YES — `verification_after.score` 0.83 > `verification_before.score`
-  0.74 → `productive: true`. See `repair-record.json`.
+  0.74 → `productive: true`. See `.loop/repair/iter-002.json`.
 
 ### Terminal
 

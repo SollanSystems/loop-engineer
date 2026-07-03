@@ -74,7 +74,7 @@ still gives resumable, evidence-backed verification. We do **not** reach for mul
   coverage), each with its own `verify` gate; progress is the count of `done` tasks with non-null
   `evidence`.
 - **Patch-and-repair:** on a red gate, hand to `[[loop-repair]]` for one bounded hypothesis →
-  one change → re-verify, capped at N=2 (see `repair-record.json`).
+  one change → re-verify, capped at N=2 (see `.loop/repair/iter-002.json`).
 
 ## Hand-off
 
