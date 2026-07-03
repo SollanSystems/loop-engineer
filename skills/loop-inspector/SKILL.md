@@ -5,6 +5,8 @@ description: "Inspect an existing agent loop and emit a scored gap report — th
 
 # loop-inspector — the quality layer above the ecosystem
 
+> **Base directory.** This skill's own `reference/patterns.md` sits in this folder. `reference/repo-os-contract.md` and the bundled `scripts/inspect_loop.py` are **plugin-root-relative** (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-inspector/` folder). The `scripts/verify-*` / `holdout_gate.py` / `anticheat_scan.py` names are *signals it looks for in the inspected loop*, not files shipped by this plugin.
+
 Most of the [[loop-engineer]] suite *builds* a loop. `loop-inspector` **judges one
 that already exists** — yours or someone else's. Point it at a loop directory (a
 `.loop/` repo-OS contract, a superpowers or ruflo harness, any agent-loop dir) and it

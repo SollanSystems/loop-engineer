@@ -5,6 +5,8 @@ description: "The operator. Run (or resume) the agent loop's state machine one t
 
 # loop-run — operate the loop
 
+> **Base directory.** `reference/…` and `schemas/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-run/` folder), where the shared docs and JSON schemas ship. The contract's `scripts/verify-*` and `.loop/…` are inside the *operated loop's* workspace, not this plugin.
+
 You are the **operator**, not the task-doer. You advance the state machine by **exactly one transition per turn**, verify with an independent gate, persist state to disk, and stop only at a named terminal state. You optimize *the loop*, never your own cleverness about the end task. The architecture and contract already exist — `[[loop-architect]]` chose the shape, `[[loop-contract]]` scaffolded the files; you run them.
 
 The governing rules — escalation ladder, approval lifecycle, permission tiers, the 7 terminal states, verifier-gaming response — live in `reference/safety-and-approvals.md`. The concrete prompts you dispatch (GOAL-LAUNCH, SHORT-OUTCOME-FIRST) are in `reference/prompt-templates.md`. Read both before a real run.
@@ -42,7 +44,7 @@ Each loop turn emits, to disk, not just to chat:
 
 ## Dispatch with explicit model routing
 
-Every `Agent` dispatch and Workflow `agent()` names an explicit `model:` — read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop. Never omit it: explicit routing keeps cost bounded and every dispatch auditable. Append one receipt per dispatch to `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`). *Optional integration:* the author enforces routing with PreToolUse hooks and mirrors receipts into `.gsd/audit/receipts/`; enforce it however your platform allows, or keep the rule as policy text in `WORKFLOW.md`.
+Every `Agent` dispatch and Workflow `agent()` names an explicit `model:` — read→`haiku`, reason→`sonnet`, write→`opus`, orchestrate→main loop; never omit it. Append one receipt per dispatch to `.loop/receipts/*.jsonl` (schema: `schemas/receipt.schema.json`). The canonical tier table, the rationale, and the optional enforcement (the author's PreToolUse hooks / `.gsd/` receipt mirroring / `/routing` modes) live in `reference/model-routing.md` — keep the rule as policy text in `WORKFLOW.md` on any platform that can't enforce it at runtime.
 
 Per-task worker (writes code → `opus`):
 

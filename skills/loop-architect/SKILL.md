@@ -5,6 +5,8 @@ description: "Classify an agent-loop task and choose its architecture + realizat
 
 # loop-architect
 
+> **Base directory.** `reference/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/reference/…`, i.e. `../../reference/…` from this `skills/loop-architect/` folder), where the shared docs ship, not inside this skill's own folder. (The `scripts/verify-*` gate named below is the operated loop's own workspace script.)
+
 The **brain** of the [[loop-engineer]] suite. It does **not** do the end task — it
 turns an underspecified objective into a decision: *what shape should this loop be,
 and what Claude-Code primitive physically runs it?* The output is an **architecture
@@ -14,7 +16,8 @@ it decides, it does not scaffold or run.
 Two separable choices (see `reference/architecture-matrix.md`):
 - **(A) Architecture** — how many agents, how much orchestration.
 - **(B) Realization** — which Claude-Code primitive (Workflow tool / markdown
-  supervisor / portable Python FSM spine / delegate to an acceptance gate such as `/verify-slice`).
+  supervisor / portable Python FSM spine / delegate to an acceptance gate — the
+  contract's `verify-fast`→`verify-full` by default, optionally `/verify-slice`).
 
 ## Prime directive
 
@@ -108,9 +111,9 @@ to reach an explicit terminal state; never a silent "completed."
 
 Any agent dispatch you suggest in the ADR names an explicit `model:` (read → `haiku`,
 reason → `sonnet`, write → `opus`) per the model-routing rule — a Workflow
-`agent({ model: "sonnet", … })` fan-out, a write agent on `opus`. Omitting
-`model:` inherits the costly main-loop model; the author blocks that with a PreToolUse hook
-(`workflow_routing.py`), but the rule holds on any surface.
+`agent({ model: "sonnet", … })` fan-out, a write agent on `opus`. Never omit it: omitting
+`model:` inherits the costly main-loop model. The full tier table + rationale (and the
+optional `workflow_routing.py` enforcement) are in `reference/model-routing.md`.
 
 ## Hand-off
 

@@ -18,7 +18,8 @@
     "prompt-templates.md",
     "eval-suite.md",
     "safety-and-approvals.md",
-    "platform-map.md"
+    "platform-map.md",
+    "model-routing.md"
   ],
   "terminal_states": [
     "Succeeded",
@@ -57,6 +58,9 @@
     "terminal_state.json.tmpl",
     "verify-fast.sh",
     "verify-full.sh",
+    "verify-safety.sh",
+    "judge-rubric.sh",
+    "extract-trace-metrics.sh",
     "EVALS-rubric.md.tmpl"
   ],
   "eval_layer_names": [

@@ -5,6 +5,8 @@ description: "Watch a RUNNING agent loop from outside and call the intervention 
 
 # loop-runtime-monitor — watch the run, call the intervention
 
+> **Base directory.** This skill's own `reference/patterns.md` sits in this folder. `reference/model-routing.md` and the bundled `scripts/runtime_monitor.py` are **plugin-root-relative** (`${CLAUDE_PLUGIN_ROOT}/…`, i.e. `../../` from this `skills/loop-runtime-monitor/` folder). The `.loop/…` state and `RUNLOG.md` it reads belong to the *watched loop*, not this plugin.
+
 The **observer**. While [[loop-run]] advances the state machine and [[loop-repair]] reacts to a red gate, this skill stands *outside* an in-flight run and answers one question: **is the loop still making progress, or is it spinning?** It reads the loop's externalized state — `.loop/state.json` + `RUNLOG.md` — recomputes progress from evidence (never from the agent's prose), and when a run has gone bad it surfaces a single intervention recommendation. It is read-only over the run; it recommends, it never mutates.
 
 This is the in-flight complement to the post-hoc [[loop-flywheel]] (which mines a *finished* run's history) and the gap-scoring loop-inspector (which audits a loop's *contract*). loop-runtime-monitor watches the run *as it happens*, so a stuck run gets caught at iteration 4 instead of at the budget wall.
@@ -50,7 +52,7 @@ The monitor recommends the rung; it never *takes* the side-effecting action itse
 python3 scripts/runtime_monitor.py path/to/.loop
 ```
 
-It emits the JSON health report `{active_task, iterations_observed, stalled, repair_churn, budget_overrun, recommendation, evidence}`. `evidence` is the concrete reason for each fired flag (the spinning task, the flat score, the exhausted budget key) — never a prose claim, always the read-off fact. Import `health_report(loop_dir)` to fold the same report into a Workflow or a watch poll. A read-only monitor poll routes to `model: "haiku"` per the model-routing rule; the report is data, the intervention decision is the operator's.
+It emits the JSON health report `{active_task, iterations_observed, stalled, repair_churn, budget_overrun, recommendation, evidence}`. `evidence` is the concrete reason for each fired flag (the spinning task, the flat score, the exhausted budget key) — never a prose claim, always the read-off fact. Import `health_report(loop_dir)` to fold the same report into a Workflow or a watch poll. A read-only monitor poll routes to `model: "haiku"` per the model-routing rule (tier table: `reference/model-routing.md`); the report is data, the intervention decision is the operator's.
 
 ## Boundaries
 

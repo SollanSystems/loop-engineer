@@ -5,6 +5,8 @@ description: "Router for designing, launching, verifying, repairing, and improvi
 
 # loop-engineer
 
+> **Base directory.** `reference/…` paths below are **plugin-root-relative** — resolve them against the plugin root (`${CLAUDE_PLUGIN_ROOT}/reference/…`, i.e. `../../reference/…` from this `skills/loop-engineer/` folder), where the shared docs ship, not inside this skill's own folder.
+
 **The loop is the design object — not the prompt.** A loop-engineer designs, launches, verifies, repairs, and improves *other* agent loops; it does not primarily solve the end task. Its first job is to turn an underspecified objective into an **executable operating contract** — success criteria, task queue, tool boundaries, evaluation methods, stopping rules, approval gates, and persistent artifacts that survive across turns and sessions.
 
 **Prime directive.** If you cannot define success, verification, or a terminal state, the task is **underspecified** (`FailedSpecGap`) — say so, do not call the next completion "done." This is the central defense against the #1 long-horizon failure mode: false completion / weak self-verification / verifier gaming.
@@ -58,7 +60,7 @@ The bundled portable core runs every loop with no external setup: `python3 -m lo
 - **`/verify-slice` and `/verify-milestone`** (claude-code-orchestration, *optional*) — auto-repair + cross-review layered on the contract's `verify-*` gate. `loop-evals` *designs* the criteria; `loop-run` *calls* the gate. No new verification engine is shipped here.
 - **A portable Python FSM spine** (*optional*) — the init/next/complete + `state.json`-resume pattern for max-determinism / cross-engine resume; ~100 lines, or reuse the author's `harmony-agent` `engine/cli.py`. v1 ships no spine code.
 - **The grader-split pattern** (as in the `launch-local-agent` skill) — an objective blocking gate in front of a judged advisory rubric; the model for keeping deterministic checks ahead of any model verdict.
-- **The model-routing rule** — every dispatched agent names an explicit `model:` (read→haiku, reason→sonnet, write→opus) so cost is bounded and dispatches are auditable; receipts append to `.loop/receipts/*.jsonl`. *Optional:* the author enforces this with PreToolUse hooks (`model_routing.py` / `workflow_routing.py`) and `/routing` modes.
+- **The model-routing rule** — every dispatched agent names an explicit `model:` (read→haiku, reason→sonnet, write→opus) so cost is bounded and dispatches are auditable; receipts append to `.loop/receipts/*.jsonl`. Canonical tier table + rationale: `reference/model-routing.md`. *Optional:* the author enforces this with PreToolUse hooks (`model_routing.py` / `workflow_routing.py`) and `/routing` modes.
 - **superpowers** (*optional*) — `writing-plans`, `executing-plans`, `subagent-driven-development`, `verification-before-completion`, `test-driven-development` compose the markdown-supervisor realization. Any on-disk planning dir works as the planning surface (the author uses GSD `.gsd/`).
 - **ui/orchestration surfaces** — when a loop's actual work is UI/UX or general orchestration (not loop engineering), defer to the appropriate `ui-ux`/`orchestration` surface; this suite builds and runs the loop, it does not do that domain work.
 
@@ -75,5 +77,6 @@ This router stays deliberately thin; every detail lives one hop away in `referen
 - `reference/eval-suite.md` — [[loop-evals]] and [[loop-flywheel]]; the 7 layers, the two first-class metrics, the flywheel schedule.
 - `reference/safety-and-approvals.md` — [[loop-run]] and [[loop-repair]]; escalation ladder, approval lifecycle, terminal states, anti-cheat.
 - `reference/platform-map.md` — [[loop-architect]]; the engine-neutral contract mapped onto Claude / Codex / Hermes / Google.
+- `reference/model-routing.md` — every spoke; the canonical read→haiku / reason→sonnet / write→opus tier table + rationale + optional enforcement.
 
 If a question is about *how* a step works rather than *which* step is next, you have left the router — open the reference above and read it there.
