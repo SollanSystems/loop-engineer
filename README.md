@@ -1,51 +1,90 @@
 # Loop Engineer
 
-*Your agent says it's done. Loop Engineer makes it prove it.*
+**Your AI agent says it's done. Loop Engineer makes it prove it.**
 
-Executable operating contracts for AI agent loops.
+[![CI](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Release](https://img.shields.io/badge/release-0.3.4-blue)](https://github.com/SollanSystems/loop-engineer/tags)
 
-Loop Engineer turns long-running AI work from a fragile chat transcript into a
-repo-native contract: success criteria, task queue, verification gates, repair
-policy, terminal states, run history, and machine-readable state.
+Long-running agents commit **false completion**. After context compaction they
+forget what "done" meant, optimize to the visible test, patch in circles, and
+report success with no independent evidence — and no typed way to say *blocked*,
+*unverifiable*, or *underspecified* instead.
 
-It ships as:
+Loop Engineer is a **proof-of-done** layer that sits above your agent runtime. It
+ships, on disk and runnable today:
 
-- a portable **Loop Contract Protocol**,
-- a Python validator and inspector,
-- and a Claude Code reference skill suite.
+- a **contract validator** (`doctor`) and **inspector** (`inspect`) that grade a
+  loop's proof machinery on *invocation evidence*, not on a self-asserted flag;
+- a **held-out gate** and an **anti-cheat scan** built to catch a loop gaming its
+  own verifier;
+- a runnable example whose `false_completion: false` is backed by a committed,
+  real gate verdict — `.loop/artifacts/holdout-verdict.json`, not a hand-set flag.
 
-The prime directive:
-
-> If a loop cannot define success, verification, or a terminal state, it stops
-> as `FailedSpecGap` instead of pretending the next completion is done.
-
----
-
-## Why this exists
-
-Long-running agents fail in predictable ways:
-
-- they forget what "done" meant after context compaction,
-- they optimize to visible tests,
-- they keep patching without measurable progress,
-- they declare success without independent evidence,
-- they have no typed way to say blocked, unsafe, unverifiable, or underspecified.
-
-Loop Engineer makes those failure modes explicit contract states instead of
-vibes — a concrete, gate-backed reference implementation of **loop engineering**:
-contracts, typed termination, and health metrics for long-running agent loops.
-
----
-
-## 30-second demo
+<!-- demo.gif lands here (M3-GIF) -->
 
 ```bash
+# Score a loop's proof-of-done in 5 seconds — no install, no agent, no API key:
 git clone https://github.com/SollanSystems/loop-engineer.git
 cd loop-engineer
-
-python3 -m loop doctor examples/coverage-repair
 python3 -m loop inspect examples/coverage-repair
 ```
+
+## Where it sits
+
+    ┌──────────────────────────────────────────────────────────────┐
+    │  Tier 3 · REFERENCE RUNNER                                    │
+    │    9 Claude Code skills: design → contract → run → repair →   │
+    │    flywheel                                                   │
+    ├──────────────────────────────────────────────────────────────┤
+    │  Tier 2 · PROOF TOOLCHAIN                                     │
+    │    doctor · inspect · holdout_gate · anticheat_scan ·         │
+    │    runtime_monitor                                            │
+    ├──────────────────────────────────────────────────────────────┤
+    │  Tier 1 · PORTABLE CONTRACT                                   │
+    │    .loop/ state + SPEC/WORKFLOW/TASKS + schemas/ + templates/ │
+    └──────────────────────────────────────────────────────────────┘
+
+Tiers 1–2 are runtime-neutral: pure-stdlib Python over files on disk, readable by
+any tool. Tier 3 (the 9 Claude Code skills) is the *reference* runner, not a
+requirement — bring your own runtime (LangGraph, ruflo, OpenHands, native Claude
+Code) and keep the contract and proof layer above it.
+
+## How it compares
+
+Different tools, different objects. The rows below are checkable facts, not
+opinions.
+
+| Project | ★ | What it is | Enforced proof-of-done? |
+|---|---:|---|---|
+| **Loop Engineer** (this repo) | — | operating contract + proof toolchain | **Yes** — 7 typed terminal states, held-out gate + anti-cheat scan, graded on invocation evidence |
+| [cobusgreyling/loop-engineering](https://github.com/cobusgreyling/loop-engineering) | 4.9K | prompt-native loop-*design guidance*; owns the term "loop engineering" | Different object — design guidance, not a runtime or gate |
+| [obra/superpowers](https://github.com/obra/superpowers) | 244K | phase-gating dev methodology (brainstorm → TDD → review) | No — gates dev phases, not a typed completion contract |
+| [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) | 36K | stateful agent-graph runtime + checkpointing | No — completion is whatever the terminal node returns |
+
+<sub>★ counts fetched via `gh api` on 2026-07-02; they drift over time.</sub>
+
+What this suite owns:
+
+- **7 typed terminal states** — a contract primitive, so no run ends in a silent "completed."
+- **`false-completion-rate`** — measurable with the bundled held-out gate and anti-cheat scan (computed from real runs; no baseline ships yet).
+- **`repair-productivity`** — the fraction of repair attempts that measurably move verification forward.
+- **Repo-native loop state** — survives compaction, crashes, and handoff.
+- **Deterministic-gate-before-rubric ordering** — model judges are advisory, not the first line of proof.
+
+What is table-stakes rather than oversold: on-disk contracts, bounded repair
+caps, and deterministic verification gates are shared with mature harnesses. Loop
+Engineer's claim is the proof-of-done framing plus the typed termination and
+loop-health metrics on top. It composes with those tools; it does not replace
+their execution engines.
+
+---
+
+## Proof-of-done, not self-assertion
+
+The `inspect` and `doctor` commands accept either a workspace root or its `.loop/`
+directory, and need no agent runtime to run.
 
 `doctor` validates the contract objects (the real output also includes a
 `paths` block listing every resolved contract file; omitted here for brevity):
@@ -100,17 +139,27 @@ scores. The one remaining gap is honest too: this low-risk, workspace-write loop
 declares `plan_then_execute: false`, so it earns no prompt-injection-discipline
 credit (correct for a loop that reads no untrusted input).
 
-Both commands accept either a workspace root or its `.loop/` directory.
+The prime directive:
+
+> If a loop cannot define success, verification, or a terminal state, it stops
+> as `FailedSpecGap` instead of pretending the next completion is done.
 
 ---
 
-## Core guarantees
+## Honest termination model
 
-- **Typed termination:** every run exits through exactly one of 7 terminal states.
-- **Evidence before completion:** a task is done only when it maps to a success criterion, a verifier passes, and evidence is recorded — not when the agent stops talking.
-- **Externalized state:** loop status lives in files, not chat memory.
-- **Bounded repair:** repair attempts are capped and measured.
-- **False-completion defense:** held-out gates and anti-cheat scans designed to catch verifier gaming.
+Loop Engineer does not allow a vague "completed." Every run exits through
+exactly one named state:
+
+| State | When |
+|---|---|
+| `Succeeded` | Verification passes; all acceptance criteria are met. |
+| `FailedUnverifiable` | Success or failure cannot be confirmed because verification is insufficient. |
+| `FailedBlocked` | The loop cannot proceed because of a tool, permission, dependency, or external blocker. |
+| `FailedBudget` | Time or cost budget is exhausted. |
+| `FailedSafety` | Safety, policy, or approval risk is detected. |
+| `FailedSpecGap` | The objective is underspecified; success criteria cannot be defined. |
+| `AbortedByHuman` | The operator explicitly stops the run. |
 
 ---
 
@@ -157,23 +206,6 @@ A task is not done because an agent says it is done. A task is done only when it
 maps to a success criterion, its verifier passes, and evidence is recorded.
 
 See `reference/repo-os-contract.md` for the canonical artifact schemas.
-
----
-
-## Honest termination model
-
-Loop Engineer does not allow a vague "completed." Every run exits through
-exactly one named state:
-
-| State | When |
-|---|---|
-| `Succeeded` | Verification passes; all acceptance criteria are met. |
-| `FailedUnverifiable` | Success or failure cannot be confirmed because verification is insufficient. |
-| `FailedBlocked` | The loop cannot proceed because of a tool, permission, dependency, or external blocker. |
-| `FailedBudget` | Time or cost budget is exhausted. |
-| `FailedSafety` | Safety, policy, or approval risk is detected. |
-| `FailedSpecGap` | The objective is underspecified; success criteria cannot be defined. |
-| `AbortedByHuman` | The operator explicitly stops the run. |
 
 ---
 
@@ -276,35 +308,6 @@ Not sure which spoke to use? Start with `/loop-engineer`; it routes the task.
 - `scripts/` — validators, runtime monitor, anti-cheat scanner, benchmark harness, rollout ledger.
 - `examples/` — sample loop contracts, including `examples/coverage-repair`.
 
-Loop Engineer deliberately composes with existing agent runtimes and workflow
-harnesses. It defines the loop contract above them; it does not try to replace
-their execution engines.
-
----
-
-## How it compares
-
-- `/goal`, `/loop`, and agent runtimes execute loops.
-- LangGraph, AutoGen, ruflo, claude-code-flow, and similar tools orchestrate agents.
-- Superpowers-style harnesses gate software-development phases.
-
-Loop Engineer defines the operating contract above those engines: what success
-means, what evidence proves it, when repair is allowed, and how the loop must
-terminate.
-
-What this suite owns:
-
-- **7 typed terminal states** — a contract primitive, so no run ends in a silent "completed."
-- **`false-completion-rate`** — measurable with the bundled held-out gate and anti-cheat scan (computed from real runs; no baseline ships yet).
-- **`repair-productivity`** — the fraction of repair attempts that measurably move verification forward.
-- **Repo-native loop state** — survives compaction, crashes, and handoff.
-- **Deterministic-gate-before-rubric ordering** — model judges are advisory, not the first line of proof.
-
-What is table-stakes rather than oversold: on-disk contracts, bounded repair
-caps, and deterministic verification gates are shared with mature harnesses.
-Loop Engineer's claim is the loop-as-design-object framing plus the typed
-termination and loop-health metrics on top.
-
 ---
 
 ## Verification
@@ -353,13 +356,8 @@ Deep content lives in `reference/` and is loaded on demand by the skills:
 
 ## Get started
 
-```bash
-git clone https://github.com/SollanSystems/loop-engineer.git
-cd loop-engineer
-python3 -m loop inspect examples/coverage-repair
-```
-
-Then scaffold a contract for your own loop with `/loop-contract`, or read
+Run the zero-install `inspect` command at the top of this README, then scaffold a
+contract for your own loop with `/loop-contract` — or read
 `reference/repo-os-contract.md` for the artifact schemas.
 
 ---
