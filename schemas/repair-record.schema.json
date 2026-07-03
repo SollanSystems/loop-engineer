@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/repair@1",
+  "title": "Loop Engineer Repair Record @1",
+  "description": "The single canonical repair record (QW11/M4). One bounded repair pass emitted by loop-repair to .loop/repair/<iteration_id>.json. Its verification_before/verification_after scores are repair-productivity's canonical input: productive == (verification_after.score > verification_before.score). Distinct from the rollout / candidate ledger record (loop-engineer/rollout@1), which adjudicates rollout candidates. The 7 canonical fields match evals/cases/structural.json repair_record_fields; the schema/iteration_id/attempt envelope matches examples/coverage-repair. additionalProperties is true because a record carries loop-specific evidence keys (metric, failing, verify_full).",
+  "type": "object",
+  "required": [
+    "schema",
+    "iteration_id",
+    "attempt",
+    "failure_mode",
+    "hypothesis",
+    "repair_action",
+    "verification_before",
+    "verification_after",
+    "remaining_delta",
+    "productive"
+  ],
+  "properties": {
+    "schema": { "const": "loop-engineer/repair@1" },
+    "iteration_id": { "type": ["string", "integer"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "failure_mode": { "type": "string", "minLength": 1 },
+    "hypothesis": { "type": "string", "minLength": 1 },
+    "repair_action": { "type": "string", "minLength": 1 },
+    "verification_before": {
+      "type": "object",
+      "required": ["score"],
+      "properties": { "score": { "type": "number" } },
+      "additionalProperties": true
+    },
+    "verification_after": {
+      "type": "object",
+      "required": ["score"],
+      "properties": { "score": { "type": "number" } },
+      "additionalProperties": true
+    },
+    "remaining_delta": { "type": "string" },
+    "productive": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

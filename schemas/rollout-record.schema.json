@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/rollout@1",
+  "title": "Loop Engineer Rollout / Candidate Ledger Record @1",
+  "description": "One candidate adjudication in a rollout / genetic-hardening loop (scripts/rollout_ledger.py RECORD_FIELDS). Appended one JSON object per line to .loop/*.jsonl. This is NOT the repair record (loop-engineer/repair@1): its productive field is the rollout-productivity signal (productive == (score_delta is not None and score_delta > 0)), a flywheel view, not the repair-productivity baseline. Records do not carry a schema envelope field today; additionalProperties is true so one may.",
+  "type": "object",
+  "required": [
+    "id",
+    "parent",
+    "verdict",
+    "score",
+    "score_delta",
+    "coherent_with_prior_winner",
+    "productive"
+  ],
+  "properties": {
+    "schema": { "const": "loop-engineer/rollout@1" },
+    "id": { "type": "string", "minLength": 1 },
+    "parent": { "type": ["string", "null"] },
+    "verdict": { "type": "string" },
+    "score": { "type": ["number", "null"] },
+    "score_delta": { "type": ["number", "null"] },
+    "coherent_with_prior_winner": { "type": "boolean" },
+    "productive": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}
