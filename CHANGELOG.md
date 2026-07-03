@@ -14,6 +14,58 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## 0.5.0 — 2026-07-03
+
+The two pre-launch milestones of the v1.0 roadmap landed together: **"enforce the
+wedge"** (false-completion defense is now enforced by validators, not asserted by
+docs) and **"first screen"** (the README/demo surface rebuilt for a stranger's
+first 30 seconds). PRs #7–#13. The version jumps 0.3.4 → 0.5.0 to match the
+roadmap's milestone numbering (`docs/superpowers/plans/2026-06-30-loop-engineer-v1.0-roadmap.md`);
+there is no 0.4.x tag.
+
+### Added
+- **Gate-backed flagship example.** `examples/coverage-repair` now runs
+  end-to-end through the real held-out gate; its `false_completion: false` is
+  backed by a committed gate verdict (`.loop/artifacts/holdout-verdict.json`),
+  not a hand-set flag (#9).
+- **Weak→strong demo, filmed live.** `docs/demo.gif` + `docs/demo.cast`: the
+  inspector scores a self-asserted DIY loop (committed as `examples/naive-loop`)
+  0/weak, then the gate-backed example 90/strong — 100% live tool output.
+  Social card at `docs/social-card.png` (#13).
+- **`loop scaffold`** command + JSON Schemas for the contract artifacts
+  (`schemas/*.schema.json`), with templates reconciled to what the validator
+  actually checks (#8).
+- **Promised templates shipped:** `templates/verify-safety.sh`,
+  `templates/extract-trace-metrics.sh`, `templates/judge-rubric.sh`; central
+  model-routing doctrine at `reference/model-routing.md` (#11).
+- **v1.0 master roadmap + four strategic specs** committed under
+  `docs/superpowers/` — credibility enforcement, ST1 metrics baseline, ST2
+  portable contract spec, ST3 integration adapters (this release).
+
+### Changed
+- **Validator cross-checks.** A `Succeeded` terminal no longer validates with
+  `false_completion: true` or an empty/false `criteria_met`; the inspector
+  grades false-completion defense on *invocation evidence* (the gate/scan
+  actually ran), never on a self-asserted flag (#8).
+- **Held-out gate + scanner hardening.** An empty visible set can no longer
+  certify (`test_empty_visible_set_returns_not_ready`); the anti-cheat scanner
+  detects edits that neuter its own gate-decision functions
+  (`test_self_neuter_of_gate_matcher_is_detected`) and reports gate tampering
+  with a distinct exit code (#8).
+- **README first screen** rebuilt for launch conversion: tagline, concrete
+  failure modes, zero-install first command, stack diagram, comparison table,
+  demo embed (#7, #12).
+- **Skill trigger surface:** diagnostic spokes (loop-inspector,
+  loop-runtime-monitor) named at the router and marketplace, trigger-phrase
+  batch, path anchoring and neutral framing across all 9 skills (#11).
+
+### Fixed
+- **CLI:** `--help`/`--version`/usage text, distinct operational-error messages,
+  explicit exit codes, ledger tolerance for foreign receipt lines (#10).
+- **The repo's own live contract passes its own gate:** `python3 -m loop doctor
+  .loop` → `ok: true` — the release-blocking exit criterion of the
+  wedge-enforcement milestone (#8).
+
 ## 0.3.4 — 2026-06-29
 
 Dogfood-driven hardening: ran `loop-inspector` + `loop-runtime-monitor` against 9 real
