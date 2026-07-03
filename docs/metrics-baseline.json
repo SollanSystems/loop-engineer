@@ -1,0 +1,44 @@
+{
+  "schema": "loop-engineer/metrics@1",
+  "loop": "examples/coverage-repair",
+  "false_completion_rate": 0.0,
+  "repair_productivity": 1.0,
+  "iterations_claiming_success": 2,
+  "false_completions": 0,
+  "repair_passes": 1,
+  "productive_repairs": 1,
+  "cost_per_success_usd": null,
+  "evidence_backed": true,
+  "provenance": {
+    "fcr_source": [
+      ".loop/artifacts/verify-T1.json",
+      ".loop/artifacts/verify-T2-iter1.json",
+      ".loop/artifacts/verify-T2.json",
+      "RUNLOG.md"
+    ],
+    "rp_source": [
+      ".loop/repair/iter-002.json"
+    ],
+    "rejected_records": [],
+    "false_completion_rate_holdout": 0.0,
+    "fcr_methods_agree": true,
+    "holdout_source": [
+      ".loop/artifacts/holdout-verdict.json"
+    ],
+    "unmatched_verify": []
+  },
+  "baseline": {
+    "source_example": "examples/coverage-repair",
+    "commit": "4d2db18927b828e1e9193afb6342f50021290dc7",
+    "inputs": [
+      "examples/coverage-repair/.loop/artifacts/holdout-verdict.json",
+      "examples/coverage-repair/.loop/artifacts/verify-T1.json",
+      "examples/coverage-repair/.loop/artifacts/verify-T2-iter1.json",
+      "examples/coverage-repair/.loop/artifacts/verify-T2.json",
+      "examples/coverage-repair/.loop/repair/iter-002.json",
+      "examples/coverage-repair/RUNLOG.md",
+      "examples/coverage-repair/TASKS.json",
+      "examples/coverage-repair/terminal_state.json"
+    ]
+  }
+}
