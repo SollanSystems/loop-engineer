@@ -22,7 +22,11 @@ ships, on disk and runnable today:
 - a runnable example whose `false_completion: false` is backed by a committed,
   real gate verdict — `.loop/artifacts/holdout-verdict.json`, not a hand-set flag.
 
-<!-- demo.gif lands here (M3-GIF) -->
+![The inspector scores a self-asserted DIY loop 0/weak, then the gate-backed example 90/strong — both runs live](docs/demo.gif)
+
+<sub>Filmed on the real tools ([`docs/demo.cast`](docs/demo.cast)); reproduce both
+verdicts yourself: `python3 -m loop inspect examples/naive-loop` then
+`examples/coverage-repair`.</sub>
 
 ```bash
 # Score a loop's proof-of-done in 5 seconds — no install, no agent, no API key:
