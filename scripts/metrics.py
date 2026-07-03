@@ -17,32 +17,42 @@ Two honesty invariants distinguish this from a self-report:
   * **FCR is derived two ways and disagreement is surfaced.** (a) the RUNLOG
     success-claim × verify-bundle cross-join (the deterministic anchor, per §3),
     and (b) the aggregated held-out-gate `false_completion` flag. An unmatched
-    success-claim counts as a false completion (fail-closed, §8). A success claim
-    is clean only if EVERY verify bundle attached to its iteration is green, or a
-    red one's own task later reached green (an honestly-repaired intermediate) —
-    an unrelated green bundle can never launder the claimed task's red gate.
+    success-claim counts as a false completion (fail-closed, §8). Claim
+    cleanness is outcome-class aware: a COMPLETION-class claim (`task_passed`,
+    `terminal`, `succeeded`, or the terminal state itself) is clean only if
+    EVERY verify bundle attached to its iteration is green — no exception of
+    any kind ("not backed by a green verify … is a false completion, full
+    stop"); a PROGRESS-class claim (`advanced`) may carry a red bundle only if
+    that bundle's own task reaches green in a STRICTLY LATER iteration (an
+    honestly-repaired intermediate). An unrelated green bundle never launders a
+    red gate, and a same-iteration green never excuses its own task's red —
+    within-iteration chronology is unknowable, so it fails closed.
 
 The `### Outcome` token contract: a claim counts toward the FCR denominator only
-when its outcome token is a recognized SUCCESS token (`task_passed`, `terminal`,
-`succeeded`, `advanced`); `repair_triggered` / `task_failed` and peers are honest
-reds. Any token in neither set is surfaced under `provenance.unrecognized_outcomes`
-so a synonym (`shipped`, `done`, …) is visible rather than silently escaping the
+when its outcome token is a recognized SUCCESS token — completion-class
+(`task_passed`, `terminal`, `succeeded`) or progress-class (`advanced`);
+`repair_triggered` / `task_failed` and peers are honest reds. Any other token of
+two or more characters is surfaced under `provenance.unrecognized_outcomes` so a
+synonym (`shipped`, `done`, `ok`, …) is visible rather than silently escaping the
 denominator — it never widens the recognized-success set on its own.
 
 A committed held-out verdict is validated structurally (it must carry the per-check
 `visible`/`holdout` arrays and internally-consistent flags a real `holdout_gate`
 run emits, not a hand-set 4-field stub) and its sha256 is recorded in provenance.
-That committed verdict is *evidence, not proof*: it demonstrates a gate ran, but
+That committed verdict is *evidence, not proof*: a fully-fabricated,
+internally-consistent artifact defeats offline shape-checking by construction, so
 tamper detection of the artifact itself belongs to the anti-cheat layer
 (`anticheat_scan.py`) — this command does not, and does not claim to, make the
 verdict tamper-proof.
 
 `--baseline` writes a checked-in scorecard, but only over a genuinely gate-backed
-run: it refuses (non-zero, writes nothing) if the run is not `evidence_backed`, if
-any record was rejected, if the two FCR methods disagree, if no iteration claims
-success (a vacuous 0/0 is not a publishable 0.0), or if any counted repair record
-is unanchored. Baselining a self-asserted run would itself be a false completion of
-ST1.
+run: it refuses (non-zero, writes nothing) if no structurally-valid held-out
+verdict artifact exists in the loop (plain-mode `evidence_backed` via a gate line
+in a verify script is a weaker heuristic and NEVER qualifies a published
+baseline), if any record was rejected, if the two FCR methods disagree, if no
+iteration claims success (a vacuous 0/0 is not a publishable 0.0), or if any
+counted repair record is unanchored. Baselining a self-asserted run would itself
+be a false completion of ST1.
 
 Pure stdlib, offline, deterministic: the same loop dir yields a byte-identical
 scorecard.
@@ -74,7 +84,12 @@ BASELINE_OUTPUT = "docs/metrics-baseline.json"
 
 # A RUNLOG iteration whose outcome declares a task/loop reached "done". A
 # repair_triggered / task_failed outcome is an honest red, NOT a success claim.
-_SUCCESS_OUTCOME_TOKENS = ("task_passed", "terminal", "succeeded", "advanced")
+# Completion-class tokens assert "done" — every attached bundle must be green,
+# no exceptions. Progress-class tokens assert forward motion — a red
+# intermediate is excusable only by a strictly-later green of the same task.
+_COMPLETION_OUTCOME_TOKENS = ("task_passed", "terminal", "succeeded")
+_PROGRESS_OUTCOME_TOKENS = ("advanced",)
+_SUCCESS_OUTCOME_TOKENS = _COMPLETION_OUTCOME_TOKENS + _PROGRESS_OUTCOME_TOKENS
 
 # Recognized honest-red outcome tokens: not a success claim, but a known outcome
 # (so they are not surfaced as an "unrecognized" synonym). Any outcome token in
@@ -94,7 +109,7 @@ _GATE_SCRIPTS = ("holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
 
 _ITER_HEADER_RE = re.compile(r"(?m)^##\s+Iteration\s+(\S+)")
 # "outcome" declaration followed (within a little markup/whitespace) by its token.
-_OUTCOME_RE = re.compile(r"outcome[^A-Za-z0-9]{0,40}?([A-Za-z][A-Za-z_]{2,})", re.IGNORECASE | re.DOTALL)
+_OUTCOME_RE = re.compile(r"outcome[^A-Za-z0-9]{0,40}?([A-Za-z][A-Za-z_]{1,})", re.IGNORECASE | re.DOTALL)
 _VERIFY_REF_RE = re.compile(r"(verify-[\w.-]+?\.json)")
 
 
@@ -248,6 +263,7 @@ def _assign_bundles_to_iters(bundles: list[dict], blocks: list[tuple[str, str]])
         target = b["iter"]
         if target is None:
             target = next((iid for iid, refs in refs_by_iter.items() if b["name"] in refs), None)
+        b["assigned_iter"] = target
         if target is None:
             unmatched.append(b["name"])
         else:
@@ -316,12 +332,11 @@ def _verify_scripts(workspace: Path) -> list[Path]:
 
 
 def _gate_script_present(workspace: Path) -> bool:
-    """A gate script the verify surface can actually invoke exists — either bundled
-    with the loop or in the loop-engineer toolkit it composes with."""
-    for base in (workspace / "scripts", _REPO_ROOT / "scripts"):
-        if any((base / name).exists() for name in _GATE_SCRIPTS):
-            return True
-    return False
+    """A gate script the loop's OWN verify surface can invoke exists. Only the
+    loop's workspace counts — checking this repo's toolkit would be vacuously
+    true for every foreign loop, since loop-engineer ships holdout_gate.py."""
+    base = workspace / "scripts"
+    return any((base / name).exists() for name in _GATE_SCRIPTS)
 
 
 def _gate_invoked(paths: LoopPaths, gate_verdicts: list[dict]) -> bool:
@@ -329,11 +344,13 @@ def _gate_invoked(paths: LoopPaths, gate_verdicts: list[dict]) -> bool:
     invocation-evidence rule (HI4), NOT looser prose matching:
 
       (a) a recorded, structurally-valid gate VERDICT artifact, or
-      (b) a NON-COMMENT gate-token line in a verify-* script whose gate script
-          file actually exists.
+      (b) a NON-COMMENT gate-token line in a verify-* script, where the loop's
+          own workspace also carries the gate script file.
 
-    A bare TASKS.json verify *declaration* or a RUNLOG prose mention is NOT an
-    invocation (a ``# TODO: call holdout_gate.py`` comment earns nothing)."""
+    Path (b) is a WEAKER heuristic than (a) — a script line proves intent, not
+    a run — which is why ``--baseline`` accepts only (a). A bare TASKS.json
+    verify *declaration* or a RUNLOG prose mention is NOT an invocation (a
+    ``# TODO: call holdout_gate.py`` comment earns nothing)."""
     if gate_verdicts:
         return True
     if not _gate_script_present(paths.workspace):
@@ -370,15 +387,23 @@ def _load_receipt_costs(loop_dir: Path) -> tuple[float | None, int]:
     return total, count
 
 
-def _anchor_repair(record: dict, bundle_scores: set[float]) -> dict:
+def _anchor_repair(record: dict, bundles: list[dict], iter_order: dict[str, int]) -> dict:
     """Cross-check a repair record's self-reported before/after scores against the
     deterministic verify bundles (§4.3, RP anchoring).
 
-    Returns ``status`` one of ``anchored`` (both scores corroborated),
-    ``unanchored`` (no verify bundle carries a score to anchor against), or
-    ``rejected`` (a score is present but no verify bundle corroborates it — a
-    fabricated delta). ``recheck_productive`` runs first, so by here a repair
-    record's before/after scores are already numeric.
+    A record anchors only against a SAME-TASK red→green bundle pair: a non-green
+    bundle whose score equals ``verification_before.score`` and a green bundle of
+    the same task whose score equals ``verification_after.score``. When both
+    bundles' iterations are known, the red must precede the green — a pair whose
+    green came first is a regression, not a repair. Set-membership over all
+    bundle scores anchored nothing (a loop authors its own bundles, so matching
+    two free-floating numbers is free).
+
+    Returns ``status`` one of ``anchored``, ``rejected`` (scored bundles exist
+    but no qualifying pair corroborates the delta — a fabricated/borrowed
+    number), or ``unanchored`` (no scored bundle to anchor against at all).
+    ``recheck_productive`` runs first, so by here a valid record's before/after
+    scores are already numeric.
     """
     before = record.get("verification_before")
     after = record.get("verification_after")
@@ -386,19 +411,28 @@ def _anchor_repair(record: dict, bundle_scores: set[float]) -> dict:
     after = _num(after.get("score")) if isinstance(after, dict) else None
     if before is None and after is None:
         return {"status": "unanchored", "reason": "no before/after score to anchor"}
-    if not bundle_scores:
+    scored = [b for b in bundles if b["score"] is not None]
+    if not scored:
         return {"status": "unanchored", "reason": "no verify bundle scores to anchor against"}
-    missing = [
-        label
-        for label, value in (("verification_before", before), ("verification_after", after))
-        if value is not None and value not in bundle_scores
-    ]
-    if missing:
-        return {
-            "status": "rejected",
-            "reason": f"self-reported {', '.join(missing)}.score not corroborated by any verify bundle",
-        }
-    return {"status": "anchored", "reason": "ok"}
+    reds = [b for b in scored if not b["green"] and b["task"]]
+    greens = [b for b in scored if b["green"] and b["task"]]
+    for red in reds:
+        for green in greens:
+            if red["task"] != green["task"]:
+                continue
+            red_order = iter_order.get(red.get("assigned_iter"))
+            green_order = iter_order.get(green.get("assigned_iter"))
+            if red_order is not None and green_order is not None and not red_order < green_order:
+                continue
+            if red["score"] == before and green["score"] == after:
+                return {"status": "anchored", "reason": "ok"}
+    return {
+        "status": "rejected",
+        "reason": (
+            "self-reported verification_before/after scores are not corroborated by any "
+            "same-task red-to-green verify bundle pair"
+        ),
+    }
 
 
 def _rel(path: Path, base: Path) -> str:
@@ -425,10 +459,20 @@ def compute_metrics(loop_dir: str | Path, loop_label: str | None = None) -> dict
     verify_by_iter, unmatched_verify = _assign_bundles_to_iters(bundles, blocks)
 
     # Success claims: RUNLOG success-outcome iterations, plus the terminal claim.
-    claim_iters: set[str] = {iid for iid, text in blocks if _block_claims_success(text)}
+    # Completion-class claims (task_passed/terminal/succeeded, and the terminal
+    # state itself) assert "done"; progress-class claims (advanced) assert motion.
+    completion_iters: set[str] = set()
+    progress_iters: set[str] = set()
+    for iid, text in blocks:
+        tokens = _block_outcome_tokens(text)
+        if any(t in _COMPLETION_OUTCOME_TOKENS for t in tokens):
+            completion_iters.add(iid)
+        elif any(t in _PROGRESS_OUTCOME_TOKENS for t in tokens):
+            progress_iters.add(iid)
     if terminal.get("state") == "Succeeded":
         tid = _norm_iter(terminal.get("iteration_id"))
-        claim_iters.add(tid)
+        completion_iters.add(tid)
+        progress_iters.discard(tid)
         # The terminal names the verify bundles that back its success claim.
         evidence = terminal.get("evidence")
         if isinstance(evidence, list):
@@ -438,20 +482,41 @@ def compute_metrics(loop_dir: str | Path, loop_label: str | None = None) -> dict
                     verify_by_iter.setdefault(tid, [])
                     if b not in verify_by_iter[tid]:
                         verify_by_iter[tid].append(b)
+    claim_iters = completion_iters | progress_iters
 
-    # FCR-A: a success claim is clean only if every verify bundle attached to its
-    # iteration is green — with one honest exception: a red bundle whose OWN task
-    # later reached green is a repaired intermediate, not a false completion (the
-    # flagship's verify-T2-iter1 → verify-T2). An UNRELATED green bundle can never
-    # launder a claimed task's still-red gate. Unmatched claims fail closed (§8).
-    green_tasks = {b["task"] for b in bundles if b["green"] and b["task"]}
+    # FCR-A cleanness is outcome-class aware. Completion-class: every attached
+    # bundle green, no exceptions ("not backed by a green verify … is a false
+    # completion, full stop"). Progress-class: a red bundle is excused only if
+    # its OWN task reaches green in a STRICTLY LATER iteration (the flagship's
+    # verify-T2-iter1 → verify-T2) — an unrelated green never launders a red
+    # gate, and a same-iteration green never excuses its own task's red
+    # (within-iteration chronology is unknowable). Unmatched claims and
+    # unordered iterations fail closed (§8).
+    iter_order = {iid: i for i, (iid, _text) in enumerate(blocks)}
+    green_task_orders: dict[str, set[int]] = {}
+    for iid, attached in verify_by_iter.items():
+        order = iter_order.get(iid)
+        if order is None:
+            continue
+        for b in attached:
+            if b["green"] and b["task"]:
+                green_task_orders.setdefault(b["task"], set()).add(order)
 
     def _claim_is_clean(iid: str) -> bool:
         attached = verify_by_iter.get(iid, [])
-        if not attached or not any(b["green"] for b in attached):
+        if not attached:
             return False
+        if iid in completion_iters:
+            return all(b["green"] for b in attached)
+        if not any(b["green"] for b in attached):
+            return False
+        claim_order = iter_order.get(iid)
         for b in attached:
-            if not b["green"] and (not b["task"] or b["task"] not in green_tasks):
+            if b["green"]:
+                continue
+            if claim_order is None or not b["task"]:
+                return False
+            if not any(o > claim_order for o in green_task_orders.get(b["task"], ())):
                 return False
         return True
 
@@ -472,11 +537,10 @@ def compute_metrics(loop_dir: str | Path, loop_label: str | None = None) -> dict
     evidence_backed = _gate_invoked(paths, gate_verdicts)
 
     # RP: over recomputed-and-agreed repair records only, whose before/after
-    # scores are anchored to the deterministic verify bundles (§4.3). A record
-    # whose stored productive lies (recheck) OR whose scores are not corroborated
-    # by any verify bundle (anchor) is rejected; a record with no bundle to anchor
-    # against is counted but flagged unanchored (a baseline refuses over those).
-    bundle_scores = {b["score"] for b in bundles if b["score"] is not None}
+    # scores are anchored to a same-task red→green verify-bundle pair (§4.3). A
+    # record whose stored productive lies (recheck) OR whose scores no pair
+    # corroborates (anchor) is rejected; a record with no scored bundle to
+    # anchor against is counted but flagged unanchored (a baseline refuses).
     validated = 0
     productive = 0
     rejected: list[dict] = []
@@ -489,7 +553,7 @@ def compute_metrics(loop_dir: str | Path, loop_label: str | None = None) -> dict
         if not verdict["valid"]:
             rejected.append({"record": rel, "reason": verdict["reason"]})
             continue
-        anchor = _anchor_repair(record, bundle_scores)
+        anchor = _anchor_repair(record, bundles, iter_order)
         if anchor["status"] == "rejected":
             rejected.append({"record": rel, "reason": anchor["reason"]})
             continue
@@ -572,19 +636,21 @@ def _git_commit() -> str | None:
 def build_baseline(loop_dir: str | Path, loop_label: str | None = None) -> tuple[bool, dict, list[str]]:
     """Compute the scorecard and check the §4.5 baseline preconditions.
 
-    Returns ``(ok, scorecard, refusal_reasons)``. ``ok`` is False when the run is
-    not evidence-backed, contains a rejected record, has disagreeing FCR methods,
-    claims no success (vacuous 0/0), or counts an unanchored repair record. Each
-    refusal names the precondition that failed.
+    Returns ``(ok, scorecard, refusal_reasons)``. ``ok`` is False when the loop
+    carries no structurally-valid gate verdict artifact (the strict form of
+    evidence-backing — a verify-script gate line never qualifies a baseline),
+    contains a rejected record, has disagreeing FCR methods, claims no success
+    (vacuous 0/0), or counts an unanchored repair record. Each refusal names the
+    precondition that failed.
     """
     scorecard = compute_metrics(loop_dir, loop_label)
     prov = scorecard["provenance"]
     reasons: list[str] = []
-    if not scorecard["evidence_backed"]:
+    if not prov["holdout_verdicts"]:
         reasons.append(
-            "run is not evidence_backed — no held-out / anti-cheat gate invocation "
-            "detectable (a structurally-valid verdict artifact, or a non-comment gate "
-            "line in a verify-* script whose gate script exists)"
+            "no structurally-valid held-out verdict artifact in the loop — a published "
+            "baseline requires a recorded gate VERDICT; a gate line in a verify-* script "
+            "(plain-mode evidence_backed) is a weaker heuristic and never qualifies"
         )
     rejected = prov["rejected_records"]
     if rejected:

@@ -395,6 +395,23 @@ def test_comment_only_gate_line_in_verify_script_is_not_evidence(tmp_path):
 
 
 def test_executed_gate_line_in_verify_script_is_evidence(tmp_path):
+    # Path (b) requires the loop's OWN workspace to carry the gate script.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+    )
+    (ws / "scripts").mkdir()
+    (ws / "scripts" / "holdout_gate.py").write_text("# loop-local gate\n", encoding="utf-8")
+    (ws / "scripts" / "verify-full").write_text(
+        "#!/bin/sh\npython3 scripts/holdout_gate.py manifest.json\n", encoding="utf-8"
+    )
+    assert metrics.compute_metrics(ws)["evidence_backed"] is True
+
+
+def test_gate_script_outside_loop_does_not_confer_evidence(tmp_path):
+    # loop-engineer itself ships holdout_gate.py; that must not vacuously satisfy
+    # the "gate script exists" clause for a foreign loop that carries none.
     ws = _make_loop(
         tmp_path,
         runlog=_RUNLOG_ONE_CLAIM,
@@ -404,7 +421,7 @@ def test_executed_gate_line_in_verify_script_is_evidence(tmp_path):
     (ws / "scripts" / "verify-full").write_text(
         "#!/bin/sh\npython3 scripts/holdout_gate.py manifest.json\n", encoding="utf-8"
     )
-    assert metrics.compute_metrics(ws)["evidence_backed"] is True
+    assert metrics.compute_metrics(ws)["evidence_backed"] is False
 
 
 # --- FCR cross-join laundering (P2) -------------------------------------------
@@ -427,13 +444,17 @@ def test_unrelated_green_bundle_does_not_launder_a_red_claimed_task(tmp_path):
 
 
 def test_honest_intermediate_red_later_repaired_is_not_a_false_completion(tmp_path):
-    # The flagship shape: a red bundle whose OWN task later reaches green is an
-    # honestly-repaired intermediate, not a laundered false completion.
+    # The real flagship shape: iteration 1 claims progress (`advanced`) with a
+    # green T1 beside an honest red T2; T2 reaches green in a STRICTLY LATER
+    # iteration. That is a repaired intermediate, not a laundered completion.
     ws = _make_loop(
         tmp_path,
         runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** advanced\n"
-        "- refs: .loop/artifacts/verify-T2-iter1.json and .loop/artifacts/verify-T2.json\n",
+        "- refs: .loop/artifacts/verify-T1.json and .loop/artifacts/verify-T2-iter1.json\n"
+        "\n## Iteration 2 — t\n\n- **outcome:** repair_triggered\n"
+        "- refs: .loop/artifacts/verify-T2.json\n",
         verify={
+            "verify-T1.json": {"task": "T1", "outcome": "PASS", "score": 0.74},
             "verify-T2-iter1.json": {"task": "T2", "outcome": "FAIL", "score": 0.74},
             "verify-T2.json": {"task": "T2", "outcome": "PASS", "score": 0.83},
         },
@@ -518,6 +539,136 @@ def test_rp_record_anchors_cleanly_against_matching_bundles(tmp_path):
     assert sc["provenance"]["rejected_records"] == []
     assert sc["provenance"]["unanchored_records"] == []
     assert sc["repair_productivity"] == 1.0
+
+
+# --- round-2 adversarial regressions: outcome classes, verdict-only baseline, ---
+# --- task-keyed RP anchoring (re-verify findings) --------------------------------
+
+
+def test_completion_claim_with_red_bundle_is_false_completion_even_if_later_repaired(tmp_path):
+    # Exploits G0/G2/H1: a COMPLETION-class claim (task_passed/succeeded/terminal)
+    # over a red gate is a false completion, full stop — a later repair of the
+    # same task never excuses it (that escape is progress-class only).
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** succeeded\n"
+        "- refs: .loop/artifacts/verify-T1.json and .loop/artifacts/verify-T2-iter1.json\n"
+        "\n## Iteration 2 — t\n\n- **outcome:** repair_triggered\n"
+        "- refs: .loop/artifacts/verify-T2.json\n",
+        verify={
+            "verify-T1.json": {"task": "T1", "outcome": "PASS", "score": 0.74},
+            "verify-T2-iter1.json": {"task": "T2", "outcome": "FAIL", "score": 0.74},
+            "verify-T2.json": {"task": "T2", "outcome": "PASS", "score": 0.83},
+        },
+    )
+    sc = metrics.compute_metrics(ws)
+    assert sc["false_completions"] == 1
+    assert sc["false_completion_rate"] == 1.0
+
+
+def test_progress_claim_same_iteration_green_does_not_excuse_its_own_tasks_red(tmp_path):
+    # Exploit G3 class: a green sibling of the SAME task in the SAME iteration
+    # proves nothing about order (within-iteration chronology is unknowable) —
+    # fail closed.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** advanced\n"
+        "- refs: .loop/artifacts/verify-T2-a.json and .loop/artifacts/verify-T2-b.json\n",
+        verify={
+            "verify-T2-a.json": {"task": "T2", "outcome": "FAIL", "score": 0.74},
+            "verify-T2-b.json": {"task": "T2", "outcome": "PASS", "score": 0.83},
+        },
+    )
+    assert metrics.compute_metrics(ws)["false_completions"] == 1
+
+
+def test_progress_claim_over_regressed_task_is_false_completion(tmp_path):
+    # Exploit H2: task green EARLIER, red at claim time — "later reached green"
+    # must be order-aware, not a global green-anywhere set.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** repair_triggered\n"
+        "- refs: .loop/artifacts/verify-X-early.json\n"
+        "\n## Iteration 2 — t\n\n- **outcome:** advanced\n"
+        "- refs: .loop/artifacts/verify-X-late.json\n",
+        verify={
+            "verify-X-early.json": {"task": "X", "outcome": "PASS", "score": 0.9},
+            "verify-X-late.json": {"task": "X", "outcome": "FAIL", "score": 0.4},
+        },
+    )
+    assert metrics.compute_metrics(ws)["false_completions"] == 1
+
+
+def test_baseline_requires_verdict_artifact_not_verify_script_reference(tmp_path):
+    # Exploit N2 pinned: plain-mode evidence_backed via a loop-local gate script +
+    # invocation line is a heuristic — it must NEVER qualify a published baseline.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={"verify-A.json": {"task": "A", "outcome": "PASS", "score": 1.0}},
+    )
+    (ws / "scripts").mkdir()
+    (ws / "scripts" / "holdout_gate.py").write_text("# loop-local gate\n", encoding="utf-8")
+    (ws / "scripts" / "verify-full").write_text(
+        "#!/bin/sh\npython3 scripts/holdout_gate.py manifest.json\n", encoding="utf-8"
+    )
+    assert metrics.compute_metrics(ws)["evidence_backed"] is True
+    out = tmp_path / "docs" / "metrics-baseline.json"
+    rc = metrics.write_baseline(ws, out, loop_label="ws")
+    assert rc != 0
+    assert not out.exists()
+    ok, _sc, reasons = metrics.build_baseline(ws, "ws")
+    assert ok is False
+    assert any("verdict" in r.lower() for r in reasons)
+
+
+def test_rp_borrowed_cross_task_scores_are_rejected(tmp_path):
+    # Exploit N3: before/after matching free-floating scores from DIFFERENT tasks
+    # anchors nothing — only a same-task red→green pair corroborates a repair.
+    ws = _make_loop(
+        tmp_path,
+        runlog=_RUNLOG_ONE_CLAIM,
+        verify={
+            "verify-zzz.json": {"task": "ZZZ", "outcome": "FAIL", "score": 0.74},
+            "verify-A.json": {"task": "A", "outcome": "PASS", "score": 0.83},
+        },
+        repair={"iter-001.json": _repair_record(0.74, 0.83, True)},
+    )
+    sc = metrics.compute_metrics(ws)
+    rejected = sc["provenance"]["rejected_records"]
+    assert any(r["record"].endswith("iter-001.json") for r in rejected)
+    assert sc["repair_productivity"] is None
+
+
+def test_rp_pair_with_green_before_red_is_a_regression_not_an_anchor(tmp_path):
+    # Order-aware anchoring: when both bundle iterations are known, the red must
+    # precede the green; a green-then-red pair is a regression, not a repair.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** task_passed\n"
+        "- refs: .loop/artifacts/verify-good.json\n"
+        "\n## Iteration 2 — t\n\n- **outcome:** repair_triggered\n"
+        "- refs: .loop/artifacts/verify-bad.json\n",
+        verify={
+            "verify-good.json": {"task": "X", "outcome": "PASS", "score": 0.83},
+            "verify-bad.json": {"task": "X", "outcome": "FAIL", "score": 0.74},
+        },
+        repair={"iter-001.json": _repair_record(0.74, 0.83, True)},
+    )
+    sc = metrics.compute_metrics(ws)
+    rejected = sc["provenance"]["rejected_records"]
+    assert any(r["record"].endswith("iter-001.json") for r in rejected)
+
+
+def test_short_outcome_token_is_surfaced(tmp_path):
+    # A <=2-char synonym ("ok") must be surfaced, not silently dropped.
+    ws = _make_loop(
+        tmp_path,
+        runlog="# RUNLOG\n\n## Iteration 1 — t\n\n- **outcome:** ok\n",
+    )
+    sc = metrics.compute_metrics(ws)
+    assert "ok" in sc["provenance"]["unrecognized_outcomes"]
+    assert sc["iterations_claiming_success"] == 0
 
 
 def test_baseline_refuses_when_a_counted_rp_record_is_unanchored(tmp_path):

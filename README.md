@@ -99,8 +99,9 @@ trusted:
 
 The number ships with a `provenance` block naming every input file (including the
 held-out verdict's sha256), so a skeptic can re-derive it. That committed verdict
-is *evidence, not proof*: it is validated structurally and shows a gate ran, but
-tamper detection of the artifact itself belongs to the anti-cheat layer — the tool
+is *evidence, not proof*: it is validated structurally, but a fully-fabricated,
+internally-consistent artifact defeats offline shape-checking by construction —
+tamper detection of the artifact itself belongs to the anti-cheat layer; the tool
 does not claim the verdict is tamper-proof. Reproduce (and refuse to publish over a
 non-gate-backed, inconsistent, vacuous, or unanchored run):
 
