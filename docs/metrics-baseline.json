@@ -20,16 +20,24 @@
       ".loop/repair/iter-002.json"
     ],
     "rejected_records": [],
+    "unanchored_records": [],
+    "unrecognized_outcomes": [],
     "false_completion_rate_holdout": 0.0,
     "fcr_methods_agree": true,
     "holdout_source": [
       ".loop/artifacts/holdout-verdict.json"
     ],
+    "holdout_verdicts": [
+      {
+        "source": ".loop/artifacts/holdout-verdict.json",
+        "sha256": "b203cf5bb6b05f15172209e067d9f4fa0aaf60cada33fe98172a8279051c1000"
+      }
+    ],
     "unmatched_verify": []
   },
   "baseline": {
     "source_example": "examples/coverage-repair",
-    "commit": "4d2db18927b828e1e9193afb6342f50021290dc7",
+    "commit": "dd21ffed9cbc88442565fe60911d201e797558e4",
     "inputs": [
       "examples/coverage-repair/.loop/artifacts/holdout-verdict.json",
       "examples/coverage-repair/.loop/artifacts/verify-T1.json",
