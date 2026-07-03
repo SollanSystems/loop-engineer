@@ -97,8 +97,12 @@ trusted:
 | `false-completion-rate` | **0.0** | RUNLOG success-claims × verify bundles, cross-checked against the held-out gate flag (both agree) |
 | `repair-productivity` | **1.0** | one repair pass, `verification_after.score` 0.83 > `before` 0.74 (recomputed, agreed) |
 
-The number ships with a `provenance` block naming every input file, so a skeptic
-can re-derive it. Reproduce (and refuse to publish over a non-gate-backed run):
+The number ships with a `provenance` block naming every input file (including the
+held-out verdict's sha256), so a skeptic can re-derive it. That committed verdict
+is *evidence, not proof*: it is validated structurally and shows a gate ran, but
+tamper detection of the artifact itself belongs to the anti-cheat layer — the tool
+does not claim the verdict is tamper-proof. Reproduce (and refuse to publish over a
+non-gate-backed, inconsistent, vacuous, or unanchored run):
 
 ```bash
 python3 -m loop metrics examples/coverage-repair            # print the scorecard
