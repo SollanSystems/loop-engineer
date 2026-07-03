@@ -59,11 +59,11 @@ opinions.
 | Project | ★ | What it is | Enforced proof-of-done? |
 |---|---:|---|---|
 | **Loop Engineer** (this repo) | — | operating contract + proof toolchain | **Yes** — 7 typed terminal states, held-out gate + anti-cheat scan, graded on invocation evidence |
-| [cobusgreyling/loop-engineering](https://github.com/cobusgreyling/loop-engineering) | 4,684 | prompt-native loop-*design guidance*; owns the term "loop engineering" | Different object — design guidance, not a runtime or gate |
-| [obra/superpowers](https://github.com/obra/superpowers) | 242K | phase-gating dev methodology (brainstorm → TDD → review) | No — gates dev phases, not a typed completion contract |
+| [cobusgreyling/loop-engineering](https://github.com/cobusgreyling/loop-engineering) | 4.9K | prompt-native loop-*design guidance*; owns the term "loop engineering" | Different object — design guidance, not a runtime or gate |
+| [obra/superpowers](https://github.com/obra/superpowers) | 244K | phase-gating dev methodology (brainstorm → TDD → review) | No — gates dev phases, not a typed completion contract |
 | [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) | 36K | stateful agent-graph runtime + checkpointing | No — completion is whatever the terminal node returns |
 
-<sub>★ counts fetched via `gh api` on 2026-06-30 (cobusgreyling verified 2026-07-01); they drift over time.</sub>
+<sub>★ counts fetched via `gh api` on 2026-07-02; they drift over time.</sub>
 
 What this suite owns:
 
