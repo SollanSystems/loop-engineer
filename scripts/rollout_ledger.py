@@ -137,11 +137,14 @@ def summarize(path: str | Path) -> dict:
                 productive += 1
         else:
             rejected += 1
-    repair_productivity = productive / validated if validated else 0.0
+    rollout_productivity = productive / validated if validated else 0.0
     return {
         "count": validated,
         "productive": productive,
-        "repair_productivity": repair_productivity,
+        # This is the rollout-productivity signal (a flywheel view of candidate
+        # adjudication), NOT the RP baseline — RP is derived by scripts/metrics.py
+        # from the canonical repair record. See the module docstring.
+        "rollout_productivity": rollout_productivity,
         "rejected": rejected,
         "malformed": malformed,
     }

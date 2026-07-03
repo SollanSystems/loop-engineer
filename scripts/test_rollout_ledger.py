@@ -76,7 +76,7 @@ def test_summarize_computes_productive_fraction_and_count(tmp_path):
 
     # Assert
     assert summary["count"] == 3
-    assert summary["repair_productivity"] == 2 / 3
+    assert summary["rollout_productivity"] == 2 / 3
 
 
 def test_append_is_append_only_and_preserves_prior_lines(tmp_path):
@@ -101,7 +101,7 @@ def test_summarize_of_empty_ledger_is_zero(tmp_path):
 
     # Assert
     assert summary["count"] == 0
-    assert summary["repair_productivity"] == 0.0
+    assert summary["rollout_productivity"] == 0.0
 
 
 # --- M4-CLI item 9: malformed ledger lines are tolerated, not fatal ----------
@@ -157,7 +157,7 @@ def test_summarize_counts_malformed_lines(tmp_path):
     # Valid candidates are summarized; malformed lines are counted separately.
     assert summary["count"] == 2
     assert summary["malformed"] == 2
-    assert summary["repair_productivity"] == 1.0
+    assert summary["rollout_productivity"] == 1.0
 
 
 def test_summarize_rejects_record_whose_productive_disagrees_with_delta(tmp_path):
@@ -172,4 +172,4 @@ def test_summarize_rejects_record_whose_productive_disagrees_with_delta(tmp_path
 
     assert summary["count"] == 1  # only the honest record is validated
     assert summary["rejected"] == 1
-    assert summary["repair_productivity"] == 1.0
+    assert summary["rollout_productivity"] == 1.0
