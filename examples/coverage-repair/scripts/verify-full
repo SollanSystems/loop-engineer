@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# verify-full — milestone gate: criterion 1 (coverage) + false-completion defense.
+# Runs verify-fast, the coverage measurement, and the REAL repo held-out gate
+# (scripts/holdout_gate.py) over the toy target's visible + holdout checks.
+# Pure stdlib; ~1s.
+set -euo pipefail
+EX="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$EX/../.." && pwd)"
+
+bash "$EX/scripts/verify-fast"
+
+echo "== criterion 1: pricing.py line coverage >= 0.80 =="
+( cd "$EX/target" && python3 measure_coverage.py )
+
+echo "== false-completion defense: held-out gate over visible + holdout =="
+python3 "$REPO/scripts/holdout_gate.py" "$EX/target/manifest.json" --cwd "$EX/target"
+echo "verify-full: PASS (criteria 1+2 verified; holdout gate green)"

@@ -35,7 +35,21 @@ Succeeded`.
 > The `scripts/verify-*` gates and `EVALS/` rubrics referenced here are designed by `[[loop-evals]]`
 > and *called* by `[[loop-run]]` (delegating acceptance to `/verify-slice`); after the run,
 > `[[loop-flywheel]]` mines `RUNLOG.md` + traces to promote the zero-qty / negative-price cases
-> into the permanent regression set. This example ships the loop artifacts, not the target repo.
+> into the permanent regression set. This example also ships a **runnable** realization of that
+> target under `target/` plus example-local `scripts/verify-*` — see **Run it yourself** below.
+
+## The runnable target (`target/`)
+
+The story above is reproducible, not just narrated. `target/` is the smallest honest realization of
+the scenario:
+
+| File | Role |
+|---|---|
+| `target/pricing.py` | The post-repair module: `parse_request` typed validation (criterion 2) + the repaired zero-qty / negative-price branches of `apply_discount` (criterion 1). |
+| `target/test_visible.py` | The **visible** suite the loop optimized against — validation + happy-path discounts. |
+| `target/test_holdout.py` | The **held-out** adversarial probes, withheld until terminal verification — they exercise exactly the two repaired branches. |
+| `target/measure_coverage.py` | Dependency-free line-coverage gate for `pricing.py` (criterion 1), pure stdlib. |
+| `target/manifest.json` | The visible/holdout split fed to the real `scripts/holdout_gate.py`. |
 
 ## What to notice (the design points this example proves)
 
@@ -52,8 +66,9 @@ Succeeded`.
 4. **Reuse, not reinvention.** Acceptance verification delegates to `/verify-slice`; every dispatch
    in `RUNLOG.md`/`WORKFLOW.md` names an explicit `model:` (read→`haiku`, write→`opus`) per the
    model-routing HARD CONTRACT; a live run appends receipts to `.loop/receipts/*.jsonl` (this
-   frozen example ships the contract artifacts, not a receipts trail). The suite added no
-   verifier of its own.
+   example ships the contract artifacts plus a runnable target and a committed gate run under
+   `.loop/artifacts/`, not a live receipts trail). The suite added no verifier of its own —
+   `run-example` calls the existing `scripts/holdout_gate.py`.
 5. **An explicit terminal state, always.** The run ends in exactly one of the canonical seven
    (`Succeeded`), written once to `terminal_state.json`.
 
@@ -68,6 +83,26 @@ done
 # The terminal state is Succeeded:
 uv run --with pyyaml python3 -c "import json; assert json.load(open('terminal_state.json'))['state']=='Succeeded'; print('terminal: Succeeded')"
 ```
+
+## Run it yourself
+
+One entrypoint reproduces this example's terminal verification end to end — no installs, ~1–2s:
+
+```bash
+# From anywhere (path-independent):
+bash examples/coverage-repair/scripts/run-example
+```
+
+It (1) runs the visible checks (`verify-fast` — criterion 2), (2) executes the **real** repo
+held-out gate `scripts/holdout_gate.py` over the toy target's visible + holdout checks, (3) captures
+the verdict to `.loop/artifacts/holdout-verdict.json`, and (4) asserts the committed
+`terminal_state.json`'s `false_completion: false` is **backed** by an independent `Succeeded`
+verdict — exiting nonzero on any mismatch. A committed transcript of one real run lives at
+`.loop/artifacts/holdout-run.txt`.
+
+`scripts/verify-full` runs the same coverage + held-out gate as the milestone check. Delete the toy
+target or the gate wiring and both the run and `python3 -m loop inspect examples/coverage-repair`
+(which grades false-completion defense as *invoked* off this real invocation) go red.
 
 ## Where to go next
 

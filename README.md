@@ -75,28 +75,30 @@ what proof machinery is present and what is missing — without running the loop
 ```json
 {
   "target": "examples/coverage-repair",
-  "score": 76,
+  "score": 90,
   "terminal_states_covered": 7,
   "present": [
     "defines verifiable success criteria",
     "independent verification",
     "approval gates on side-effects",
+    "false-completion defense (invoked)",
     "all 7 terminal states reachable"
   ],
   "gaps": [
-    "no false-completion defense: no recorded holdout/anti-cheat invocation (a self-asserted false_completion flag or prose mention earns no credit)",
     "no plan-then-execute discipline for untrusted/web reads (prompt-injection surface)"
   ],
-  "verdict": "ok"
+  "verdict": "strong"
 }
 ```
 
 Note: `false-completion defense` credit is graded on *invocation evidence*, not
-self-assertion. This example declares `false_completion: false` and an anti-cheat
-policy in prose but records no holdout/anti-cheat run, so it earns no credit and
-the gap is flagged honestly — wire a `scripts/verify-*` gate that invokes a
-holdout / anti-cheat check (or record a run in `RUNLOG.md` / `.loop/receipts`) to
-earn it.
+self-assertion. This example earns it the honest way — `scripts/verify-full`
+invokes the real held-out gate (`scripts/holdout_gate.py`) over the toy target in
+`examples/coverage-repair/target/`, and `run-example` records a Succeeded verdict
+to `.loop/artifacts/holdout-verdict.json` — so a self-asserted flag is never what
+scores. The one remaining gap is honest too: this low-risk, workspace-write loop
+declares `plan_then_execute: false`, so it earns no prompt-injection-discipline
+credit (correct for a loop that reads no untrusted input).
 
 Both commands accept either a workspace root or its `.loop/` directory.
 

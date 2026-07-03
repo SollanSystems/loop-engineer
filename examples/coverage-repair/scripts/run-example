@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# run-example — reproduce this example's terminal verification, end to end.
+#
+#   1. run the visible checks (verify-fast — criterion 2),
+#   2. execute the REAL repo held-out gate (scripts/holdout_gate.py) over the toy
+#      target's visible + holdout checks, capturing the verdict JSON,
+#   3. cross-check that the committed terminal_state.json's false_completion:false
+#      is BACKED by an independent gate verdict of Succeeded.
+#
+# Exits nonzero on any mismatch. Path-independent (resolves from $0, not cwd).
+# Pure stdlib; ~1-2s (CI-cheap).
+set -euo pipefail
+EX="$(cd "$(dirname "$0")/.." && pwd)"     # examples/coverage-repair
+REPO="$(cd "$EX/../.." && pwd)"            # repo root
+ART="$EX/.loop/artifacts"
+VERDICT="$ART/holdout-verdict.json"
+mkdir -p "$ART"
+
+echo "== [1/3] visible checks (criterion 2 — typed validation) =="
+bash "$EX/scripts/verify-fast"
+
+echo "== [2/3] held-out gate (real scripts/holdout_gate.py) =="
+set +e
+python3 "$REPO/scripts/holdout_gate.py" "$EX/target/manifest.json" \
+  --cwd "$EX/target" > "$VERDICT"
+gate_rc=$?
+set -e
+cat "$VERDICT"
+echo "captured verdict -> ${VERDICT#"$REPO"/}"
+
+echo "== [3/3] cross-check: committed terminal_state vs gate verdict =="
+python3 - "$EX/terminal_state.json" "$VERDICT" "$gate_rc" <<'PY'
+import json, sys
+
+terminal = json.load(open(sys.argv[1], encoding="utf-8"))
+verdict = json.load(open(sys.argv[2], encoding="utf-8"))
+gate_rc = int(sys.argv[3])
+
+claimed_fc = terminal.get("false_completion")
+gate_verdict = verdict.get("verdict")
+gate_fc = verdict.get("false_completion")
+
+# The committed claim (false_completion: false, state Succeeded) is credible only
+# if an independent gate run actually reached Succeeded with no measured false
+# completion — and the gate's own exit code agrees (0 iff Succeeded).
+if claimed_fc is not False:
+    sys.exit(f"MISMATCH: terminal_state.false_completion is {claimed_fc!r}, expected false")
+if gate_verdict != "Succeeded":
+    sys.exit(f"MISMATCH: gate verdict {gate_verdict!r} != Succeeded — "
+             "committed false_completion:false is unbacked")
+if gate_fc is not False:
+    sys.exit(f"MISMATCH: gate measured false_completion={gate_fc!r}")
+if gate_rc != 0:
+    sys.exit(f"MISMATCH: gate exit code {gate_rc} != 0 despite a Succeeded verdict")
+
+print("OK: terminal_state false_completion:false is BACKED by an independent "
+      "holdout_gate verdict of Succeeded")
+PY
+
+echo "run-example: PASS"
