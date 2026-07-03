@@ -361,3 +361,57 @@ def test_self_neuter_of_gate_matcher_is_detected():
     )
     prefixed_sigs = {f["signature"] for f in acs.scan(diff_text=prefixed)["findings"]}
     assert "scanner_self_edit" in prefixed_sigs
+
+
+# --- M4-CLI item 7: exit-code split (clean / findings / operational error) ---
+
+import io  # noqa: E402
+import json  # noqa: E402
+
+
+def _main(monkeypatch, args, stdin_text=""):
+    """Run acs.main with a controlled stdin (pytest replaces sys.stdin with an
+    object whose read() raises, so the scanner's stdin fallback would blow up)."""
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
+    return acs.main(args)
+
+
+def test_exit_zero_on_clean_scan(monkeypatch):
+    rc = _main(monkeypatch, ["--files", "src/widget.py"])
+    assert rc == 0
+
+
+def test_exit_one_on_review_findings(monkeypatch):
+    # A test-file mutation is a review-flag finding (not clean, not tampering).
+    rc = _main(monkeypatch, ["--files", "tests/test_foo.py"])
+    assert rc == 1
+
+
+def test_exit_two_on_gate_tampering(monkeypatch):
+    rc = _main(monkeypatch, ["--files", "scripts/self_eval.py"])
+    assert rc == 2
+
+
+def test_operational_error_on_missing_trajectory_file_is_distinct(monkeypatch):
+    # A broken invocation must NOT be read as a clean scan (0) or as findings (1).
+    rc = _main(monkeypatch, ["--trajectory", "/no/such/trajectory.json"])
+    assert rc not in (0, 1, 2)
+    assert rc == 3
+
+
+def test_operational_error_on_missing_diff_file(monkeypatch):
+    rc = _main(monkeypatch, ["--diff", "/no/such/diff.txt"])
+    assert rc == 3
+
+
+def test_operational_error_on_malformed_trajectory_json(monkeypatch, tmp_path):
+    bad = tmp_path / "traj.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+    rc = _main(monkeypatch, ["--trajectory", str(bad)])
+    assert rc == 3
+
+
+def test_module_docstring_documents_operational_error_exit_code():
+    doc = (acs.__doc__ or "").lower()
+    assert "operational error" in doc
+    assert "clean" in doc and "findings" in doc

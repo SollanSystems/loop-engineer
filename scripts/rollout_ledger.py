@@ -36,6 +36,10 @@ import json
 import sys
 from pathlib import Path
 
+
+def _warn(message: str) -> None:
+    print(f"rollout_ledger: {message}", file=sys.stderr)
+
 RECORD_FIELDS = (
     "id",
     "parent",
@@ -64,21 +68,49 @@ def append(record: dict, path: str | Path) -> dict:
     return written
 
 
-def read(path: str | Path) -> list[dict]:
-    """Return every record in the ledger, in append order. Empty if absent."""
+def _read_with_stats(path: str | Path) -> tuple[list[dict], int]:
+    """Read the ledger, tolerating corruption. Returns ``(records, malformed)``.
+
+    A ledger is append-only JSONL that may have been truncated mid-write or hand-
+    edited, so a single bad line must not lose the whole lineage. A line that is
+    not a JSON object (unparseable, or valid JSON that is not a dict) is skipped
+    with a stderr warning and counted, never raised.
+    """
     p = Path(path)
     if not p.exists():
-        return []
-    records = []
-    for line in p.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            records.append(json.loads(line))
+        return [], 0
+    records: list[dict] = []
+    malformed = 0
+    for lineno, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            malformed += 1
+            _warn(f"skipping malformed ledger line {lineno}: {exc}")
+            continue
+        if not isinstance(record, dict):
+            malformed += 1
+            _warn(f"skipping malformed ledger line {lineno}: not a JSON object")
+            continue
+        records.append(record)
+    return records, malformed
+
+
+def read(path: str | Path) -> list[dict]:
+    """Return every valid record in the ledger, in append order. Empty if absent.
+
+    Malformed lines are skipped (with a stderr warning), never fatal.
+    """
+    records, _ = _read_with_stats(path)
     return records
 
 
 def summarize(path: str | Path) -> dict:
-    """Compute repair-productivity (productive fraction) and the candidate count."""
-    records = read(path)
+    """Compute repair-productivity (productive fraction), the candidate count, and
+    the number of malformed lines skipped."""
+    records, malformed = _read_with_stats(path)
     count = len(records)
     productive = sum(1 for r in records if r.get("productive"))
     repair_productivity = productive / count if count else 0.0
@@ -86,6 +118,7 @@ def summarize(path: str | Path) -> dict:
         "count": count,
         "productive": productive,
         "repair_productivity": repair_productivity,
+        "malformed": malformed,
     }
 
 
