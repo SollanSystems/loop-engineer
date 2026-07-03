@@ -64,11 +64,12 @@ def test_every_record_has_exactly_the_seven_fields(tmp_path):
 
 
 def test_summarize_computes_productive_fraction_and_count(tmp_path):
-    # Arrange
+    # Arrange — `productive` must agree with score_delta (summarize recomputes it
+    # and rejects disagreement): a productive candidate carries a positive delta.
     ledger = tmp_path / "rollout.jsonl"
-    rollout_ledger.append(_candidate(id="cand-1", productive=False), ledger)
-    rollout_ledger.append(_candidate(id="cand-2", productive=True), ledger)
-    rollout_ledger.append(_candidate(id="cand-3", productive=True), ledger)
+    rollout_ledger.append(_candidate(id="cand-1", score_delta=0.0, productive=False), ledger)
+    rollout_ledger.append(_candidate(id="cand-2", score_delta=0.1, productive=True), ledger)
+    rollout_ledger.append(_candidate(id="cand-3", score_delta=0.1, productive=True), ledger)
 
     # Act
     summary = rollout_ledger.summarize(ledger)
@@ -145,15 +146,30 @@ def test_read_warns_to_stderr_on_malformed_line(tmp_path, capsys):
 
 def test_summarize_counts_malformed_lines(tmp_path):
     ledger = tmp_path / "rollout.jsonl"
-    rollout_ledger.append(_candidate(id="cand-1", productive=True), ledger)
+    rollout_ledger.append(_candidate(id="cand-1", score_delta=0.1, productive=True), ledger)
     with ledger.open("a", encoding="utf-8") as fh:
         fh.write("garbage line\n")
         fh.write("also not json {,,}\n")
-    rollout_ledger.append(_candidate(id="cand-2", productive=True), ledger)
+    rollout_ledger.append(_candidate(id="cand-2", score_delta=0.1, productive=True), ledger)
 
     summary = rollout_ledger.summarize(ledger)
 
     # Valid candidates are summarized; malformed lines are counted separately.
     assert summary["count"] == 2
     assert summary["malformed"] == 2
+    assert summary["repair_productivity"] == 1.0
+
+
+def test_summarize_rejects_record_whose_productive_disagrees_with_delta(tmp_path):
+    # HI5/M3: a record claiming productive:true on a zero delta is a lie —
+    # summarize recomputes from score_delta, rejects it, and excludes it from the
+    # productive fraction rather than summing the flag verbatim.
+    ledger = tmp_path / "rollout.jsonl"
+    rollout_ledger.append(_candidate(id="honest", score_delta=0.1, productive=True), ledger)
+    rollout_ledger.append(_candidate(id="liar", score_delta=0.0, productive=True), ledger)
+
+    summary = rollout_ledger.summarize(ledger)
+
+    assert summary["count"] == 1  # only the honest record is validated
+    assert summary["rejected"] == 1
     assert summary["repair_productivity"] == 1.0

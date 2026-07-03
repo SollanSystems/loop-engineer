@@ -1,10 +1,17 @@
-"""Append-only JSONL rollout ledger — the durable record of loop candidates (G8).
+"""Append-only JSONL rollout / candidate ledger (G8, schema loop-engineer/rollout@1).
 
-A rollout/repair loop produces a stream of *candidates*: each is a proposed
-change (a repair, a harden, a config mutation) that the loop scored and
-adjudicated against the prior winner. This ledger is where that stream lands —
+A rollout/hardening loop produces a stream of *candidates*: each is a proposed
+change (a harden, a config mutation, a rollout adjudication) that the loop scored
+and adjudicated against the prior winner. This ledger is where that stream lands —
 one JSON object per line, appended and never rewritten, so the lineage survives
 compaction and session loss.
+
+**This is the rollout / candidate ledger record, NOT the repair record.** The
+canonical repair record (``schemas/repair-record.schema.json``,
+``loop-engineer/repair@1``, on disk at ``.loop/repair/<iteration_id>.json``) is
+what repair-productivity (RP) is derived from — see ``reference/eval-suite.md``
+§2.2. This record's ``productive`` is the separate *rollout*-productivity signal
+(a flywheel view of candidate adjudication), not the RP baseline.
 
 Each record carries EXACTLY these 7 fields:
 
@@ -16,12 +23,13 @@ Each record carries EXACTLY these 7 fields:
   * ``coherent_with_prior_winner``  — does it preserve the prior winner's gains?
   * ``productive``                  — did it *measurably* improve the score?
 
-``productive`` is the per-candidate signal behind the suite's
-repair-productivity metric: a repair that does not move the score is churn, not
-progress. ``summarize`` aggregates that signal into the productive fraction.
+``productive`` is never trusted verbatim (M3/HI5): ``summarize`` recomputes it
+from ``score_delta`` via the shared ``recheck_productive`` validator and
+**rejects** any record whose stored flag disagrees, so the productive fraction is
+a derivation, not a self-report.
 
 This ships as composable tooling, not a runtime: a loop calls ``append`` at each
-adjudication and ``summarize`` when it wants the repair-productivity readout.
+adjudication and ``summarize`` when it wants the rollout-productivity readout.
 
 Run::
 
@@ -108,16 +116,33 @@ def read(path: str | Path) -> list[dict]:
 
 
 def summarize(path: str | Path) -> dict:
-    """Compute repair-productivity (productive fraction), the candidate count, and
-    the number of malformed lines skipped."""
+    """Compute rollout-productivity (productive fraction) over *validated* records.
+
+    ``productive`` is recomputed from ``score_delta`` via the shared
+    ``recheck_productive`` validator; a record whose stored flag disagrees is
+    rejected (counted under ``rejected``, excluded from the fraction) rather than
+    summed verbatim. ``malformed`` counts unparseable lines skipped by the reader.
+    """
+    from metrics import recheck_productive
+
     records, malformed = _read_with_stats(path)
-    count = len(records)
-    productive = sum(1 for r in records if r.get("productive"))
-    repair_productivity = productive / count if count else 0.0
+    validated = 0
+    productive = 0
+    rejected = 0
+    for record in records:
+        verdict = recheck_productive(record)
+        if verdict["valid"]:
+            validated += 1
+            if verdict["expected"]:
+                productive += 1
+        else:
+            rejected += 1
+    repair_productivity = productive / validated if validated else 0.0
     return {
-        "count": count,
+        "count": validated,
         "productive": productive,
         "repair_productivity": repair_productivity,
+        "rejected": rejected,
         "malformed": malformed,
     }
 
