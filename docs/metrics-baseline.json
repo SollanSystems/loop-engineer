@@ -37,7 +37,7 @@
   },
   "baseline": {
     "source_example": "examples/coverage-repair",
-    "commit": "dd21ffed9cbc88442565fe60911d201e797558e4",
+    "commit": "2344314b5f0ce06c121baf51c4f17688186d42fb",
     "inputs": [
       "examples/coverage-repair/.loop/artifacts/holdout-verdict.json",
       "examples/coverage-repair/.loop/artifacts/verify-T1.json",
