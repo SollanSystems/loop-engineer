@@ -14,6 +14,31 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## Unreleased
+
+**B1 — the writer API.** `loop.emit` lets a foreign runtime (LangGraph, a plain
+script, any orchestrator) record an evidence-backed loop contract without
+adopting the loop-engineer runtime. It is a writer, never a runtime: it renders
+the contract artifacts and refuses a dishonest `Succeeded` at write time — the
+same evidence cross-check `loop doctor` enforces, applied before the file exists.
+
+### Added
+- **`loop/emit.py` writer API** — `open_contract`, `append_iteration`,
+  `append_receipt`, and `terminate`, plus the `EmitError` raised when a write
+  would produce a dishonest or schema-invalid artifact. `terminate` refuses an
+  evidence-free `Succeeded` (also no-met-criterion or false-completion-flagged),
+  so the honesty gate runs at write time rather than only at validate time;
+  every artifact it writes passes `doctor` by construction.
+- **LangGraph recipe** (`examples/langgraph-emit/`) — a runnable three-node
+  graph whose terminal node ships proof-of-done through `loop.emit`; the emitted
+  contract passes `loop doctor` independently of the graph that wrote it. Paired
+  with the 10-line integration guide `docs/integrations/langgraph.md`.
+- **Recipe acceptance test** (`scripts/test_langgraph_recipe.py`) — runs the
+  example end-to-end and asserts the emitted contract passes `doctor` and ends
+  `Succeeded` with evidence. Env-guarded on `langgraph` (skips when absent), so
+  the package stays zero-dependency; a dedicated `recipe (langgraph)` CI job
+  installs LangGraph and runs it.
+
 ## 0.6.1 — 2026-07-04
 
 **PyPI substrate.** `loop-engineer` becomes a self-contained wheel that runs from
