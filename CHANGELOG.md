@@ -14,7 +14,7 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
-## Unreleased
+## 0.6.1 — 2026-07-04
 
 **PyPI substrate.** `loop-engineer` becomes a self-contained wheel that runs from
 any directory — the CLI no longer depends on being executed from a source

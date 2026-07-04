@@ -15,9 +15,9 @@ def test_readme_has_no_stale_seven_skills():
     assert "all 9 skills" in readme
 
 
-def test_plugin_version_is_0_6_0():
+def test_plugin_version_is_0_6_1():
     plugin = json.loads(_read(".claude-plugin/plugin.json"))
-    assert plugin["version"] == "0.6.0"
+    assert plugin["version"] == "0.6.1"
 
 
 def test_pyproject_version_matches_plugin():
@@ -30,6 +30,7 @@ def test_pyproject_version_matches_plugin():
 
 def test_changelog_has_current_and_historical_entries():
     changelog = _read("CHANGELOG.md")
+    assert "## 0.6.1" in changelog
     assert "## 0.6.0" in changelog
     assert "## 0.5.0" in changelog
     assert "## 0.3.4" in changelog
