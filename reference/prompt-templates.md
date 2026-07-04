@@ -180,7 +180,7 @@ DO:
    do not delete assertions. Editing the gate to go green is verifier-gaming and
    is a security failure (see reference/safety-and-approvals.md).
 4. Re-run the SAME verification.
-5. Append a repair record to the RUNLOG / repair-record.json:
+5. Append a repair record to the RUNLOG / .loop/repair/<iteration_id>.json:
    { failure_mode, hypothesis, repair_action,
      verification_before, verification_after, remaining_delta }
 

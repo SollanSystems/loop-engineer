@@ -9,17 +9,18 @@ from .contract import doctor_report
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect")
+_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect> <workspace-or-.loop>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics> <workspace-or-.loop>"
 
-_HELP = f"""{_PROG} — validate and inspect a portable repo-OS loop contract.
+_HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
 {_USAGE}
+       {_PROG} metrics [--baseline] <workspace-or-.loop>
 
 commands:
   scaffold   Write a fresh, doctor-clean loop contract into <target>.
@@ -28,11 +29,17 @@ commands:
   verify     Alias for doctor — check the contract's state.
   inspect    Score an existing loop against the prime-directive checklist
              (emits a weak/strong verdict and a gap report).
+  metrics    Derive false-completion-rate + repair-productivity from the loop's
+             real .loop/ evidence (RUNLOG, verify bundles, held-out gate, repair
+             records) and emit a JSON scorecard. With --baseline, write a
+             checked-in baseline scorecard — refused unless the run is gate-backed.
 
 arguments:
   <target>   A workspace root or its .loop/ directory.
 
 options:
+  --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
+                run; exits non-zero and writes nothing otherwise.
   -h, --help    Show this help and exit.
   --version     Show the version and exit.
 """
@@ -68,6 +75,34 @@ def _print_json(report: dict) -> int:
     return 0 if report.get("ok") else 1
 
 
+def _run_metrics(argv: list[str]) -> int:
+    """`metrics [--baseline] <target>` — parses its own flag, then delegates to
+    scripts/metrics.py (imported repo-relative, the QW8 editable-install path)."""
+    unknown = [a for a in argv if a.startswith("-") and a != "--baseline"]
+    if unknown:
+        print(f"metrics: unknown option: {unknown[0]}", file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
+        return 2
+    positional = [a for a in argv if not a.startswith("-")]
+    if not positional:
+        print("metrics: missing target argument", file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
+        return 2
+    target = Path(positional[0])
+    if not target.exists():
+        print(
+            f"metrics: target path does not exist: {target}\n"
+            f"       pass an existing loop workspace or its .loop/ directory.",
+            file=sys.stderr,
+        )
+        return 2
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    import metrics  # type: ignore
+
+    return metrics.run(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -86,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown loop command: {command}", file=sys.stderr)
         print(_USAGE, file=sys.stderr)
         return 2
+
+    # metrics carries its own optional --baseline flag, so it parses its own args
+    # before the generic single-target guards below.
+    if command == "metrics":
+        return _run_metrics(argv)
 
     if not argv:
         print(f"{command}: missing target argument", file=sys.stderr)

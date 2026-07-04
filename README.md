@@ -72,8 +72,8 @@ opinions.
 What this suite owns:
 
 - **7 typed terminal states** — a contract primitive, so no run ends in a silent "completed."
-- **`false-completion-rate`** — measurable with the bundled held-out gate and anti-cheat scan (computed from real runs; no baseline ships yet).
-- **`repair-productivity`** — the fraction of repair attempts that measurably move verification forward.
+- **`false-completion-rate`** — measurable with the bundled held-out gate and anti-cheat scan; **0.0** on the shipped gate-backed example (see [Measured baseline](#measured-baseline)).
+- **`repair-productivity`** — the fraction of repair attempts that measurably move verification forward; **1.0** on that example.
 - **Repo-native loop state** — survives compaction, crashes, and handoff.
 - **Deterministic-gate-before-rubric ordering** — model judges are advisory, not the first line of proof.
 
@@ -82,6 +82,33 @@ caps, and deterministic verification gates are shared with mature harnesses. Loo
 Engineer's claim is the proof-of-done framing plus the typed termination and
 loop-health metrics on top. It composes with those tools; it does not replace
 their execution engines.
+
+### Measured baseline
+
+The two metrics are **derived by a tool, not quoted from prose.** The checked-in
+scorecard [`docs/metrics-baseline.json`](docs/metrics-baseline.json) is computed
+by `python3 -m loop metrics` over the gate-backed `examples/coverage-repair` run —
+its `false_completion:false` is backed by a real `holdout_gate.py` verdict, and
+its `productive` flag is recomputed from the repair record's own score delta, not
+trusted:
+
+| Metric | Baseline | Source |
+|---|---:|---|
+| `false-completion-rate` | **0.0** | RUNLOG success-claims × verify bundles, cross-checked against the held-out gate flag (both agree) |
+| `repair-productivity` | **1.0** | one repair pass, `verification_after.score` 0.83 > `before` 0.74 (recomputed, agreed) |
+
+The number ships with a `provenance` block naming every input file (including the
+held-out verdict's sha256), so a skeptic can re-derive it. That committed verdict
+is *evidence, not proof*: it is validated structurally, but a fully-fabricated,
+internally-consistent artifact defeats offline shape-checking by construction —
+tamper detection of the artifact itself belongs to the anti-cheat layer; the tool
+does not claim the verdict is tamper-proof. Reproduce (and refuse to publish over a
+non-gate-backed, inconsistent, vacuous, or unanchored run):
+
+```bash
+python3 -m loop metrics examples/coverage-repair            # print the scorecard
+python3 -m loop metrics --baseline examples/coverage-repair # rewrite docs/metrics-baseline.json
+```
 
 ---
 

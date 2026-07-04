@@ -42,7 +42,7 @@ same `.loop/state.json` checkpoint; they never spawn a fresh untracked attempt.
 - **Max repair attempts per task:** `2` (default).
 - After exceeding the cap: replan / revert / approve / terminate — never silently retry.
 - Each repair attempt produces a structured repair record (see `[[loop-repair]]` and
-  `repair-record.json` in this example).
+  `.loop/repair/iter-002.json` in this example).
 - A repair that does not measurably improve the score is churn → replan.
 - Detected verifier-gaming → hard-terminate `FailedSafety` immediately.
 

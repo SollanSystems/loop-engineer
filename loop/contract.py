@@ -290,6 +290,98 @@ def _jsonschema_validate(data: dict[str, Any], name: str, path: Path, issues: li
         issues.append(ContractIssue("schema_violation", f"{path.name}: {location}: {err.message}", path))
 
 
+# The FCR/RP evidentiary trail (M5): repair records and receipt/rollout ledgers.
+# Validated OPTIONALLY — only when the files exist — so an in-flight loop that has
+# not emitted them yet still passes, while a loop that ships malformed metric
+# inputs can no longer pass validation with them unchecked.
+_RECORD_SCHEMA_FILES = {
+    "repair": "repair-record.schema.json",
+    "rollout": "rollout-record.schema.json",
+    "receipt": "receipt.schema.json",
+}
+
+# The $id each record schema publishes, reported under schemas_checked when the
+# corresponding record files were present and validated (deterministic order).
+_RECORD_SCHEMA_IDS = (
+    ("repair", "loop-engineer/repair@1"),
+    ("rollout", "loop-engineer/rollout@1"),
+    ("receipt", "loop-engineer/receipt@1"),
+)
+
+
+def _load_schema_file(filename: str) -> dict[str, Any]:
+    return json.loads((_schemas_dir() / filename).read_text(encoding="utf-8"))
+
+
+def _structural_record_check(data: dict[str, Any], schema: dict[str, Any], path: Path, issues: list[dict]) -> None:
+    props = schema.get("properties", {})
+    for key in schema.get("required", []):
+        if key not in data:
+            issues.append(ContractIssue("invalid_record", f"{path.name}: missing {key}", path))
+    for key, sub in props.items():
+        if key in data and isinstance(sub, dict) and "const" in sub and data[key] != sub["const"]:
+            issues.append(ContractIssue("schema_mismatch", f"{path.name}: {key} != {sub['const']!r}", path))
+    for vk in ("verification_before", "verification_after"):
+        sub = props.get(vk)
+        if isinstance(sub, dict) and "score" in sub.get("required", []) and vk in data:
+            value = data[vk]
+            score = value.get("score") if isinstance(value, dict) else None
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                issues.append(ContractIssue("invalid_record", f"{path.name}: {vk}.score must be numeric", path))
+
+
+def _validate_record(data: dict[str, Any], schema_key: str, path: Path, mode: str, issues: list[dict]) -> None:
+    filename = _RECORD_SCHEMA_FILES[schema_key]
+    if mode == "jsonschema":
+        import jsonschema  # type: ignore
+
+        validator = jsonschema.Draft202012Validator(_load_schema_file(filename))
+        for err in validator.iter_errors(data):
+            location = "/".join(str(p) for p in err.absolute_path) or "<root>"
+            issues.append(ContractIssue("schema_violation", f"{path.name}: {location}: {err.message}", path))
+    else:
+        _structural_record_check(data, _load_schema_file(filename), path, issues)
+
+
+def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) -> None:
+    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError as exc:
+            issues.append(ContractIssue("invalid_json", f"{path.name}:{lineno}: {exc}", path))
+            continue
+        if not isinstance(data, dict):
+            issues.append(ContractIssue("invalid_record", f"{path.name}:{lineno}: expected object", path))
+            continue
+        _validate_record(data, schema_key, path, mode, issues)
+
+
+def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) -> set[str]:
+    """Validate record files that are present; return the set of record schema
+    keys actually checked (``repair``/``rollout``/``receipt``) so ``doctor`` can
+    report them under ``schemas_checked`` instead of under-counting its coverage."""
+    checked: set[str] = set()
+    repair_dir = paths.loop_dir / "repair"
+    if repair_dir.is_dir():
+        for record_path in sorted(repair_dir.glob("*.json")):
+            data = _read_json(record_path, issues)
+            if data is not None:
+                _validate_record(data, "repair", record_path, mode, issues)
+                checked.add("repair")
+    for ledger_path in sorted(paths.loop_dir.glob("*.jsonl")):
+        _validate_jsonl(ledger_path, "rollout", mode, issues)
+        checked.add("rollout")
+    receipts_dir = paths.loop_dir / "receipts"
+    if receipts_dir.is_dir():
+        for receipt_path in sorted(receipts_dir.glob("*.jsonl")):
+            _validate_jsonl(receipt_path, "receipt", mode, issues)
+            checked.add("receipt")
+    return checked
+
+
 def validate_contract(target: str | Path) -> dict[str, Any]:
     paths = resolve_loop_paths(target)
     issues: list[dict] = []
@@ -328,12 +420,17 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     if not paths.runlog.exists():
         issues.append(ContractIssue("missing_file", "missing RUNLOG.md", paths.runlog))
     _check_stub_verify_scripts(paths, issues)
+    records_checked = _validate_optional_records(paths, mode, issues)
+
+    schemas_checked = list(SCHEMA_IDS) + [
+        schema_id for key, schema_id in _RECORD_SCHEMA_IDS if key in records_checked
+    ]
 
     return {
         "ok": not issues,
         "paths": paths.to_json(),
         "validation_mode": mode,
-        "schemas_checked": list(SCHEMA_IDS),
+        "schemas_checked": schemas_checked,
         "issues": issues,
     }
 

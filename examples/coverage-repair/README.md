@@ -29,7 +29,7 @@ Succeeded`.
 | `TASKS.json` | `[[loop-contract]]` → updated by `[[loop-run]]` | The **machine-readable queue** — `T1` (validation) and `T2` (coverage), each with its `verify` command, `criterion_ref`, `attempts`, and `evidence`. Both end `done`. |
 | `RUNLOG.md` | `[[loop-run]]` (+ repair blocks from `[[loop-repair]]`) | The **append-only history** — two dated iterations: iteration 1 verify **FAIL** → repair → iteration 2 verify **PASS** → terminal. |
 | `.loop/state.json` | `[[loop-run]]` | The **live FSM cursor** — serialized after every transition; here at the terminal snapshot (`state: terminal`, `best_score: 0.83`, `terminal_state: "Succeeded"`). This is what makes the loop resumable across sessions. |
-| `repair-record.json` | `[[loop-repair]]` | One **structured repair record** — `failure_mode`, `hypothesis`, `repair_action`, `verification_before`, `verification_after`, `remaining_delta` (+ `productive: true`). The verification delta proves the repair moved the score (`repair-productivity`). |
+| `.loop/repair/iter-002.json` | `[[loop-repair]]` | One **structured repair record** at its canonical path (`loop-engineer/repair@1`) — `failure_mode`, `hypothesis`, `repair_action`, `verification_before`, `verification_after`, `remaining_delta` (+ `productive: true`). The verification delta proves the repair moved the score, and is the record `python3 -m loop metrics` reads for `repair-productivity`. |
 | `terminal_state.json` | `[[loop-run]]` | The **single end record** — `state == "Succeeded"`, `criteria_met` both true, `evidence` paths, and `false_completion: false`. No silent "completed." |
 
 > The `scripts/verify-*` gates and `EVALS/` rubrics referenced here are designed by `[[loop-evals]]`
@@ -76,7 +76,7 @@ the scenario:
 
 ```bash
 # All JSON in this example parses:
-for f in TASKS.json .loop/state.json repair-record.json terminal_state.json; do
+for f in TASKS.json .loop/state.json .loop/repair/iter-002.json terminal_state.json; do
   uv run --with pyyaml python3 -c "import json,sys; json.load(open('$f')); print('ok:', '$f')"
 done
 
