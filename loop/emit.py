@@ -196,6 +196,8 @@ def terminate(
             raise EmitError("refusing evidence-free Succeeded: evidence[] is empty (G1)")
         if not any(v is True for v in criteria_met.values()):
             raise EmitError("refusing Succeeded with no met (true) entry in criteria_met (G1)")
+    if not all(isinstance(v, bool) for v in criteria_met.values()):
+        raise EmitError("criteria_met values must be booleans")
     paths = _require_contract(target)
     current = _read_state(paths)
 

@@ -101,6 +101,15 @@ def test_terminate_rejects_unknown_state(workspace):
         emit.terminate(workspace, state="Done", criteria_met={"1": True}, evidence=["a"])
 
 
+def test_terminate_rejects_non_boolean_criteria_met_value(workspace):
+    with pytest.raises(emit.EmitError):
+        emit.terminate(
+            workspace, state="FailedUnverifiable", criteria_met={"done": "yes"},
+            evidence=[], reason="could not verify",
+        )
+    assert not (workspace / ".loop" / "terminal_state.json").exists()
+
+
 def test_writes_refused_without_a_contract(tmp_path):
     with pytest.raises(emit.EmitError):
         emit.append_iteration(tmp_path / "nowhere", iteration_id=1, outcome="task_passed")
