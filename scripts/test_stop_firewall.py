@@ -131,3 +131,10 @@ def test_unresolvable_cli_fails_open(tmp_path):
     proc = _run_hook(_payload(_lying_workspace(tmp_path)), plugin_root=tmp_path / "empty")
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+def test_hook_is_registered_in_plugin_manifest():
+    manifest = json.loads((REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    stop_entries = manifest["hooks"]["Stop"]
+    commands = [h["command"] for entry in stop_entries for h in entry["hooks"]]
+    assert any("stop_firewall.py" in c and "${CLAUDE_PLUGIN_ROOT}" in c for c in commands)

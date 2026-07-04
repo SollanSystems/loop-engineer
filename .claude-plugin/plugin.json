@@ -6,5 +6,19 @@
   "homepage": "https://github.com/SollanSystems/loop-engineer",
   "repository": "https://github.com/SollanSystems/loop-engineer",
   "keywords": ["agent", "loop", "agentic", "verification", "harness", "orchestration", "self-improvement", "claude-code", "eval", "repair"],
-  "license": "MIT"
+  "license": "MIT",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_firewall.py",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
 }
