@@ -244,25 +244,16 @@ See `reference/repo-os-contract.md` for the canonical artifact schemas.
 
 ### Portable validator / inspector
 
-No Claude Code plugin is required to validate or inspect a loop contract. From
-the cloned repo root:
+No Claude Code plugin is required to validate or inspect a loop contract:
 
 ```bash
-python3 -m loop doctor /path/to/workspace
-python3 -m loop inspect /path/to/workspace
+uvx loop-engineer inspect .        # zero-install score of any repo's loop contract
+pip install loop-engineer          # or install the CLI: `loop doctor`, `loop inspect`, ...
 ```
 
-To run it against a loop in any other directory, install the core once
-(editable):
-
-```bash
-pip install -e .            # optional faster manifest parsing: pip install -e ".[yaml]"
-python3 -m loop doctor /path/to/workspace
-```
-
-`python3 -m loop` resolves the bundled `loop/` package from the repo root;
-`pip install -e .` puts it on your path so the CLI works from any directory. The
-core is pure-stdlib — PyYAML is an optional extra, not a requirement.
+From a clone, `python3 -m loop <cmd>` and `pip install -e .` keep working; the
+wheel is self-contained (schemas, templates, and the inspect/metrics tooling
+ship inside it). The core is pure-stdlib — PyYAML/jsonschema are optional extras.
 
 The portable core lives in `loop/` and validates schema-bearing artifacts in
 `schemas/`:
@@ -286,6 +277,36 @@ Restart Claude Code to load all 9 skills. (Local dev: clone the repo and run
 for the plugin — no other dependencies. Optional integrations (e.g.
 `claude-code-orchestration` for `/verify-slice`) are layered on when present and
 never required; every skill runs on the bundled core alone.
+
+---
+
+## Adopt in your stack
+
+Three thin, enforcing on-ramps — each one makes a false "done" fail somewhere
+that already exists in your workflow. Start where your loop lives:
+
+**Claude Code** — the plugin ships a Stop-hook firewall: if the session's repo
+holds a `.loop/` contract that claims `Succeeded` while `loop doctor` says
+otherwise, the stop is blocked with the exact doctor issues. No-op without
+`.loop/`, fail-open on error, zero config beyond installing the plugin.
+
+**Any Python runtime** — `loop.emit` is a pure-stdlib writer for foreign
+orchestrators (LangGraph, or anything that can call four functions):
+`open_contract`, `append_iteration`, `append_receipt`, `terminate`. The writer
+refuses an evidence-free `Succeeded` at write time. Recipe:
+[docs/integrations/langgraph.md](docs/integrations/langgraph.md).
+
+**CI** — one workflow step validates the contract and publishes a scorecard:
+
+```yaml
+- uses: SollanSystems/loop-engineer@v0.7.0
+  with:
+    path: "."
+```
+
+`doctor` failure fails the job; the inspect verdict is warn-only unless you set
+`fail-under-score`. Pre-commit users: hook id `loop-doctor`. This repo runs the
+same action against its own contract — the gate gates its maker.
 
 ---
 
