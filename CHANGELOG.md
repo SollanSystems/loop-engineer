@@ -61,6 +61,32 @@ firewall never locks a session — and a strict no-op for every repo without a
   (`python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_firewall.py`), so a marketplace
   install gets the firewall with zero configuration.
 
+**C1 — the CI gate.** The proof-of-done gate at the two boundaries where a
+foreign repo already runs its checks: a GitHub Action for pull-request CI and a
+pre-commit hook for the local commit. Both wrap the same `loop doctor` honesty
+gate the runtime enforces, so a consumer adopts the wedge without adopting the
+loop-engineer runtime — and the repo dogfoods both on its own contract in CI.
+
+### Added
+- **Composite GitHub Action** (`action.yml`, id `loop-engineer gate`) — runs
+  `loop doctor` as a hard gate and `loop inspect` as a scorecard (warn-only until
+  `fail-under-score` is set), installing loop-engineer from PyPI (`version:`) or
+  from the action's own checkout by default. Writes the scorecard to the job
+  summary and, given a `github-token`, an optional PR comment. The `action-dogfood`
+  CI job runs it against the tracked flagship example contract
+  (`examples/coverage-repair`) at `fail-under-score: 90` — the repo root's live
+  `.loop/` is gitignored and absent in a fresh CI checkout.
+- **`.pre-commit-hooks.yaml`** — a `language: python` hook id `loop-doctor`
+  (`entry: loop doctor .`, `always_run`, `pass_filenames: false`) that a consumer
+  wires in with three lines of `.pre-commit-config.yaml`; PR1's self-contained
+  wheel is what makes the `language: python` install work from any consumer repo.
+- **Pre-commit acceptance test** (`scripts/test_precommit_hook.py`) — asserts the
+  hook definition is sound and its entry matches a declared console script, plus a
+  consumer-fixture path that scaffolds a fresh contract and runs the hook through
+  `pre-commit try-repo` end-to-end. Env-guarded on the `pre-commit` tool (skips
+  when absent); the `action-dogfood` CI job installs it and runs the fixture for
+  real on the PR checkout.
+
 ## 0.6.1 — 2026-07-04
 
 **PyPI substrate.** `loop-engineer` becomes a self-contained wheel that runs from

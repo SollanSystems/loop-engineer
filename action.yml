@@ -1,0 +1,98 @@
+name: "loop-engineer gate"
+description: "Proof-of-done gate for agent-loop contracts: hard-fails on doctor, scores with inspect (warn-only by default)."
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  path:
+    description: "Workspace (or .loop dir) holding the loop contract"
+    required: false
+    default: "."
+  version:
+    description: "loop-engineer version to install from PyPI (e.g. 0.6.1). Empty installs from the action's own checkout."
+    required: false
+    default: ""
+  fail-under-score:
+    description: "Fail the job when the inspect score (0-100) is below this. 0 keeps inspect warn-only."
+    required: false
+    default: "0"
+  python-version:
+    description: "Python version for the gate"
+    required: false
+    default: "3.12"
+  github-token:
+    description: "Token for the optional PR scorecard comment. Empty skips the comment."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install loop-engineer
+      shell: bash
+      env:
+        LOOP_VERSION: "${{ inputs.version }}"
+      run: |
+        if [ -n "$LOOP_VERSION" ]; then
+          python -m pip install --quiet "loop-engineer==$LOOP_VERSION"
+        else
+          python -m pip install --quiet "${{ github.action_path }}"
+        fi
+
+    - name: loop doctor (hard gate)
+      shell: bash
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+      run: loop doctor "$LOOP_PATH"
+
+    - name: loop inspect (scorecard)
+      shell: bash
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+        LOOP_FAIL_UNDER: "${{ inputs.fail-under-score }}"
+      run: |
+        set +e
+        loop inspect "$LOOP_PATH" > "${RUNNER_TEMP}/inspect.json"
+        set -e
+        python - "${RUNNER_TEMP}/inspect.json" "$LOOP_FAIL_UNDER" <<'PY'
+        import json, os, sys
+
+        report = json.load(open(sys.argv[1]))
+        fail_under = int(sys.argv[2])
+        score, verdict = report.get("score", 0), report.get("verdict", "?")
+        lines = [
+            "## loop-engineer scorecard",
+            "",
+            f"| metric | value |",
+            f"|---|---|",
+            f"| verdict | **{verdict}** |",
+            f"| score | {score}/100 |",
+            f"| gaps | {len(report.get('gaps', []))} |",
+            "",
+        ]
+        for gap in report.get("gaps", [])[:10]:
+            lines.append(f"- {gap}")
+        summary = "\n".join(lines) + "\n"
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+            fh.write(summary)
+        open(os.path.join(os.environ["RUNNER_TEMP"], "scorecard.md"), "w", encoding="utf-8").write(summary)
+        if verdict == "weak":
+            print(f"::warning::loop inspect verdict is weak (score {score}/100)")
+        if fail_under and score < fail_under:
+            print(f"::error::inspect score {score} < fail-under-score {fail_under}")
+            raise SystemExit(1)
+        PY
+
+    - name: PR scorecard comment (optional)
+      if: ${{ inputs.github-token != '' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh api "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/comments" \
+          -f body="$(cat "${RUNNER_TEMP}/scorecard.md")" || echo "::warning::PR comment failed (non-fatal)"
