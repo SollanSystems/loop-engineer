@@ -2,15 +2,18 @@
 """S0 acceptance: a built wheel must be self-contained. Build the wheel, install
 it into a fresh venv, and run scaffold/doctor/inspect from a temp cwd where the
 repo checkout is not importable. Env-guarded: building needs pip + network for
-the hatchling backend, so this skips in offline/pip-less local envs and runs in CI.
+the hatchling backend, so this skips in offline/pip-less local envs; in CI a
+wheel build failure fails the test rather than skipping it.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import venv
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -38,8 +41,18 @@ def wheel_env(tmp_path_factory):
         capture_output=True, text=True,
     )
     if build.returncode != 0:
+        if os.environ.get("CI"):
+            pytest.fail(f"wheel build failed in CI: {build.stderr[-1500:]}")
         pytest.skip(f"wheel build unavailable here (offline?): {build.stderr[-400:]}")
     wheel = next(tmp.glob("loop_engineer-*.whl"))
+
+    names = zipfile.ZipFile(wheel).namelist()
+    for expected in (
+        "loop/_bundle/schemas/",
+        "loop/_bundle/templates/",
+        "loop/_bundle/tools/",
+    ):
+        assert any(n.startswith(expected) for n in names), f"wheel missing {expected}"
 
     venv_dir = tmp / "venv"
     venv.EnvBuilder(with_pip=True).create(venv_dir)
