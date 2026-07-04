@@ -14,6 +14,36 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## Unreleased
+
+**PyPI substrate.** `loop-engineer` becomes a self-contained wheel that runs from
+any directory — the CLI no longer depends on being executed from a source
+checkout — and ships to PyPI on a version tag through trusted publishing, with no
+token or secret stored in the repo.
+
+### Added
+- **Self-contained wheel** — the schemas, contract templates, and CLI-needed tool
+  scripts the loop reads at runtime are bundled into the wheel under
+  `loop/_bundle/` (via `[tool.hatch.build.targets.wheel.force-include]`) and
+  resolved through an `importlib.resources`-first resolver (`loop/_resources.py`)
+  that falls back to the repo-relative layout for editable installs / source
+  checkouts. `loop` invocations no longer break when run outside the repo tree.
+- **`loop-engineer` console script** — a second `[project.scripts]` entry point
+  alongside `loop` (both map to `loop.__main__:main`), so `uvx loop-engineer`
+  funnels straight to the CLI under the PyPI project name.
+- **Wheel self-containment acceptance test**
+  (`scripts/test_wheel_selfcontained.py`) — builds the wheel and asserts its zip
+  manifest carries the bundled `schemas/`, `templates/`, and `tools/` resources,
+  so a regression that drops a runtime resource from the wheel fails the suite
+  (env-guarded: skips when `pip`/`build` are unavailable locally, hard-fails the
+  build under CI).
+- **Tag-triggered PyPI publish workflow** (`.github/workflows/publish.yml`) — on a
+  `v*` tag push it guards that the tag matches the `pyproject` version, builds the
+  sdist + wheel, smoke-tests the wheel from a throwaway venv (`loop-engineer
+  --version`, then `loop scaffold`/`doctor`/`inspect`), and publishes via PyPI
+  **trusted publishing** (`id-token: write`, the `pypi` environment,
+  `pypa/gh-action-pypi-publish`) — no API token or secret anywhere in the repo.
+
 ## 0.6.0 — 2026-07-03
 
 "Metrics real": false-completion-rate (FCR) and repair-productivity (RP) graduate
