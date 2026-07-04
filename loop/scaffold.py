@@ -5,9 +5,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-# Resolve the bundled templates/ relative to the repo root, the same way
-# __main__ resolves scripts/ — so scaffold works from an editable install.
-_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+from ._resources import templates_dir
+
+
+def _templates_dir() -> Path:
+    return templates_dir()
+
 
 _PLACEHOLDER_RE = re.compile(r"\{\{[A-Z0-9_]+\}\}")
 
@@ -114,14 +117,14 @@ def scaffold(target: str | Path) -> dict[str, Any]:
     for template_name, rel in _FILLED_FILES.items():
         dest = target / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        text = (_TEMPLATES_DIR / template_name).read_text(encoding="utf-8")
+        text = (_templates_dir() / template_name).read_text(encoding="utf-8")
         dest.write_text(_fill(text, mapping), encoding="utf-8")
         written.append(rel)
 
     for template_name, rel in _VERIFY_SCRIPTS.items():
         dest = target / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(_TEMPLATES_DIR / template_name, dest)
+        shutil.copyfile(_templates_dir() / template_name, dest)
         dest.chmod(0o755)
         written.append(rel)
 

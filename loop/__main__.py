@@ -77,7 +77,7 @@ def _print_json(report: dict) -> int:
 
 def _run_metrics(argv: list[str]) -> int:
     """`metrics [--baseline] <target>` — parses its own flag, then delegates to
-    scripts/metrics.py (imported repo-relative, the QW8 editable-install path)."""
+    scripts/metrics.py (resolved bundle-first, repo-relative fallback)."""
     unknown = [a for a in argv if a.startswith("-") and a != "--baseline"]
     if unknown:
         print(f"metrics: unknown option: {unknown[0]}", file=sys.stderr)
@@ -96,7 +96,9 @@ def _run_metrics(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    from ._resources import tools_dir
+
+    scripts_dir = tools_dir()
     sys.path.insert(0, str(scripts_dir))
     import metrics  # type: ignore
 
@@ -159,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
     # command == "inspect": keep the historical inspector script as the scoring
     # UI over the same contract artifacts; import lazily to avoid making
     # scripts/ a package.
-    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    from ._resources import tools_dir
+
+    scripts_dir = tools_dir()
     sys.path.insert(0, str(scripts_dir))
     import inspect_loop  # type: ignore
 
