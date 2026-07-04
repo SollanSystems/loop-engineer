@@ -39,6 +39,28 @@ same evidence cross-check `loop doctor` enforces, applied before the file exists
   the package stays zero-dependency; a dedicated `recipe (langgraph)` CI job
   installs LangGraph and runs it.
 
+**A1 — the Stop-hook firewall.** The false-completion wedge, enforced at the
+session boundary instead of only on demand. When a `.loop/` contract claims
+`Succeeded` while `loop doctor` still reports `ok:false`, the Stop hook blocks the
+turn from ending and hands the agent the named doctor issues, so a run cannot exit
+on a false "done". It is fail-open by construction — a broken or unresolvable
+firewall never locks a session — and a strict no-op for every repo without a
+`.loop/` contract.
+
+### Added
+- **`hooks/stop_firewall.py`** — a stdlib-only Stop hook that blocks a
+  `Succeeded`-claiming contract whose `loop doctor` report is `ok:false`, carrying
+  the issues into the block reason. Fails open on any error (malformed stdin,
+  unresolvable `loop` CLI, doctor failure), stays silent when no `.loop/` exists,
+  respects `stop_hook_active` to avoid livelock, and blocks at most once per
+  session per issue-set (a tempdir sentinel keyed on the issue digest). Covered by
+  `scripts/test_stop_firewall.py` (subprocess acceptance tests for the honest,
+  lying, in-flight, absent, once-per-session, and fail-open paths).
+- **Plugin-manifest registration** — the hook is wired into
+  `.claude-plugin/plugin.json` under the top-level `hooks.Stop` key
+  (`python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_firewall.py`), so a marketplace
+  install gets the firewall with zero configuration.
+
 ## 0.6.1 — 2026-07-04
 
 **PyPI substrate.** `loop-engineer` becomes a self-contained wheel that runs from
