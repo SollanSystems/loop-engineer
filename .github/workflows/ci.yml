@@ -70,3 +70,8 @@ jobs:
         with:
           path: "."
           fail-under-score: "90"
+
+      - name: pre-commit consumer fixture
+        run: |
+          python -m pip install --quiet pre-commit pytest pyyaml
+          python -B -m pytest -q -p no:cacheprovider scripts/test_precommit_hook.py

@@ -1,0 +1,7 @@
+- id: loop-doctor
+  name: loop doctor (loop-contract validity gate)
+  description: "Validate the repo's .loop/ contract objects; fails on a dishonest or malformed contract."
+  entry: loop doctor .
+  language: python
+  pass_filenames: false
+  always_run: true
