@@ -264,9 +264,10 @@ _SCHEMA_FILES = {
 
 
 def _schemas_dir() -> Path:
-    # Resolve schemas/ relative to the loop package's repo root, the same pattern
-    # the pyproject comment describes for scripts/ (editable install is supported).
-    return Path(__file__).resolve().parent.parent / "schemas"
+    # Bundle-first (wheel package data), repo-relative editable-install fallback.
+    from ._resources import schemas_dir
+
+    return schemas_dir()
 
 
 def _load_schema(name: str) -> dict[str, Any]:

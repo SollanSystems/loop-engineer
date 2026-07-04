@@ -22,20 +22,28 @@ keywords = ["agent", "loop", "agentic", "verification", "harness", "orchestratio
 yaml = ["pyyaml>=6"]
 schemas = ["jsonschema>=4"]
 
-# Console entry point. `loop.__main__:main` resolves the bundled scripts/ dir
-# relative to its own __file__, so this is EDITABLE-INSTALL ONLY: `pip install -e .`
-# keeps loop/ pointing at the repo (where scripts/ lives). A non-editable wheel
-# does not ship scripts/, so `inspect`/`metrics` would not resolve — see the
-# [tool.hatch.build.targets.wheel] note below.
+# Console entry points. Both install modes work: `loop.__main__:main` resolves
+# schemas/templates/tool-scripts bundle-first via loop/_resources.py (wheel
+# package data under loop/_bundle/), with the repo checkout as the editable
+# fallback. `loop-engineer` is the uvx-visible alias matching the PyPI project.
 [project.scripts]
 loop = "loop.__main__:main"
+loop-engineer = "loop.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/SollanSystems/loop-engineer"
 Repository = "https://github.com/SollanSystems/loop-engineer"
 
-# Editable install is the supported mode: `python3 -m loop inspect` resolves the
-# bundled scripts/ dir relative to the repo, so install with `pip install -e .`
-# to run the CLI from any directory.
+# The wheel is self-contained: schemas/, templates/, and the CLI-needed tool
+# scripts ship as package data under loop/_bundle/ (resolved by loop/_resources.py,
+# importlib.resources-first with the repo checkout as editable-install fallback).
 [tool.hatch.build.targets.wheel]
 packages = ["loop"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "loop/_bundle/schemas"
+"templates" = "loop/_bundle/templates"
+"scripts/inspect_loop.py" = "loop/_bundle/tools/inspect_loop.py"
+"scripts/metrics.py" = "loop/_bundle/tools/metrics.py"
+"scripts/holdout_gate.py" = "loop/_bundle/tools/holdout_gate.py"
+"scripts/anticheat_scan.py" = "loop/_bundle/tools/anticheat_scan.py"
