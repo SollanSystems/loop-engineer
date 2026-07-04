@@ -5,7 +5,7 @@
 [![CI](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/badge/release-0.5.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
+[![Release](https://img.shields.io/badge/release-0.6.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
 
 Long-running agents commit **false completion**. After context compaction they
 forget what "done" meant, optimize to the visible test, patch in circles, and
@@ -362,8 +362,8 @@ license, and README differentiation.
 
 ## Status
 
-- Version: `0.5.0`
-- Release tag: `loop-engineer--v0.5.0`
+- Version: `0.6.0`
+- Release tag: `loop-engineer--v0.6.0`
 - License: MIT
 - Primary interface: Claude Code plugin
 - Portable core: Python CLI + JSON schemas

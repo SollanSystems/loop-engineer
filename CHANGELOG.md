@@ -14,6 +14,65 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## 0.6.0 — 2026-07-03
+
+"Metrics real": false-completion-rate (FCR) and repair-productivity (RP) graduate
+from claims to derivations (the ST1 spec), and the derivation itself survived two
+rounds of adversarial red-teaming before merge — every exploit found is now a
+pinned regression test. (PR #16.)
+
+### Added
+- **`loop metrics <loop-dir>`** — derives FCR and RP from a loop's real on-disk
+  evidence (RUNLOG, verify bundles, held-out verdict, repair records, receipts),
+  never from agent narration. FCR is computed two ways — the deterministic
+  claim×verify cross-join and the aggregated held-out `false_completion` flag —
+  and disagreement is surfaced, not resolved. An unmatched success claim counts
+  as a false completion (fail-closed). Output is a `loop-engineer/metrics@1`
+  scorecard whose `provenance` block names every input file, so a skeptic can
+  re-derive each number by hand.
+- **`loop metrics --baseline`** — writes `docs/metrics-baseline.json` and
+  **refuses** (non-zero exit, writes nothing) unless the run is genuinely
+  gate-backed: a structurally valid held-out verdict artifact must exist (a gate
+  line in a verify script never qualifies); no rejected or unanchored repair
+  record; the two FCR methods must agree; a vacuous zero-claim run cannot
+  baseline.
+- **Published baseline** over the gate-backed `examples/coverage-repair`:
+  **FCR 0.0, RP 1.0** — the README numbers cite the committed file (a test binds
+  the README literals to the JSON), reproducible with
+  `python3 -m loop metrics examples/coverage-repair`.
+- **Canonical record schemas** — `schemas/repair-record.schema.json`
+  (`loop-engineer/repair@1`, RP's only input) and
+  `schemas/rollout-record.schema.json` (`loop-engineer/rollout@1`, the separate
+  candidate-adjudication artifact). Ends the two-shapes-both-called-"the repair
+  record" ambiguity; `validate_contract` checks record files when present and
+  `doctor` reports which record schemas it validated.
+- **`loop` console script** (`[project.scripts]`) — the CLI runs from any
+  directory under the supported editable install.
+
+### Changed
+- **`productive` is recomputed, never trusted.** `recheck_productive` recomputes
+  it from each record's own evidence and rejects disagreements;
+  `rollout_ledger.summarize()` (whose productivity key is now honestly named
+  `rollout_productivity`) and the metrics command aggregate only validated
+  records. Repair records additionally **anchor** to the deterministic verify
+  bundles: `verification_before/after` scores must match a same-task red→green
+  bundle pair (order-enforced when known), or the record is rejected/unanchored.
+- **Claim semantics are outcome-class aware.** A completion-class claim
+  (`task_passed`/`succeeded`/`terminal`) is clean only if every verify bundle in
+  its iteration is green — no exceptions; a progress-class claim (`advanced`)
+  may carry a red intermediate only if the same task reaches green in a strictly
+  later iteration. Unrecognized outcome tokens are surfaced in provenance
+  instead of silently escaping the denominator.
+
+### Honesty hardening (adversarial pre-merge review)
+Two red-team rounds (four, then two, adversarial reviewers) attacked the metrics
+implementation before merge and confirmed 17 issues — including a `--baseline`
+that would have published a clean headline FCR over a run its own held-out gate
+had flagged, and an `evidence_backed` satisfiable by a prose mention of the
+gate. All are fixed and pinned as regression tests; the honest residual is
+documented in the README: a committed verdict artifact is *evidence, not proof* —
+tamper detection belongs to the anti-cheat layer.
+
 ## 0.5.0 — 2026-07-03
 
 The two pre-launch milestones of the v1.0 roadmap landed together: **"enforce the
