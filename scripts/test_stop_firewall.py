@@ -92,7 +92,7 @@ def test_inflight_contract_passes_silently(tmp_path):
 
 
 def test_lying_succeeded_blocks_with_doctor_issues(tmp_path):
-    proc = _run_hook(_payload(_lying_workspace(tmp_path)))
+    proc = _run_hook(_payload(_lying_workspace(tmp_path)), extra_env={"TMPDIR": str(tmp_path)})
     assert proc.returncode == 0
     out = json.loads(proc.stdout)
     assert out["decision"] == "block"
@@ -103,9 +103,10 @@ def test_lying_succeeded_blocks_with_doctor_issues(tmp_path):
 def test_blocks_at_most_once_per_session(tmp_path):
     ws = _lying_workspace(tmp_path)
     payload = _payload(ws)
-    first = _run_hook(payload)
+    extra_env = {"TMPDIR": str(tmp_path)}  # shared across both calls: the sentinel must persist between them
+    first = _run_hook(payload, extra_env=extra_env)
     assert json.loads(first.stdout)["decision"] == "block"
-    second = _run_hook(payload)  # same session_id, same issues
+    second = _run_hook(payload, extra_env=extra_env)  # same session_id, same issues
     assert second.returncode == 0
     assert second.stdout.strip() == ""
 
@@ -129,6 +130,21 @@ def test_malformed_stdin_fails_open():
 def test_unresolvable_cli_fails_open(tmp_path):
     """Forced-error fixture: lying contract but no reachable loop CLI."""
     proc = _run_hook(_payload(_lying_workspace(tmp_path)), plugin_root=tmp_path / "empty")
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == ""
+
+
+def test_doctor_garbage_output_fails_open(tmp_path):
+    """Forced-error fixture: a resolvable loop CLI that prints non-JSON to stdout."""
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    fake_loop = fake_bin / "loop"
+    fake_loop.write_text('#!/bin/sh\necho "not json"\nexit 0\n', encoding="utf-8")
+    fake_loop.chmod(0o755)
+    proc = _run_hook(
+        _payload(_lying_workspace(tmp_path)),
+        extra_env={"PATH": f"{fake_bin}:/usr/bin:/bin"},  # fake `loop` wins shutil.which() over the real one
+    )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
 

@@ -87,7 +87,7 @@ def main() -> int:
         return 0
     proc = subprocess.run(
         cli + ["doctor", str(cwd)],
-        capture_output=True, text=True, timeout=60, env=_cli_env(),
+        capture_output=True, text=True, timeout=60, env=_cli_env(),  # < manifest's 90s hook timeout, so this dies first
     )
     report = json.loads(proc.stdout)
     if report.get("ok") is True:
