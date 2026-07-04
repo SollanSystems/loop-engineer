@@ -73,7 +73,9 @@ loop-engineer runtime — and the repo dogfoods both on its own contract in CI.
   `fail-under-score` is set), installing loop-engineer from PyPI (`version:`) or
   from the action's own checkout by default. Writes the scorecard to the job
   summary and, given a `github-token`, an optional PR comment. The `action-dogfood`
-  CI job runs it against this repo's own `.loop/` contract at `fail-under-score: 90`.
+  CI job runs it against the tracked flagship example contract
+  (`examples/coverage-repair`) at `fail-under-score: 90` — the repo root's live
+  `.loop/` is gitignored and absent in a fresh CI checkout.
 - **`.pre-commit-hooks.yaml`** — a `language: python` hook id `loop-doctor`
   (`entry: loop doctor .`, `always_run`, `pass_filenames: false`) that a consumer
   wires in with three lines of `.pre-commit-config.yaml`; PR1's self-contained

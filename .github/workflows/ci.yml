@@ -62,13 +62,16 @@ jobs:
         run: python -B -m pytest -q -p no:cacheprovider scripts/test_langgraph_recipe.py
 
   action-dogfood:
-    name: action (dogfood on own contract)
+    name: action (dogfood on flagship example)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The repo root's live .loop/ is gitignored, so it does not exist in a fresh
+      # CI checkout — the tracked flagship example is the contract the action gates
+      # (doctor-clean, inspect 90/strong in the action's dependency-free install).
       - uses: ./
         with:
-          path: "."
+          path: "examples/coverage-repair"
           fail-under-score: "90"
 
       - name: pre-commit consumer fixture
