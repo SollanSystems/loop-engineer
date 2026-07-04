@@ -35,24 +35,31 @@ runs:
 
     - name: Install loop-engineer
       shell: bash
+      env:
+        LOOP_VERSION: "${{ inputs.version }}"
       run: |
-        if [ -n "${{ inputs.version }}" ]; then
-          python -m pip install --quiet "loop-engineer==${{ inputs.version }}"
+        if [ -n "$LOOP_VERSION" ]; then
+          python -m pip install --quiet "loop-engineer==$LOOP_VERSION"
         else
           python -m pip install --quiet "${{ github.action_path }}"
         fi
 
     - name: loop doctor (hard gate)
       shell: bash
-      run: loop doctor "${{ inputs.path }}"
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+      run: loop doctor "$LOOP_PATH"
 
     - name: loop inspect (scorecard)
       shell: bash
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+        LOOP_FAIL_UNDER: "${{ inputs.fail-under-score }}"
       run: |
         set +e
-        loop inspect "${{ inputs.path }}" > "${RUNNER_TEMP}/inspect.json"
+        loop inspect "$LOOP_PATH" > "${RUNNER_TEMP}/inspect.json"
         set -e
-        python - "${RUNNER_TEMP}/inspect.json" "${{ inputs.fail-under-score }}" <<'PY'
+        python - "${RUNNER_TEMP}/inspect.json" "$LOOP_FAIL_UNDER" <<'PY'
         import json, os, sys
 
         report = json.load(open(sys.argv[1]))

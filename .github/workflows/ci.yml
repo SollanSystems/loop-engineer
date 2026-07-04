@@ -72,6 +72,8 @@ jobs:
           fail-under-score: "90"
 
       - name: pre-commit consumer fixture
+        # bare `python` is on PATH here because the preceding `uses: ./` composite step ran setup-python
+        # (persisted via GITHUB_PATH) — keep the action step before this one.
         run: |
           python -m pip install --quiet pre-commit pytest pyyaml
           python -B -m pytest -q -p no:cacheprovider scripts/test_precommit_hook.py
