@@ -6,6 +6,7 @@ entry point as a subprocess so exit codes and STDOUT/STDERR match what a user se
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -100,10 +101,14 @@ def test_entrypoint_resolves_repo_relative_scripts_dir():
 
 def test_metrics_runs_from_a_foreign_cwd(tmp_path):
     # Proves scripts/ resolution is repo-relative, not cwd-relative: invoke from an
-    # unrelated cwd with an absolute target.
+    # unrelated cwd with an absolute target. PYTHONPATH stands in for the editable
+    # install's module visibility (CI has no `pip install -e .`); what is under
+    # test is the cwd-independent scripts/ resolution, not packaging.
+    env = dict(os.environ, PYTHONPATH=str(ROOT))
     result = subprocess.run(
         [sys.executable, "-m", "loop", "metrics", str(ROOT / "examples" / "coverage-repair")],
         cwd=tmp_path,
+        env=env,
         text=True,
         capture_output=True,
     )

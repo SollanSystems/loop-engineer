@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -123,5 +125,9 @@ def test_flagship_example_contract_validates_clean_with_repair_record():
 
 
 def test_repo_own_contract_still_validates_clean():
+    # The repo's live .loop run-state is gitignored, so a fresh checkout (CI)
+    # has none; the live-contract gate is a local/operator check.
+    if not (ROOT / ".loop" / "state.json").exists():
+        pytest.skip("no live .loop contract in this checkout (gitignored run-state)")
     report = validate_contract(ROOT / ".loop")
     assert report["ok"] is True, report["issues"]
