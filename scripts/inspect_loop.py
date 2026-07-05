@@ -165,6 +165,62 @@ def _task_verify_declared(tasks: dict) -> bool:
     return False
 
 
+# Scaffold placeholder convention: an unfilled slot is the literal "REPLACE"
+# marker (loop/scaffold.py `_substitutions`: "REPLACE: <hint>" for filled tokens,
+# a bare "REPLACE" for the extra CRITERION_2/3 slots).
+_PLACEHOLDER_MSG = (
+    "unfilled scaffold placeholders ('REPLACE: ...') — replace them with "
+    "concrete, verifiable text before this loop can claim to define {what}"
+)
+_SECTION_HEADING_RE = re.compile(r"\s*#{1,6}\s+(?P<title>.*\S)\s*$")
+_LIST_ITEM_RE = re.compile(r"\s*(?:\d+[.)]|[-*+])\s+(?P<item>.*\S)\s*$")
+
+
+def _is_placeholder(text: str) -> bool:
+    """True iff ``text`` is an unfilled scaffold slot ('REPLACE' / 'REPLACE:…')."""
+    upper = text.strip().upper()
+    return upper == "REPLACE" or upper.startswith("REPLACE:")
+
+
+def _section_body(text: str, heading: str) -> str | None:
+    """Return the body of the first ``## <heading>`` section (case-insensitive)."""
+    lines = text.splitlines()
+    target = heading.strip().lower()
+    start = None
+    for i, line in enumerate(lines):
+        match = _SECTION_HEADING_RE.match(line)
+        if match and match.group("title").strip().lower().rstrip(":") == target:
+            start = i + 1
+            break
+    if start is None:
+        return None
+    body: list[str] = []
+    for line in lines[start:]:
+        if _SECTION_HEADING_RE.match(line):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def _success_criteria_all_placeholder(spec_text: str) -> bool:
+    """True iff the SPEC's Success-criteria list has items and all are unfilled."""
+    body = _section_body(spec_text, "success criteria")
+    if body is None:
+        return False
+    items = [m.group("item") for line in body.splitlines() if (m := _LIST_ITEM_RE.match(line))]
+    return bool(items) and all(_is_placeholder(item) for item in items)
+
+
+def _task_titles_all_placeholder(tasks: dict) -> bool:
+    """True iff every declared task carries an unfilled 'REPLACE' title."""
+    rows = tasks.get("tasks")
+    if not isinstance(rows, list) or not rows:
+        return False
+    titles = [row.get("title") for row in rows if isinstance(row, dict)]
+    titles = [t for t in titles if isinstance(t, str) and t.strip()]
+    return bool(titles) and all(_is_placeholder(title) for title in titles)
+
+
 def _terminal_states_covered_from_contract(loop: Path) -> int:
     """Count terminal taxonomy coverage from contract-owned files only."""
 
@@ -301,7 +357,15 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, object]:
     policies = manifest.get("policies") if isinstance(manifest, dict) else None
     manifest_declares_plan = isinstance(policies, dict) and "plan_then_execute" in policies
 
-    has_spec_criteria = "success criteria" in spec or "success_criteria" in spec
+    # A fresh scaffold's Success-criteria list and task titles are the literal
+    # "REPLACE:" placeholders. A structurally-present-but-unfilled criteria list
+    # earns no defines_success credit — a shell is not a defined success.
+    spec_raw = _read_text(paths.spec) + "\n" + _read_text(paths.contract)
+    criteria_all_placeholder = _success_criteria_all_placeholder(spec_raw)
+    task_titles_placeholder = _task_titles_all_placeholder(tasks)
+
+    has_criteria_heading = "success criteria" in spec or "success_criteria" in spec
+    has_spec_criteria = has_criteria_heading and not criteria_all_placeholder
     has_verify = (
         _task_verify_declared(tasks)
         or _script_exists(
@@ -332,6 +396,8 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, object]:
         "approval_gates": has_approval,
         "false_completion_defense": _false_completion_credit(paths),
         "plan_then_execute": has_plan_then_execute,
+        "_success_criteria_placeholder": has_criteria_heading and criteria_all_placeholder,
+        "_task_titles_placeholder": task_titles_placeholder,
     }
 
 
@@ -385,11 +451,17 @@ def inspect_loop(loop_dir: str) -> dict:
         if key == "false_completion_defense":
             score += _grade_false_completion(value, weight, label, gap_msg, present, gaps)
             continue
+        if key == "defines_success" and not value and results.get("_success_criteria_placeholder"):
+            gaps.append("success criteria are " + _PLACEHOLDER_MSG.format(what="success"))
+            continue
         if value:
             score += weight
             present.append(label)
         else:
             gaps.append(gap_msg)
+
+    if results.get("_task_titles_placeholder"):
+        gaps.append("TASKS.json titles are " + _PLACEHOLDER_MSG.format(what="its tasks"))
 
     terminal_points = round(_TERMINAL_WEIGHT * covered / len(TERMINAL_STATES))
     score += terminal_points

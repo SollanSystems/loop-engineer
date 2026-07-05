@@ -7,6 +7,7 @@ must be green, or the credibility slice fails at the front door.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import pathlib
 import subprocess
@@ -15,6 +16,12 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+_il_spec = importlib.util.spec_from_file_location(
+    "il", pathlib.Path(__file__).parent / "inspect_loop.py"
+)
+il = importlib.util.module_from_spec(_il_spec)
+_il_spec.loader.exec_module(il)
 
 
 def test_scaffolded_contract_passes_doctor_unedited(tmp_path):
@@ -125,6 +132,31 @@ def test_missing_terminal_is_an_issue_when_state_declares_a_terminal(tmp_path):
         issue["code"] == "missing_file" and "terminal" in issue["message"]
         for issue in report["issues"]
     )
+
+
+def test_fresh_scaffold_is_doctor_clean_but_inspects_below_strong(tmp_path):
+    """The scaffold is a valid in-flight contract (doctor-clean) yet a fresh,
+    unedited one is not a *strong* loop: its success criteria and task titles are
+    still the literal `REPLACE:` placeholders. Doctor stays green; the inspector
+    must dock defines_success and flag the placeholder convention so a stranger
+    knows the loop is a shell to fill, not a finished proof."""
+    from loop.contract import validate_contract
+    from loop.scaffold import scaffold
+
+    target = tmp_path / "fresh"
+    scaffold(target)
+
+    # Doctor is unchanged — a fresh scaffold is a valid in-flight contract.
+    assert validate_contract(target)["ok"] is True
+
+    report = il.inspect_loop(str(target))
+    gaps = " ".join(report["gaps"]).lower()
+    present = " ".join(report["present"]).lower()
+
+    assert report["verdict"] != "strong"
+    assert report["score"] < 80
+    assert "defines verifiable success criteria" not in present
+    assert "replace" in gaps and "placeholder" in gaps
 
 
 def test_scaffold_cli_subcommand(tmp_path):

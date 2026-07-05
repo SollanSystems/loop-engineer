@@ -561,3 +561,129 @@ def test_flagship_example_keeps_strong_gate_backed_verdict():
     assert report["verdict"] == "strong"
     assert report["score"] >= 80
     assert any("invoked" in signal for signal in report["present"])
+
+
+# --- M2: unfilled scaffold placeholders earn no defines_success credit --------
+
+
+def test_placeholder_success_criteria_earn_no_defines_success_credit(tmp_path):
+    loop = tmp_path / "ph"
+    loop.mkdir()
+    (loop / "SPEC.md").write_text(
+        "# SPEC\n## Success criteria\n"
+        "1. REPLACE: first success criterion\n2. REPLACE\n3. REPLACE\n",
+        encoding="utf-8",
+    )
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    gaps = " ".join(report["gaps"]).lower()
+    assert "defines verifiable success criteria" not in present
+    # The gap names the scaffold placeholder convention actionably.
+    assert "replace" in gaps and "placeholder" in gaps
+
+
+def test_real_success_criteria_still_earn_defines_success_credit(tmp_path):
+    loop = tmp_path / "real"
+    loop.mkdir()
+    (loop / "SPEC.md").write_text(
+        "# SPEC\n## Success criteria\n1. coverage >= 80% (scripts/verify-full)\n",
+        encoding="utf-8",
+    )
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    assert "defines verifiable success criteria" in present
+
+
+def test_one_filled_criterion_among_placeholders_still_earns_credit(tmp_path):
+    # Partial fill is real intent — a single concrete criterion keeps the credit.
+    loop = tmp_path / "partial"
+    loop.mkdir()
+    (loop / "SPEC.md").write_text(
+        "# SPEC\n## Success criteria\n"
+        "1. coverage >= 80% (scripts/verify-full)\n2. REPLACE\n",
+        encoding="utf-8",
+    )
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    assert "defines verifiable success criteria" in present
+
+
+def test_placeholder_task_titles_flagged_as_gap(tmp_path):
+    loop = tmp_path / "pht"
+    loop.mkdir()
+    (loop / "TASKS.json").write_text(
+        json.dumps({"tasks": [{"id": "T1", "title": "REPLACE: first task",
+                               "verify": "scripts/verify-fast"}]}),
+        encoding="utf-8",
+    )
+    report = il.inspect_loop(str(loop))
+    gaps = " ".join(report["gaps"]).lower()
+    assert "task" in gaps and "placeholder" in gaps
+
+
+def test_fresh_scaffold_is_not_strong_with_placeholder_gaps(tmp_path):
+    # M2: an unedited scaffold scored 86/strong; it must now land at ok-or-below
+    # and name the placeholder convention so a stranger knows what to fill.
+    from loop.scaffold import scaffold
+
+    target = tmp_path / "fresh-scaffold"
+    scaffold(target)
+    report = il.inspect_loop(str(target))
+    gaps = " ".join(report["gaps"]).lower()
+
+    assert report["verdict"] != "strong"
+    assert report["score"] < 80
+    assert "replace" in gaps and "placeholder" in gaps
+
+
+def test_keyword_stuffed_fake_scores_below_strong_with_false_completion_gap(tmp_path):
+    # Acceptance (M2 + M3): the review's keyword-stuffed fake — SPEC/WORKFLOW
+    # prose stuffed with checklist vocabulary, all 7 terminal states, an echo
+    # "verify" line, a stuffed RUNLOG, and NO real gate files. It scored
+    # 100/strong before the fixes; it must now land materially below strong with
+    # a false-completion gap (the echo trick and stuffed prose buy no defense
+    # credit — M3 — and the unfilled success criteria earn no defines_success
+    # credit — M2).
+    fake = tmp_path / "fake"
+    (fake / ".loop").mkdir(parents=True)
+    (fake / "scripts").mkdir()
+    (fake / "SPEC.md").write_text(
+        "# SPEC — totally-done\n"
+        "This loop has verifiable success, independent verification, approval "
+        "gates, false-completion defense, held-out anti-cheat, plan-then-execute.\n"
+        "## Success criteria\n"
+        "1. REPLACE: first success criterion\n"
+        "2. REPLACE\n",
+        encoding="utf-8",
+    )
+    (fake / "WORKFLOW.md").write_text(
+        "# WORKFLOW\n## Approval Gates\nApproval gate on side-effects.\n"
+        "## Plan-then-execute\nPlan-then-execute for untrusted reads.\n"
+        "## Anti-cheat\nfalse-completion defense via held-out holdout gate anti-cheat.\n"
+        "## Terminal States\n"
+        "Succeeded, FailedUnverifiable, FailedBlocked, FailedBudget, "
+        "FailedSafety, FailedSpecGap, AbortedByHuman.\n",
+        encoding="utf-8",
+    )
+    (fake / "TASKS.json").write_text(
+        json.dumps({"tasks": [{"id": "T1", "title": "REPLACE: first task",
+                               "verify": "scripts/verify-fast"}]}),
+        encoding="utf-8",
+    )
+    (fake / "scripts" / "verify-fast").write_text(
+        '#!/bin/sh\necho "holdout_gate anticheat_scan all clean"\n', encoding="utf-8"
+    )
+    (fake / "RUNLOG.md").write_text(
+        "Iteration 1: holdout gate anti-cheat false-completion defense engaged. "
+        "Everything looks done and fine.\n",
+        encoding="utf-8",
+    )
+
+    report = il.inspect_loop(str(fake))
+    present = " ".join(report["present"]).lower()
+    gaps = " ".join(report["gaps"]).lower()
+
+    assert "false-completion defense" not in present
+    assert "false-completion" in gaps or "false completion" in gaps
+    assert report["verdict"] != "strong"
+    assert report["score"] < 80
