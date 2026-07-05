@@ -351,8 +351,22 @@ def _validate_record(data: dict[str, Any], schema_key: str, path: Path, mode: st
         _structural_record_check(data, _load_schema_file(filename), path, issues)
 
 
+# The canonical rollout / candidate ledger file (scripts/rollout_ledger.py,
+# schemas/rollout-record.schema.json). doctor validates THIS as a rollout ledger;
+# any other .loop/*.jsonl is foreign and skipped rather than force-validated
+# against the rollout schema.
+ROLLOUT_LEDGER_NAMES = ("rollout.jsonl",)
+
+
 def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) -> None:
-    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        # A ledger that is not valid UTF-8 fails closed — decoding it lossily
+        # (errors="ignore") would let a record with corrupt bytes validate clean.
+        issues.append(ContractIssue("invalid_encoding", f"{path.name}: not valid UTF-8: {exc}", path))
+        return
+    for lineno, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
@@ -379,9 +393,11 @@ def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) 
             if data is not None:
                 _validate_record(data, "repair", record_path, mode, issues)
                 checked.add("repair")
-    for ledger_path in sorted(paths.loop_dir.glob("*.jsonl")):
-        _validate_jsonl(ledger_path, "rollout", mode, issues)
-        checked.add("rollout")
+    for name in ROLLOUT_LEDGER_NAMES:
+        ledger_path = paths.loop_dir / name
+        if ledger_path.is_file():
+            _validate_jsonl(ledger_path, "rollout", mode, issues)
+            checked.add("rollout")
     receipts_dir = paths.loop_dir / "receipts"
     if receipts_dir.is_dir():
         for receipt_path in sorted(receipts_dir.glob("*.jsonl")):
