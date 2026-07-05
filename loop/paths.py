@@ -25,6 +25,12 @@ class LoopPaths:
 
 def _workspace_from(target: Path) -> Path:
     target = target.resolve()
+    if target.is_file():
+        # A FILE target (.loop/state.json, TASKS.json, RUNLOG.md, …) names a
+        # contract artifact, not the workspace. Resolve from its parent so the
+        # owning workspace is found instead of treating the file as a directory
+        # and building garbage paths underneath it.
+        target = target.parent
     if target.name == ".loop":
         return target.parent
     if (target / ".loop").is_dir():

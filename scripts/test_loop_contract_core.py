@@ -518,6 +518,41 @@ def test_f2_fresh_scaffold_stays_clean(tmp_path):
     assert report["ok"] is True, report["issues"]
 
 
+def test_f7_file_target_resolves_to_owning_workspace(tmp_path):
+    # F7: a FILE target (loop doctor .loop/state.json or TASKS.json) resolved the
+    # workspace to the file itself, so every path underneath was garbage. A file
+    # target must resolve from its parent to the SAME paths as the dir target.
+    from loop.paths import resolve_loop_paths
+
+    target = _scaffold(tmp_path, "file-target")
+    from_dir = resolve_loop_paths(target)
+
+    from_state_file = resolve_loop_paths(target / ".loop" / "state.json")
+    assert from_state_file.workspace == from_dir.workspace
+    assert from_state_file.state == from_dir.state
+    assert from_state_file.loop_dir == from_dir.loop_dir
+
+    from_tasks_file = resolve_loop_paths(target / "TASKS.json")
+    assert from_tasks_file.workspace == from_dir.workspace
+    assert from_tasks_file.tasks == from_dir.tasks
+
+
+def test_f7_doctor_on_file_target_matches_dir_target(tmp_path):
+    # F7 at the CLI level: `doctor <ws>/.loop/state.json` must produce the same
+    # report as `doctor <ws>` instead of a wall of garbage-path issues.
+    target = _scaffold(tmp_path, "file-cli")
+
+    from_dir = _run_loop_cli("doctor", str(target))
+    from_file = _run_loop_cli("doctor", str(target / ".loop" / "state.json"))
+
+    assert from_dir.returncode == 0, from_dir.stderr + from_dir.stdout
+    assert from_file.returncode == 0, from_file.stderr + from_file.stdout
+    dir_report = json.loads(from_dir.stdout)
+    file_report = json.loads(from_file.stdout)
+    assert file_report["ok"] is True
+    assert file_report["paths"] == dir_report["paths"]
+
+
 def test_loop_doctor_flags_stub_verify_scripts(tmp_path):
     workspace = _write_valid_loop(tmp_path)
     (workspace / "scripts" / "verify-fast").write_text(
