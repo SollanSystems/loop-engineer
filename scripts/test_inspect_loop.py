@@ -687,3 +687,199 @@ def test_keyword_stuffed_fake_scores_below_strong_with_false_completion_gap(tmp_
     assert "false-completion" in gaps or "false completion" in gaps
     assert report["verdict"] != "strong"
     assert report["score"] < 80
+
+
+# --- must-fix #1 (allowlist): only a genuine interpreter/script invocation of a
+# --- gate .py earns "invoked" credit. grep/cat/ls/test/head/wc/find evade. -----
+
+_GATE_EVASION_COMMANDS = ("grep", "cat", "ls", "test -f", "head", "wc -l", "find")
+
+
+def test_non_executing_commands_referencing_gate_py_earn_no_invoked_credit(tmp_path):
+    # must-fix #1 / D(i): grep/cat/ls/test/head/wc/find that merely *reference* the
+    # gate .py (read/list/search it) never *execute* it — ZERO invoked credit.
+    # A real gate file is present so the only thing under test is the invocation
+    # shape: a non-executing reference must not upgrade to "invoked".
+    for i, cmd in enumerate(_GATE_EVASION_COMMANDS):
+        loop = tmp_path / f"evade{i}"
+        (loop / "scripts").mkdir(parents=True)
+        (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+        (loop / "scripts" / "verify-fast").write_text(
+            f"#!/bin/sh\n{cmd} scripts/holdout_gate.py\n", encoding="utf-8"
+        )
+        # Unit: the invocation detector rejects the non-executing reference.
+        assert il._gate_invoked_in_verify(loop) is False, cmd
+        # Report: no "(invoked)" credit is shown for the false-completion defense.
+        report = il.inspect_loop(str(loop))
+        present = " ".join(report["present"]).lower()
+        assert "(invoked)" not in present, cmd
+
+
+def test_grep_evasion_literal_m3_fake_scores_below_strong(tmp_path):
+    # must-fix #1 acceptance: the literal M3 fake with `echo` swapped for `grep`
+    # (no real gate file, only a grep reference in verify-fast) scored 88/strong
+    # before the fix. grep earns no invoked credit and, with no gate file, the
+    # defense grades "none" → the score cap holds it below strong.
+    fake = tmp_path / "grepfake"
+    (fake / ".loop").mkdir(parents=True)
+    (fake / "scripts").mkdir()
+    (fake / "SPEC.md").write_text(
+        "# SPEC\n## Success criteria\n1. coverage >= 80% (scripts/verify-full)\n",
+        encoding="utf-8",
+    )
+    (fake / "WORKFLOW.md").write_text(
+        "# WORKFLOW\n## Approval Gates\nApproval gate on side-effects.\n"
+        "## Plan-then-execute\nPlan-then-execute for untrusted reads.\n"
+        "## Terminal States\n"
+        "Succeeded, FailedUnverifiable, FailedBlocked, FailedBudget, "
+        "FailedSafety, FailedSpecGap, AbortedByHuman.\n",
+        encoding="utf-8",
+    )
+    (fake / "TASKS.json").write_text(
+        json.dumps({"tasks": [{"id": "T1", "title": "ship it",
+                               "verify": "scripts/verify-fast"}]}),
+        encoding="utf-8",
+    )
+    (fake / "scripts" / "verify-fast").write_text(
+        '#!/bin/sh\ngrep "holdout_gate.py anticheat_scan" ./SPEC.md\n',
+        encoding="utf-8",
+    )
+
+    report = il.inspect_loop(str(fake))
+    present = " ".join(report["present"]).lower()
+    assert "(invoked)" not in present
+    assert report["verdict"] != "strong"
+    assert report["score"] < 80
+
+
+def test_allowlisted_invocations_keep_invoked_credit(tmp_path):
+    # must-fix #1 / D(iii): the allowlisted true positives keep FULL credit.
+    invocations = (
+        "python3 scripts/holdout_gate.py\n",
+        "bash scripts/anticheat_scan.py\n",
+        "./scripts/holdout_gate.py\n",
+        "uv run python scripts/anticheat_scan.py\n",
+    )
+    for i, body in enumerate(invocations):
+        loop = tmp_path / f"real{i}"
+        (loop / "scripts").mkdir(parents=True)
+        (loop / "scripts" / "verify-fast").write_text(
+            "#!/bin/sh\n" + body, encoding="utf-8"
+        )
+        assert il._gate_invoked_in_verify(loop) is True, body
+
+
+def test_versioned_python_interpreter_invocation_counts(tmp_path):
+    # must-fix #1: `python3.12 scripts/holdout_gate.py` is a genuine invocation.
+    loop = tmp_path / "pyver"
+    (loop / "scripts").mkdir(parents=True)
+    (loop / "scripts" / "verify-fast").write_text(
+        "#!/bin/sh\npython3.12 scripts/holdout_gate.py --strict\n", encoding="utf-8"
+    )
+    assert il._gate_invoked_in_verify(loop) is True
+
+
+# --- must-fix #2 (score cap): "strong" is unreachable without a real defense ---
+
+
+def test_stuffed_fake_with_no_defense_cannot_reach_strong(tmp_path):
+    # must-fix #2 / D(ii): a stuffed fake — real-looking success criteria, an
+    # echo-only verify-fast, prose approval/plan headings, all 7 terminal states,
+    # but NO real gate files — must score < 80 and verdict != "strong". Pure
+    # keyword stuffing with zero false-completion defense cannot buy a strong
+    # verdict (or clear the fail-under-80 CI gate).
+    fake = tmp_path / "stuffed"
+    (fake / ".loop").mkdir(parents=True)
+    (fake / "scripts").mkdir()
+    (fake / "SPEC.md").write_text(
+        "# SPEC\n## Success criteria\n"
+        "1. unit + integration coverage >= 80% (scripts/verify-full)\n"
+        "2. zero lint errors (scripts/verify-fast)\n"
+        "## Evidence Rules\nEach criterion maps to a scripts/verify-* command.\n",
+        encoding="utf-8",
+    )
+    (fake / "WORKFLOW.md").write_text(
+        "# WORKFLOW\n## Approval Gates\nPause on destructive / secret / production.\n"
+        "## Plan-then-execute\nPrecommit the execution graph for untrusted reads.\n"
+        "## Terminal States\n"
+        "Succeeded, FailedUnverifiable, FailedBlocked, FailedBudget, "
+        "FailedSafety, FailedSpecGap, AbortedByHuman.\n",
+        encoding="utf-8",
+    )
+    (fake / "scripts" / "verify-fast").write_text(
+        '#!/bin/sh\necho "holdout_gate anticheat_scan all clean"\n', encoding="utf-8"
+    )
+
+    report = il.inspect_loop(str(fake))
+    present = " ".join(report["present"]).lower()
+    gaps = " ".join(report["gaps"]).lower()
+
+    assert report["verdict"] != "strong"
+    assert report["score"] < 80
+    # The false-completion defense grades "none" (no invoked/wired gate).
+    assert "false-completion defense" not in present
+    # The cap gap explicitly names the reason strong is out of reach.
+    assert "capped" in gaps and "false-completion defense" in gaps
+
+
+def test_score_cap_only_bites_when_defense_is_none(tmp_path):
+    # must-fix #2: the cap targets grade "none" only. A genuinely gate-backed loop
+    # ("invoked") is never capped — the flagship keeps its full score.
+    root = pathlib.Path(__file__).resolve().parent.parent
+    report = il.inspect_loop(str(root / "examples" / "coverage-repair"))
+    gaps = " ".join(report["gaps"]).lower()
+    assert report["verdict"] == "strong"
+    assert report["score"] >= 80
+    assert "capped" not in gaps
+
+
+# --- must-fix #3 (verify substance): an echo-only verify-* body is not proof ----
+
+
+def test_echo_only_verify_script_earns_no_independent_verification(tmp_path):
+    # must-fix #3 / failure #3: a file merely NAMED scripts/verify-fast whose whole
+    # body is echo earns ZERO independent_verification credit — printing is not
+    # verifying. (No resolving task.verify, no SPEC verify reference.)
+    loop = tmp_path / "echoverify"
+    (loop / "scripts").mkdir(parents=True)
+    (loop / "scripts" / "verify-fast").write_text(
+        '#!/bin/sh\necho "checking..."\necho "all good"\nexit 0\n', encoding="utf-8"
+    )
+    assert il._verify_script_has_substance(loop.resolve()) is False
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    gaps = " ".join(report["gaps"]).lower()
+    assert "independent verification" not in present
+    assert "no independent verification" in gaps
+
+
+def test_substantive_verify_script_earns_independent_verification(tmp_path):
+    # must-fix #3: a verify-* script with a real executable check (an existence
+    # loop) earns the credit — the substance gate is not a blanket denial.
+    loop = tmp_path / "realverify"
+    (loop / "scripts").mkdir(parents=True)
+    (loop / "scripts" / "verify-fast").write_text(
+        "#!/bin/sh\n"
+        'for f in SPEC.md WORKFLOW.md; do\n'
+        '  [ -f "$1/$f" ] || exit 1\n'
+        "done\n"
+        'echo "PASS"\n',
+        encoding="utf-8",
+    )
+    assert il._verify_script_has_substance(loop.resolve()) is True
+    report = il.inspect_loop(str(loop))
+    present = " ".join(report["present"]).lower()
+    assert "independent verification" in present
+
+
+def test_fresh_scaffold_keeps_independent_verification_credit(tmp_path):
+    # must-fix #3 invariant: the shipped scaffold's verify-fast has a real for-loop
+    # existence check, so a fresh scaffold KEEPS independent_verification credit.
+    from loop.scaffold import scaffold
+
+    target = tmp_path / "fresh-scaffold-verify"
+    scaffold(target)
+    assert il._verify_script_has_substance(target.resolve()) is True
+    report = il.inspect_loop(str(target))
+    present = " ".join(report["present"]).lower()
+    assert "independent verification" in present

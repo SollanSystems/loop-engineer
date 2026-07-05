@@ -17,11 +17,15 @@ key, or the phrase "false-completion" in prose earns *nothing* — those are
 assertions the loop makes about itself. The three grades are:
 
   * **invoked** (full credit) — a ``scripts/verify-*`` gate *executes* a holdout
-    / anti-cheat gate script (``python3 scripts/holdout_gate.py``, not an
-    ``echo "holdout_gate"`` that only prints the token), OR ``RUNLOG.md`` /
-    ``.loop/receipts/*.jsonl`` records an actual run (a gate token AND a run-word
-    on one line — a ``holdout_gate`` verdict / anti-cheat scan result — not a
-    bare token in stuffed prose).
+    / anti-cheat gate script: an interpreter (``python``/``python3``/``python3.N``/
+    ``uv``/``bash``/``sh``/``exec``) runs a gate script named in its arguments
+    (``python3 scripts/holdout_gate.py``), or the gate script is invoked directly
+    by path (``./scripts/holdout_gate.py``). A command that only *references* the
+    file — ``echo``/``printf`` printing it, or ``grep``/``cat``/``ls``/``test``/
+    ``head``/``wc``/``find`` reading, listing, or searching it — earns *nothing*.
+    OR ``RUNLOG.md`` / ``.loop/receipts/*.jsonl`` records an actual run (a gate
+    token AND a run-word on one line — a ``holdout_gate`` verdict / anti-cheat
+    scan result — not a bare token in stuffed prose).
   * **wired** (partial credit, half the weight) — a gate script file exists
     (``scripts/holdout_gate.py`` / ``anticheat_scan.py`` / ``anti_cheat.py``)
     and is referenced from the contract's verify surface (SPEC / WORKFLOW /
@@ -44,6 +48,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -125,12 +130,19 @@ _FALSE_COMPLETION_PARTIAL_DIVISOR = 2  # wired-but-unrun earns half the weight
 # gate uses (`python3 scripts/holdout_gate.py`, `./scripts/anticheat_scan.py`).
 # The bare token ("holdout_gate") without .py is prose, not an invocation.
 _GATE_SCRIPT_RE = re.compile(r"\b(?:holdout_gate|anticheat_scan|anti_cheat)\.py\b")
-# Commands whose arguments are inert output, not executed gates: a token inside
-# `echo`/`printf`/`:` (or the `true`/`false` no-ops) is printed, never run.
-_INERT_EMITTERS = frozenset({"echo", "printf", ":", "true", "false"})
+# Genuine-invocation ALLOWLIST: "invoked" credit requires an executable line that
+# actually *runs* a gate script. Either an interpreter leads the command and a
+# gate script is named in its arguments, or the gate script is invoked directly
+# by path. Everything else — a reference via echo/printf/grep/cat/ls/test/head/
+# wc/find, or any other non-interpreter command — earns nothing.
+_GATE_INTERPRETERS = frozenset({"python", "python3", "uv", "bash", "sh", "exec"})
+_VERSIONED_PYTHON_RE = re.compile(r"^python3\.\d+$")
 # Split a shell line into command segments so a real invocation chained after an
 # inert emitter (`echo x && python3 ...holdout_gate.py`) is still discovered.
 _SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[;|()&]")
+# A verify-* line is "inert" (no verification substance) when its leading command
+# only prints or no-ops. A body of nothing but these plus comments is not proof.
+_INERT_LINE_COMMANDS = frozenset({"echo", "printf", "exit", "true", "false", ":"})
 
 
 def _read_text(path: Path) -> str:
@@ -252,12 +264,50 @@ def _leading_command(segment: str) -> str:
     return parts[0] if parts else ""
 
 
+def _shell_tokens(segment: str) -> list[str]:
+    """Tokenize a shell segment (subshell openers stripped, quotes removed)."""
+    seg = segment.lstrip("({ \t")
+    try:
+        return shlex.split(seg, posix=True)
+    except ValueError:
+        return seg.split()
+
+
+def _basename(token: str) -> str:
+    """The trailing path component of a shell token (posix `/` separator)."""
+    return token.rsplit("/", 1)[-1]
+
+
+def _is_gate_interpreter(token: str) -> bool:
+    return token in _GATE_INTERPRETERS or bool(_VERSIONED_PYTHON_RE.match(token))
+
+
+def _segment_runs_gate(segment: str) -> bool:
+    """True iff this shell segment genuinely *executes* a gate script.
+
+    Allowlisted shapes only: an interpreter (python/python3/python3.N/uv/bash/sh/
+    exec) whose arguments name a gate script, or the gate script invoked directly
+    by path (`./scripts/holdout_gate.py`). A leading grep/cat/ls/test/head/wc/find
+    — or echo/printf — that merely references the file is not an execution.
+    """
+    tokens = _shell_tokens(segment)
+    if not tokens:
+        return False
+    lead, args = tokens[0], tokens[1:]
+    if _basename(lead) in _GATE_SCRIPTS:
+        return True
+    if _is_gate_interpreter(lead):
+        return any(_basename(arg) in _GATE_SCRIPTS for arg in args)
+    return False
+
+
 def _gate_invoked_in_verify(workspace: Path) -> bool:
     """A verify-* script genuinely *executes* a holdout/anti-cheat gate.
 
     Credit requires the gate script (`holdout_gate.py` / `anticheat_scan.py` /
-    `anti_cheat.py`) to be *invoked* as a command — not merely printed. A token
-    inside an `echo`/`printf`/`:` argument is inert output and earns nothing.
+    `anti_cheat.py`) to be *run* — an interpreter invocation or a direct
+    by-path call. A command that only prints, reads, lists, or searches the file
+    (echo/printf/grep/cat/ls/test/head/wc/find) earns nothing.
     """
     for script in _verify_scripts(workspace):
         for line in _read_text(script).splitlines():
@@ -268,8 +318,26 @@ def _gate_invoked_in_verify(workspace: Path) -> bool:
                 segment = segment.strip()
                 if not segment or not _GATE_SCRIPT_RE.search(segment):
                     continue
-                if _leading_command(segment) in _INERT_EMITTERS:
-                    continue
+                if _segment_runs_gate(segment):
+                    return True
+    return False
+
+
+def _verify_script_has_substance(workspace: Path) -> bool:
+    """A verify-* script exists whose body has ≥1 non-inert executable line.
+
+    A body of nothing but comments and printing/no-op commands (echo/printf/exit/
+    true/false/`:`) is not verification — a file merely *named* ``verify-fast``
+    earns no independent-verification credit. The shipped scaffold's verify-fast
+    keeps credit: its contract-file existence ``for``/``if`` loop is substantive.
+    """
+    for script in _verify_scripts(workspace):
+        for line in _read_text(script).splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            lead = _leading_command(stripped)
+            if lead and lead not in _INERT_LINE_COMMANDS:
                 return True
     return False
 
@@ -366,17 +434,11 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, object]:
 
     has_criteria_heading = "success criteria" in spec or "success_criteria" in spec
     has_spec_criteria = has_criteria_heading and not criteria_all_placeholder
+    # A verify-* script earns credit only if it actually verifies — a body of
+    # nothing but echo/printf/no-ops (a file merely *named* verify-fast) does not.
     has_verify = (
         _task_verify_declared(tasks)
-        or _script_exists(
-            paths.workspace,
-            "verify-fast",
-            "verify-fast.sh",
-            "verify-full",
-            "verify-full.sh",
-            "verify-safety",
-            "verify-safety.sh",
-        )
+        or _verify_script_has_substance(paths.workspace)
         or "scripts/verify" in spec
     )
     has_approval = (
@@ -486,6 +548,18 @@ def inspect_loop(loop_dir: str) -> dict:
         )
 
     score = max(0, min(100, score))
+
+    # False-completion defense is the anti-gaming keystone: a loop with NO real
+    # holdout/anti-cheat gate (grade "none") must never reach "strong" or clear a
+    # fail-under-80 CI gate on keyword stuffing alone. Cap it below the threshold.
+    # "wired"/"invoked" grades — a gate that at least exists — are uncapped.
+    if results["false_completion_defense"] == "none" and score >= 80:
+        score = 79
+        gaps.append(
+            "no false-completion defense — score capped below 'strong'; "
+            "wire a holdout/anti-cheat gate"
+        )
+
     return {
         "target": str(loop),
         "score": score,
