@@ -87,6 +87,32 @@ loop-engineer runtime — and the repo dogfoods both on its own contract in CI.
   when absent); the `action-dogfood` CI job installs it and runs the fixture for
   real on the PR checkout.
 
+**PR5 — Adopt in your stack.** The four on-ramps shipped above (uvx funnel,
+`loop.emit` writer, Stop-hook firewall, CI Action + pre-commit hook) get a single
+"Adopt in your stack" README section that funnels a reader from zero-install
+`uvx loop-engineer inspect .` through to full adoption, with a refreshed Install
+section. Every claim the section makes is gate-backed by a new test, so the docs
+can never advertise an on-ramp that does not exist.
+
+### Added
+- **README "Adopt in your stack" section + Install refresh** — a runtime-neutral
+  adoption path leading with `uvx loop-engineer inspect .` (zero install), then the
+  `loop.emit` writer for foreign runtimes, the Stop-hook firewall, and the CI
+  Action / pre-commit gate pinned at `SollanSystems/loop-engineer@v0.7.0` (a
+  forward-looking pin re-verified at the next release).
+- **show-hn launch draft leads with the uvx funnel** — the M5-LAUNCH Show HN draft
+  now opens its command sequence with `uvx loop-engineer inspect .`. The draft
+  lives under the gitignored `roadmap/` tree (a launch working file, absent in a
+  fresh checkout), so its gate is env-guarded.
+- **Docs-claims gate test** (`scripts/test_docs_adoption.py`) — asserts every
+  "Adopt in your stack" README claim is backed by a shipped, wired artifact: the
+  uvx funnel by the `loop-engineer` console script, the `loop.emit` claim by the
+  real writer functions + the LangGraph guide, the Stop-hook claim by the
+  registered hook file, and the CI Action claim by `action.yml` + the
+  `loop-doctor` pre-commit hook. The show-hn assertion skips when the gitignored
+  draft is absent (fresh CI checkouts), matching the repo's env-guarded-skip
+  pattern.
+
 ## 0.6.1 — 2026-07-04
 
 **PyPI substrate.** `loop-engineer` becomes a self-contained wheel that runs from
