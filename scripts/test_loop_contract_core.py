@@ -251,10 +251,85 @@ def test_g1_contradictory_succeeded_terminal_emits_issue():
     assert any(i["code"] == "contradictory_terminal" for i in all_false_issues)
 
     happy_issues = _terminal_issues(
-        {**base, "criteria_met": {"1": True}, "false_completion": False}
+        {**base, "criteria_met": {"1": True}, "false_completion": False, "evidence": ["e.json"]}
     )
     assert not any(i["code"] == "contradictory_terminal" for i in happy_issues)
     assert happy_issues == []
+
+
+def _write_valid_succeeded_contract(root: pathlib.Path, evidence) -> pathlib.Path:
+    """A doctor-clean scaffold mutated into a Succeeded terminal with the given
+    evidence list. Used to pin F1 end-to-end (both validation modes)."""
+    from loop.scaffold import scaffold
+
+    target = root / "loop"
+    scaffold(target)
+    state_path = target / ".loop" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["terminal_state"] = "Succeeded"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    (target / ".loop" / "terminal_state.json").write_text(
+        json.dumps(
+            {
+                "schema": "loop-engineer/terminal@1",
+                "project": "loop",
+                "state": "Succeeded",
+                "iteration_id": 1,
+                "criteria_met": {"c1": True},
+                "evidence": evidence,
+                "false_completion": False,
+                "terminated_at": "2026-01-01T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def test_g1_empty_evidence_succeeded_terminal_is_flagged_unit():
+    # F1: a Succeeded terminal with no evidence outruns its own claim exactly like
+    # false_completion=true or an unmet criterion. _validate_terminal runs the
+    # cross-field check in BOTH validation modes, so this unit assertion covers both.
+    empty_evidence_issues = _terminal_issues(
+        {
+            "schema": "loop-engineer/terminal@1",
+            "state": "Succeeded",
+            "criteria_met": {"c1": True},
+            "false_completion": False,
+            "evidence": [],
+        }
+    )
+    assert any(i["code"] == "contradictory_terminal" for i in empty_evidence_issues)
+    assert any(
+        "evidence" in i["message"]
+        for i in empty_evidence_issues
+        if i["code"] == "contradictory_terminal"
+    )
+
+
+def test_f1_empty_evidence_succeeded_fails_doctor_end_to_end(tmp_path):
+    # F1 repro: a schema-valid contract whose terminal declares Succeeded with an
+    # empty evidence[] must NOT pass doctor. Runs under whichever validation mode
+    # is installed; the two suite invocations exercise both.
+    from loop.contract import doctor_report
+
+    target = _write_valid_succeeded_contract(tmp_path, evidence=[])
+    report = doctor_report(target)
+    assert report["ok"] is False, report["issues"]
+    assert any(
+        i["code"] == "contradictory_terminal" and "evidence" in i["message"]
+        for i in report["issues"]
+    )
+
+
+def test_f1_non_empty_evidence_succeeded_still_passes_doctor(tmp_path):
+    # The fix must not over-fire: a Succeeded terminal that DOES carry evidence
+    # stays doctor-clean.
+    from loop.contract import doctor_report
+
+    target = _write_valid_succeeded_contract(tmp_path, evidence=[".loop/artifacts/verify-T1.json"])
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
 
 
 def test_jsonschema_mode_rejects_schema_violating_artifact(tmp_path):

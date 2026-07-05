@@ -187,8 +187,10 @@ def _check_terminal_contradiction(data: dict[str, Any] | None, path: Path, issue
     """G1: a Succeeded terminal must not contradict its own evidence.
 
     Runs in both validation modes because JSON Schema cannot express the
-    cross-field rule that a success claim requires false_completion=false AND at
-    least one met criterion.
+    cross-field rule that a success claim requires false_completion=false, at
+    least one met criterion, AND a non-empty evidence list — mirroring the
+    write-time refusal in loop/emit.py (an evidence-free Succeeded is a claim
+    with nothing behind it).
     """
 
     if not isinstance(data, dict) or data.get("state") != "Succeeded":
@@ -201,6 +203,11 @@ def _check_terminal_contradiction(data: dict[str, Any] | None, path: Path, issue
     if not isinstance(criteria, dict) or not any(v is True for v in criteria.values()):
         issues.append(
             ContractIssue("contradictory_terminal", "Succeeded terminal has no met (true) entry in criteria_met", path)
+        )
+    evidence = data.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        issues.append(
+            ContractIssue("contradictory_terminal", "Succeeded terminal has empty evidence[] (G1)", path)
         )
 
 
