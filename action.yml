@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ""
   fail-under-score:
-    description: "Fail the job when the inspect score (0-100) is below this. 0 keeps inspect warn-only."
+    description: "Fail the job when the inspect score (0-100) is below this. 0 keeps inspect warn-only. NOTE: the inspect score is an advisory heuristic and a determined author can game it — loop doctor is the hard gate."
     required: false
     default: "0"
   python-version:
@@ -71,43 +71,34 @@ runs:
         LOOP_PATH: "${{ inputs.path }}"
         LOOP_FAIL_UNDER: "${{ inputs.fail-under-score }}"
       run: |
+        # inspect is advisory; capture its JSON even on a non-zero verdict, then
+        # let the extracted (tested) scorecard render + apply fail-under. The
+        # script validates fail-under as an int instead of tracebacking on it.
         set +e
         loop inspect "$LOOP_PATH" > "${RUNNER_TEMP}/inspect.json"
         set -e
-        python - "${RUNNER_TEMP}/inspect.json" "$LOOP_FAIL_UNDER" <<'PY'
-        import json, os, sys
-
-        report = json.load(open(sys.argv[1]))
-        fail_under = int(sys.argv[2])
-        score, verdict = report.get("score", 0), report.get("verdict", "?")
-        lines = [
-            "## loop-engineer scorecard",
-            "",
-            f"| metric | value |",
-            f"|---|---|",
-            f"| verdict | **{verdict}** |",
-            f"| score | {score}/100 |",
-            f"| gaps | {len(report.get('gaps', []))} |",
-            "",
-        ]
-        for gap in report.get("gaps", [])[:10]:
-            lines.append(f"- {gap}")
-        summary = "\n".join(lines) + "\n"
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
-            fh.write(summary)
-        open(os.path.join(os.environ["RUNNER_TEMP"], "scorecard.md"), "w", encoding="utf-8").write(summary)
-        if verdict == "weak":
-            print(f"::warning::loop inspect verdict is weak (score {score}/100)")
-        if fail_under and score < fail_under:
-            print(f"::error::inspect score {score} < fail-under-score {fail_under}")
-            raise SystemExit(1)
-        PY
+        python "${{ github.action_path }}/scripts/action_scorecard.py" \
+          "${RUNNER_TEMP}/inspect.json" "$LOOP_FAIL_UNDER"
 
     - name: PR scorecard comment (optional)
       if: ${{ inputs.github-token != '' && github.event_name == 'pull_request' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
-        gh api "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/comments" \
-          -f body="$(cat "${RUNNER_TEMP}/scorecard.md")" || echo "::warning::PR comment failed (non-fatal)"
+        # Sticky comment: find our own marker-bearing comment and edit it in place,
+        # else post a fresh one — so re-runs update one comment instead of spamming.
+        # Non-fatal on any API failure.
+        set +e
+        body="$(cat "${RUNNER_TEMP}/scorecard.md")"
+        existing="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+          --jq '.[] | select(.body | contains("<!-- loop-engineer-scorecard -->")) | .id' | head -n1)"
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/${GH_REPO}/issues/comments/${existing}" \
+            -f body="$body" || echo "::warning::PR comment update failed (non-fatal)"
+        else
+          gh api --method POST "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            -f body="$body" || echo "::warning::PR comment failed (non-fatal)"
+        fi
