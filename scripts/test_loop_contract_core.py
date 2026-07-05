@@ -438,6 +438,86 @@ def test_jsonschema_mode_enforces_every_schema_required_field(tmp_path):
         assert any(i["code"] == "schema_violation" for i in report["issues"]), field
 
 
+def _scaffold(tmp_path: pathlib.Path, name: str) -> pathlib.Path:
+    from loop.scaffold import scaffold
+
+    target = tmp_path / name
+    scaffold(target)
+    return target
+
+
+def _set_task_verify(target: pathlib.Path, value) -> None:
+    tasks_path = target / "TASKS.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks["tasks"][0]["verify"] = value
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+
+
+def test_f2_no_verify_surface_is_flagged(tmp_path):
+    # F2(a): a contract with no verify-* script AND no task declaring a verify
+    # command has no verification surface at all — doctor must say so.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "no-surface")
+    (target / "scripts" / "verify-fast").unlink()
+    (target / "scripts" / "verify-full").unlink()
+    _set_task_verify(target, "")
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "missing_verify_surface" for i in report["issues"]), report["issues"]
+
+
+def test_f2_scaffold_with_deleted_verify_scripts_is_flagged(tmp_path):
+    # F2(b) repro: deleting scripts/verify-* from a scaffold left doctor green
+    # even though every task still points at the now-missing script.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "deleted-scripts")
+    (target / "scripts" / "verify-fast").unlink()
+    (target / "scripts" / "verify-full").unlink()
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "unresolved_task_verify" for i in report["issues"]), report["issues"]
+
+
+def test_f2_unresolvable_path_shaped_task_verify_is_flagged(tmp_path):
+    # F2(b): a path-shaped task.verify that does not resolve relative to the
+    # workspace is flagged, even when the verify-* scripts exist.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "bad-path")
+    _set_task_verify(target, "scripts/does-not-exist")
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "unresolved_task_verify" for i in report["issues"]), report["issues"]
+    assert not any(i["code"] == "missing_verify_surface" for i in report["issues"])
+
+
+def test_f2_plain_command_task_verify_is_not_path_checked(tmp_path):
+    # F2: a plain command (first token has no "/") is not a path and is not
+    # existence-checked — "pytest -q" must stay clean.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "plain-cmd")
+    _set_task_verify(target, "pytest -q")
+
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
+
+
+def test_f2_fresh_scaffold_stays_clean(tmp_path):
+    # F2 must not over-fire: a fresh scaffold has verify scripts and a resolving
+    # task verify, so it stays doctor-clean.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "fresh")
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
+
+
 def test_loop_doctor_flags_stub_verify_scripts(tmp_path):
     workspace = _write_valid_loop(tmp_path)
     (workspace / "scripts" / "verify-fast").write_text(

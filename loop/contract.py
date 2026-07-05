@@ -272,7 +272,67 @@ def _verify_script_paths(paths: LoopPaths) -> list[Path]:
     return [scripts / "verify-fast", scripts / "verify-fast.sh", scripts / "verify-full", scripts / "verify-full.sh"]
 
 
+def _task_verify_values(tasks: dict[str, Any] | None) -> list[str]:
+    """Non-empty ``verify`` strings declared by the tasks, in order."""
+    if not isinstance(tasks, dict):
+        return []
+    task_list = tasks.get("tasks")
+    if not isinstance(task_list, list):
+        return []
+    values: list[str] = []
+    for task in task_list:
+        if isinstance(task, dict):
+            verify = task.get("verify")
+            if isinstance(verify, str) and verify.strip():
+                values.append(verify.strip())
+    return values
+
+
+def _check_verify_surface(paths: LoopPaths, tasks: dict[str, Any] | None, issues: list[dict]) -> None:
+    """Every loop needs a verification surface, and a declared one must resolve.
+
+    (a) If NO verify-* script exists AND no task declares a verify command, the
+        contract can never gate anything — ``missing_verify_surface``.
+    (b) A task ``verify`` whose first whitespace token is path-shaped (contains
+        "/") must resolve relative to the workspace — a dangling script path is
+        ``unresolved_task_verify``. A plain command (``pytest -q``) is not a path
+        and is not existence-checked.
+
+    Runs in both validation modes.
+    """
+    any_script = any(p.is_file() for p in _verify_script_paths(paths))
+    verify_values = _task_verify_values(tasks)
+    if not any_script and not verify_values:
+        issues.append(
+            ContractIssue(
+                "missing_verify_surface",
+                "no verify-* script exists and no task declares a verify command",
+                paths.tasks,
+            )
+        )
+    for value in verify_values:
+        first = value.split()[0]
+        if "/" not in first:
+            continue
+        if not (paths.workspace / first).exists():
+            issues.append(
+                ContractIssue(
+                    "unresolved_task_verify",
+                    f"task verify path {first!r} does not resolve under the workspace",
+                    paths.tasks,
+                )
+            )
+
+
 def _check_stub_verify_scripts(paths: LoopPaths, issues: list[dict]) -> None:
+    """Flag verify-* scripts that still carry the scaffold's stub markers.
+
+    The ``stub:`` / ``replace with real command`` markers are an OPT-IN
+    convention: a loop that wants doctor to refuse an un-filled gate leaves them
+    in until the real command lands. The templates ship WITHOUT them so a fresh
+    scaffold is doctor-clean — the presence of a marker is a deliberate signal,
+    never the default state.
+    """
     for script in _verify_script_paths(paths):
         if not script.exists() or not script.is_file():
             continue
@@ -463,6 +523,7 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     if not paths.runlog.exists():
         issues.append(ContractIssue("missing_file", "missing RUNLOG.md", paths.runlog))
     _check_stub_verify_scripts(paths, issues)
+    _check_verify_surface(paths, tasks, issues)
     records_checked = _validate_optional_records(paths, mode, issues)
 
     schemas_checked = list(SCHEMA_IDS) + [
