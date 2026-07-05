@@ -16,10 +16,12 @@ self-asserted ``false_completion: false`` flag, a ``verifier_gaming`` manifest
 key, or the phrase "false-completion" in prose earns *nothing* — those are
 assertions the loop makes about itself. The three grades are:
 
-  * **invoked** (full credit) — a ``scripts/verify-*`` gate invokes a holdout /
-    anti-cheat gate on an executable (non-comment) line, OR ``RUNLOG.md`` /
-    ``.loop/receipts/*.jsonl`` records an actual run (a ``holdout_gate`` verdict
-    / anti-cheat scan result).
+  * **invoked** (full credit) — a ``scripts/verify-*`` gate *executes* a holdout
+    / anti-cheat gate script (``python3 scripts/holdout_gate.py``, not an
+    ``echo "holdout_gate"`` that only prints the token), OR ``RUNLOG.md`` /
+    ``.loop/receipts/*.jsonl`` records an actual run (a gate token AND a run-word
+    on one line — a ``holdout_gate`` verdict / anti-cheat scan result — not a
+    bare token in stuffed prose).
   * **wired** (partial credit, half the weight) — a gate script file exists
     (``scripts/holdout_gate.py`` / ``anticheat_scan.py`` / ``anti_cheat.py``)
     and is referenced from the contract's verify surface (SPEC / WORKFLOW /
@@ -41,6 +43,7 @@ Prints the report as JSON. Exit 0 iff the verdict is non-weak (``strong``/``ok``
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -118,6 +121,17 @@ _GATE_SCRIPTS = ("holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
 _GATE_RUN_WORDS = ("verdict", "scan", "result", "passed", "failed", "ran", "clean", "flagged")
 _FALSE_COMPLETION_PARTIAL_DIVISOR = 2  # wired-but-unrun earns half the weight
 
+# A gate script referenced as a *.py path — the invocation shape a real verify
+# gate uses (`python3 scripts/holdout_gate.py`, `./scripts/anticheat_scan.py`).
+# The bare token ("holdout_gate") without .py is prose, not an invocation.
+_GATE_SCRIPT_RE = re.compile(r"\b(?:holdout_gate|anticheat_scan|anti_cheat)\.py\b")
+# Commands whose arguments are inert output, not executed gates: a token inside
+# `echo`/`printf`/`:` (or the `true`/`false` no-ops) is printed, never run.
+_INERT_EMITTERS = frozenset({"echo", "printf", ":", "true", "false"})
+# Split a shell line into command segments so a real invocation chained after an
+# inert emitter (`echo x && python3 ...holdout_gate.py`) is still discovered.
+_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[;|()&]")
+
 
 def _read_text(path: Path) -> str:
     try:
@@ -175,33 +189,73 @@ def _verify_scripts(workspace: Path) -> list[Path]:
     return sorted(p for p in scripts.glob("verify-*") if p.is_file())
 
 
+def _leading_command(segment: str) -> str:
+    """The command word of a shell segment (past subshell/group openers)."""
+    stripped = segment.lstrip("({ \t")
+    parts = stripped.split(None, 1)
+    return parts[0] if parts else ""
+
+
 def _gate_invoked_in_verify(workspace: Path) -> bool:
-    """A verify-* script runs a holdout/anti-cheat gate on an executable line."""
+    """A verify-* script genuinely *executes* a holdout/anti-cheat gate.
+
+    Credit requires the gate script (`holdout_gate.py` / `anticheat_scan.py` /
+    `anti_cheat.py`) to be *invoked* as a command — not merely printed. A token
+    inside an `echo`/`printf`/`:` argument is inert output and earns nothing.
+    """
     for script in _verify_scripts(workspace):
         for line in _read_text(script).splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            if any(token in stripped for token in _GATE_TOKENS):
+            for segment in _SEGMENT_SPLIT_RE.split(stripped):
+                segment = segment.strip()
+                if not segment or not _GATE_SCRIPT_RE.search(segment):
+                    continue
+                if _leading_command(segment) in _INERT_EMITTERS:
+                    continue
                 return True
     return False
 
 
+def _records_gate_run(low: str) -> bool:
+    """A gate token AND an independent run-word share one lowered line.
+
+    The run-word is checked against the residue *after* the gate tokens are
+    removed, so a token that itself contains a run-word (``anticheat_scan`` ⊃
+    ``scan``) cannot self-satisfy — a bare token earns nothing.
+    """
+    if not any(token in low for token in _GATE_TOKENS):
+        return False
+    residue = low
+    for token in _GATE_TOKENS:
+        residue = residue.replace(token, " ")
+    return any(word in residue for word in _GATE_RUN_WORDS)
+
+
+def _receipt_records_gate(line: str) -> bool:
+    """A receipt line is a real gate record: parseable JSON with gate+run fields."""
+    line = line.strip()
+    if not line:
+        return False
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    return _records_gate_run(json.dumps(obj).lower())
+
+
 def _gate_run_recorded(paths) -> bool:
     """RUNLOG.md / .loop/receipts/*.jsonl record an actual gate run."""
-    texts = [_read_text(paths.runlog)]
+    for line in _read_text(paths.runlog).splitlines():
+        if _records_gate_run(line.lower()):
+            return True
     receipts = paths.loop_dir / "receipts"
     if receipts.is_dir():
-        texts.extend(_read_text(p) for p in sorted(receipts.glob("*.jsonl")))
-    for text in texts:
-        for line in text.splitlines():
-            low = line.lower()
-            if any(token in low for token in _GATE_TOKENS):
-                return True
-            if ("holdout" in low or "anticheat" in low or "anti-cheat" in low) and any(
-                word in low for word in _GATE_RUN_WORDS
-            ):
-                return True
+        for receipt in sorted(receipts.glob("*.jsonl")):
+            for line in _read_text(receipt).splitlines():
+                if _receipt_records_gate(line):
+                    return True
     return False
 
 

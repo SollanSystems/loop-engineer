@@ -440,3 +440,124 @@ def test_documented_cli_by_path_reads_dotloop_manifest(tmp_path):
     gap_text = " ".join(report["gaps"]).lower()
     assert "plan-then-execute" not in present_text, report
     assert "plan-then-execute" in gap_text, report
+
+
+# --- M3: false-completion credit grades on execution evidence, not tokens ----
+
+
+def _verify_gate_loop(root: pathlib.Path, name: str, verify_body: str) -> pathlib.Path:
+    """A loop whose only signal is a single verify-safety script body."""
+    d = root / name
+    (d / "scripts").mkdir(parents=True)
+    (d / "scripts" / "verify-safety").write_text(
+        "#!/bin/sh\n" + verify_body, encoding="utf-8"
+    )
+    return d
+
+
+def test_string_literal_gate_tokens_earn_no_invoked_credit(tmp_path):
+    # M3(a): a token inside echo/printf/':' args (or any quoted-string emit) is
+    # inert output, not an executed gate — it must earn ZERO invoked credit.
+    exploits = (
+        'echo "holdout_gate"\n',
+        "printf 'holdout_gate\\n'\n",
+        ": holdout_gate\n",
+        'echo "run the holdout_gate please"\n',
+        'echo "holdout_gate.py"\n',  # even the script name, still just printed
+    )
+    for i, body in enumerate(exploits):
+        loop = _verify_gate_loop(tmp_path, f"exploit{i}", body)
+        assert il._gate_invoked_in_verify(loop) is False, body
+
+
+def test_real_gate_invocations_keep_invoked_credit(tmp_path):
+    # M3(a): the token as part of a genuinely invoked command keeps full credit.
+    real = (
+        "python3 scripts/holdout_gate.py --strict\n",
+        "bash scripts/anticheat_scan.py\n",
+        "./scripts/holdout_gate.py\n",
+        "uv run python scripts/anticheat_scan.py\n",
+        # the flagship shape: the gate path is double-quoted, invoked by python3.
+        'python3 "$REPO/scripts/holdout_gate.py" "$EX/target/manifest.json" --cwd "$EX/target"\n',
+        # chained after an echo — the real invocation must still count.
+        'echo "gate:" && python3 scripts/holdout_gate.py\n',
+    )
+    for i, body in enumerate(real):
+        loop = _verify_gate_loop(tmp_path, f"real{i}", body)
+        assert il._gate_invoked_in_verify(loop) is True, body
+
+
+def test_bare_gate_token_in_runlog_earns_no_recorded_credit(tmp_path):
+    # M3(b): a bare gate token in RUNLOG prose is a self-narration, not a run —
+    # even when the token itself (anticheat_scan) contains a run-word ("scan").
+    loop = tmp_path / "rl"
+    (loop / ".loop").mkdir(parents=True)
+    (loop / "RUNLOG.md").write_text(
+        "This loop uses holdout_gate and anticheat_scan for false-completion defense.\n",
+        encoding="utf-8",
+    )
+    paths = il.resolve_loop_paths(loop)
+    assert il._gate_run_recorded(paths) is False
+
+
+def test_recorded_gate_run_with_run_word_earns_credit(tmp_path):
+    # M3(b): a real recorded run — token AND an independent run-word on one line.
+    loop = tmp_path / "rl2"
+    (loop / ".loop").mkdir(parents=True)
+    (loop / "RUNLOG.md").write_text(
+        "gate: scripts/holdout_gate.py target/manifest.json -> verdict Succeeded\n",
+        encoding="utf-8",
+    )
+    paths = il.resolve_loop_paths(loop)
+    assert il._gate_run_recorded(paths) is True
+
+
+def test_receipts_jsonl_records_gate_run(tmp_path):
+    # M3(b): a structured receipt line is parsed as JSON and matched on fields.
+    loop = tmp_path / "rc"
+    (loop / ".loop" / "receipts").mkdir(parents=True)
+    (loop / ".loop" / "receipts" / "run.jsonl").write_text(
+        json.dumps({"event": "holdout_gate", "verdict": "Succeeded"}) + "\n",
+        encoding="utf-8",
+    )
+    paths = il.resolve_loop_paths(loop)
+    assert il._gate_run_recorded(paths) is True
+
+
+def test_prose_renamed_to_jsonl_earns_no_recorded_credit(tmp_path):
+    # M3(b): a non-JSON prose line stuffed into a .jsonl file is not a receipt.
+    loop = tmp_path / "rc2"
+    (loop / ".loop" / "receipts").mkdir(parents=True)
+    (loop / ".loop" / "receipts" / "run.jsonl").write_text(
+        "holdout_gate anticheat_scan verdict clean passed\n", encoding="utf-8"
+    )
+    paths = il.resolve_loop_paths(loop)
+    assert il._gate_run_recorded(paths) is False
+
+
+def test_stuffed_fake_without_gate_file_cannot_reach_wired(tmp_path):
+    # M3(c): file-exists + surface-reference is the wired bar; with NO gate script
+    # file, a stuffed contract that merely names the gate cannot reach "wired".
+    loop = tmp_path / "nofile"
+    (loop / "scripts").mkdir(parents=True)
+    (loop / "WORKFLOW.md").write_text(
+        "# WORKFLOW\nHigh-value tasks are gated by scripts/holdout_gate.py anti-cheat.\n",
+        encoding="utf-8",
+    )
+    (loop / "SPEC.md").write_text(
+        "# SPEC\nholdout_gate anticheat_scan anti-cheat defense.\n", encoding="utf-8"
+    )
+    paths = il.resolve_loop_paths(loop)
+    assert il._gate_script_referenced(paths) is False
+    assert il._false_completion_credit(paths) == "none"
+
+
+def test_flagship_example_keeps_strong_gate_backed_verdict():
+    # Regression guard: the genuinely gate-backed flagship must keep its verdict
+    # and its invoked false-completion credit — the discriminator must not dock
+    # the real, double-quoted `holdout_gate.py` invocation in its verify-full.
+    root = pathlib.Path(__file__).resolve().parent.parent
+    report = il.inspect_loop(str(root / "examples" / "coverage-repair"))
+    assert report["verdict"] == "strong"
+    assert report["score"] >= 80
+    assert any("invoked" in signal for signal in report["present"])
