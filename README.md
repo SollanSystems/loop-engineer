@@ -305,8 +305,9 @@ refuses an evidence-free `Succeeded` at write time. Recipe:
 ```
 
 `doctor` failure fails the job; the inspect verdict is warn-only unless you set
-`fail-under-score`. Pre-commit users: hook id `loop-doctor`. This repo runs the
-same action against its own contract — the gate gates its maker.
+`fail-under-score`. Pre-commit users: hook id `loop-doctor`. This repo dogfoods
+the same action in CI against its flagship example contract
+([`examples/coverage-repair`](examples/coverage-repair)) — the gate gates its maker.
 
 ---
 
