@@ -85,6 +85,55 @@ def test_present_rollout_jsonl_bad_line_is_flagged(tmp_path):
     assert any("rollout.jsonl" in i["message"] for i in issues)
 
 
+def test_foreign_jsonl_is_not_validated_as_rollout(tmp_path):
+    # F5a: doctor must validate only the canonical rollout ledger (rollout.jsonl),
+    # not every .loop/*.jsonl. A foreign notes.jsonl must not false-FAIL a healthy
+    # contract by being force-validated against the rollout schema.
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+    (loop_dir / "notes.jsonl").write_text(json.dumps({"note": "hi"}) + "\n", encoding="utf-8")
+    assert _optional_issues(tmp_path) == []
+
+
+def test_foreign_jsonl_does_not_mark_rollout_checked(tmp_path):
+    # F5a: "rollout" belongs in schemas_checked only when a canonical ledger was
+    # actually validated — an unknown jsonl must not inflate coverage.
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+    (loop_dir / "notes.jsonl").write_text(json.dumps({"note": "hi"}) + "\n", encoding="utf-8")
+    checked = _validate_optional_records(resolve_loop_paths(tmp_path), "structural-fallback", [])
+    assert "rollout" not in checked
+
+
+def test_canonical_rollout_ledger_is_still_validated_and_marked(tmp_path):
+    # F5a: the canonical rollout.jsonl must still be validated and reported.
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+    good = {"id": "c1", "parent": None, "verdict": "ok", "score": 0.9,
+            "score_delta": 0.1, "coherent_with_prior_winner": True, "productive": True}
+    (loop_dir / "rollout.jsonl").write_text(json.dumps(good) + "\n", encoding="utf-8")
+    issues: list[dict] = []
+    checked = _validate_optional_records(resolve_loop_paths(tmp_path), "structural-fallback", issues)
+    assert issues == []
+    assert "rollout" in checked
+
+
+def test_rollout_ledger_with_invalid_utf8_is_flagged(tmp_path):
+    # F5b: a rollout ledger line carrying a raw 0xff byte inside an otherwise-valid
+    # JSON record must not silently validate clean under errors="ignore" (a false
+    # PASS). Strict decode fails the file closed with an invalid_encoding issue.
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+    prefix = b'{"id": "c1", "parent": null, "verdict": "o'
+    suffix = (
+        b'k", "score": 0.9, "score_delta": 0.1, '
+        b'"coherent_with_prior_winner": true, "productive": true}'
+    )
+    (loop_dir / "rollout.jsonl").write_bytes(prefix + b"\xff" + suffix + b"\n")
+    issues = _optional_issues(tmp_path)
+    assert any(i["code"] == "invalid_encoding" for i in issues), issues
+
+
 def test_present_valid_receipt_jsonl_passes(tmp_path):
     receipts = tmp_path / ".loop" / "receipts"
     receipts.mkdir(parents=True)

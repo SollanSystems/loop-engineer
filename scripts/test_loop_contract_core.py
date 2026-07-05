@@ -190,6 +190,41 @@ def test_read_manifest_returns_dict_on_malformed_yaml(tmp_path):
     assert isinstance(result, dict)
 
 
+def test_f6_fallback_yaml_keeps_hash_inside_quotes():
+    # F6: the fallback parser stripped everything after the first '#' before it
+    # ever looked at quotes, so goal: "reach #1" truncated to '"reach'. A '#'
+    # inside a quoted scalar is data, not a comment.
+    from loop.contract import _fallback_yaml
+
+    assert _fallback_yaml('goal: "reach #1"\n') == {"goal": "reach #1"}
+    assert _fallback_yaml("goal: 'reach #1'\n") == {"goal": "reach #1"}
+    # A genuine unquoted trailing comment is still stripped.
+    assert _fallback_yaml("goal: ship  # real comment\n") == {"goal": "ship"}
+    # And a nested (one-level) mapping value keeps its quoted '#' too.
+    assert _fallback_yaml('policies:\n  note: "see #3"\n') == {"policies": {"note": "see #3"}}
+
+
+def test_f6_both_manifest_parse_paths_agree_on_quoted_hash(tmp_path, monkeypatch):
+    # F6: PyYAML and the fallback subset parser must agree that a '#' inside a
+    # quoted value survives. Pin both paths — the real library, and the fallback
+    # forced by hiding the yaml module (import yaml -> ImportError -> fallback).
+    import sys
+
+    from loop.contract import read_manifest
+
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text('schema: loop-engineer/manifest@1\ngoal: "reach #1"\n', encoding="utf-8")
+
+    yaml = pytest.importorskip("yaml")
+    real = read_manifest(manifest)
+    assert real["goal"] == "reach #1"
+
+    monkeypatch.setitem(sys.modules, "yaml", None)  # import yaml now raises ImportError
+    fallback = read_manifest(manifest)
+    assert fallback["goal"] == "reach #1"
+    assert fallback["goal"] == real["goal"]
+
+
 def test_doctor_does_not_crash_on_malformed_manifest(tmp_path):
     # F1 (blast radius): the doctor CLI validates a foreign contract via the same
     # read_manifest; a malformed manifest must produce an actionable report, not a
@@ -251,10 +286,85 @@ def test_g1_contradictory_succeeded_terminal_emits_issue():
     assert any(i["code"] == "contradictory_terminal" for i in all_false_issues)
 
     happy_issues = _terminal_issues(
-        {**base, "criteria_met": {"1": True}, "false_completion": False}
+        {**base, "criteria_met": {"1": True}, "false_completion": False, "evidence": ["e.json"]}
     )
     assert not any(i["code"] == "contradictory_terminal" for i in happy_issues)
     assert happy_issues == []
+
+
+def _write_valid_succeeded_contract(root: pathlib.Path, evidence) -> pathlib.Path:
+    """A doctor-clean scaffold mutated into a Succeeded terminal with the given
+    evidence list. Used to pin F1 end-to-end (both validation modes)."""
+    from loop.scaffold import scaffold
+
+    target = root / "loop"
+    scaffold(target)
+    state_path = target / ".loop" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["terminal_state"] = "Succeeded"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    (target / ".loop" / "terminal_state.json").write_text(
+        json.dumps(
+            {
+                "schema": "loop-engineer/terminal@1",
+                "project": "loop",
+                "state": "Succeeded",
+                "iteration_id": 1,
+                "criteria_met": {"c1": True},
+                "evidence": evidence,
+                "false_completion": False,
+                "terminated_at": "2026-01-01T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def test_g1_empty_evidence_succeeded_terminal_is_flagged_unit():
+    # F1: a Succeeded terminal with no evidence outruns its own claim exactly like
+    # false_completion=true or an unmet criterion. _validate_terminal runs the
+    # cross-field check in BOTH validation modes, so this unit assertion covers both.
+    empty_evidence_issues = _terminal_issues(
+        {
+            "schema": "loop-engineer/terminal@1",
+            "state": "Succeeded",
+            "criteria_met": {"c1": True},
+            "false_completion": False,
+            "evidence": [],
+        }
+    )
+    assert any(i["code"] == "contradictory_terminal" for i in empty_evidence_issues)
+    assert any(
+        "evidence" in i["message"]
+        for i in empty_evidence_issues
+        if i["code"] == "contradictory_terminal"
+    )
+
+
+def test_f1_empty_evidence_succeeded_fails_doctor_end_to_end(tmp_path):
+    # F1 repro: a schema-valid contract whose terminal declares Succeeded with an
+    # empty evidence[] must NOT pass doctor. Runs under whichever validation mode
+    # is installed; the two suite invocations exercise both.
+    from loop.contract import doctor_report
+
+    target = _write_valid_succeeded_contract(tmp_path, evidence=[])
+    report = doctor_report(target)
+    assert report["ok"] is False, report["issues"]
+    assert any(
+        i["code"] == "contradictory_terminal" and "evidence" in i["message"]
+        for i in report["issues"]
+    )
+
+
+def test_f1_non_empty_evidence_succeeded_still_passes_doctor(tmp_path):
+    # The fix must not over-fire: a Succeeded terminal that DOES carry evidence
+    # stays doctor-clean.
+    from loop.contract import doctor_report
+
+    target = _write_valid_succeeded_contract(tmp_path, evidence=[".loop/artifacts/verify-T1.json"])
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
 
 
 def test_jsonschema_mode_rejects_schema_violating_artifact(tmp_path):
@@ -326,6 +436,121 @@ def test_jsonschema_mode_enforces_every_schema_required_field(tmp_path):
         assert report["validation_mode"] == "jsonschema"
         assert report["ok"] is False, f"task missing {field!r} should fail"
         assert any(i["code"] == "schema_violation" for i in report["issues"]), field
+
+
+def _scaffold(tmp_path: pathlib.Path, name: str) -> pathlib.Path:
+    from loop.scaffold import scaffold
+
+    target = tmp_path / name
+    scaffold(target)
+    return target
+
+
+def _set_task_verify(target: pathlib.Path, value) -> None:
+    tasks_path = target / "TASKS.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks["tasks"][0]["verify"] = value
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+
+
+def test_f2_no_verify_surface_is_flagged(tmp_path):
+    # F2(a): a contract with no verify-* script AND no task declaring a verify
+    # command has no verification surface at all — doctor must say so.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "no-surface")
+    (target / "scripts" / "verify-fast").unlink()
+    (target / "scripts" / "verify-full").unlink()
+    _set_task_verify(target, "")
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "missing_verify_surface" for i in report["issues"]), report["issues"]
+
+
+def test_f2_scaffold_with_deleted_verify_scripts_is_flagged(tmp_path):
+    # F2(b) repro: deleting scripts/verify-* from a scaffold left doctor green
+    # even though every task still points at the now-missing script.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "deleted-scripts")
+    (target / "scripts" / "verify-fast").unlink()
+    (target / "scripts" / "verify-full").unlink()
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "unresolved_task_verify" for i in report["issues"]), report["issues"]
+
+
+def test_f2_unresolvable_path_shaped_task_verify_is_flagged(tmp_path):
+    # F2(b): a path-shaped task.verify that does not resolve relative to the
+    # workspace is flagged, even when the verify-* scripts exist.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "bad-path")
+    _set_task_verify(target, "scripts/does-not-exist")
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "unresolved_task_verify" for i in report["issues"]), report["issues"]
+    assert not any(i["code"] == "missing_verify_surface" for i in report["issues"])
+
+
+def test_f2_plain_command_task_verify_is_not_path_checked(tmp_path):
+    # F2: a plain command (first token has no "/") is not a path and is not
+    # existence-checked — "pytest -q" must stay clean.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "plain-cmd")
+    _set_task_verify(target, "pytest -q")
+
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
+
+
+def test_f2_fresh_scaffold_stays_clean(tmp_path):
+    # F2 must not over-fire: a fresh scaffold has verify scripts and a resolving
+    # task verify, so it stays doctor-clean.
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "fresh")
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
+
+
+def test_f7_file_target_resolves_to_owning_workspace(tmp_path):
+    # F7: a FILE target (loop doctor .loop/state.json or TASKS.json) resolved the
+    # workspace to the file itself, so every path underneath was garbage. A file
+    # target must resolve from its parent to the SAME paths as the dir target.
+    from loop.paths import resolve_loop_paths
+
+    target = _scaffold(tmp_path, "file-target")
+    from_dir = resolve_loop_paths(target)
+
+    from_state_file = resolve_loop_paths(target / ".loop" / "state.json")
+    assert from_state_file.workspace == from_dir.workspace
+    assert from_state_file.state == from_dir.state
+    assert from_state_file.loop_dir == from_dir.loop_dir
+
+    from_tasks_file = resolve_loop_paths(target / "TASKS.json")
+    assert from_tasks_file.workspace == from_dir.workspace
+    assert from_tasks_file.tasks == from_dir.tasks
+
+
+def test_f7_doctor_on_file_target_matches_dir_target(tmp_path):
+    # F7 at the CLI level: `doctor <ws>/.loop/state.json` must produce the same
+    # report as `doctor <ws>` instead of a wall of garbage-path issues.
+    target = _scaffold(tmp_path, "file-cli")
+
+    from_dir = _run_loop_cli("doctor", str(target))
+    from_file = _run_loop_cli("doctor", str(target / ".loop" / "state.json"))
+
+    assert from_dir.returncode == 0, from_dir.stderr + from_dir.stdout
+    assert from_file.returncode == 0, from_file.stderr + from_file.stdout
+    dir_report = json.loads(from_dir.stdout)
+    file_report = json.loads(from_file.stdout)
+    assert file_report["ok"] is True
+    assert file_report["paths"] == dir_report["paths"]
 
 
 def test_loop_doctor_flags_stub_verify_scripts(tmp_path):

@@ -59,6 +59,25 @@ def _parse_scalar(value: str) -> Any:
     return value
 
 
+def _strip_comment(raw: str) -> str:
+    """Drop a trailing ``#`` comment, but only when the ``#`` is unquoted.
+
+    A ``#`` inside a single- or double-quoted scalar is data (``"reach #1"``),
+    not a comment; and — like YAML — a ``#`` only opens a comment at line start
+    or after whitespace, so an unquoted ``reach#1`` is left intact.
+    """
+
+    in_single = in_double = False
+    for i, ch in enumerate(raw):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i]
+    return raw
+
+
 def _fallback_yaml(text: str) -> dict[str, Any]:
     """Small YAML subset parser for the manifest shapes this project emits.
 
@@ -69,7 +88,7 @@ def _fallback_yaml(text: str) -> dict[str, Any]:
     root: dict[str, Any] = {}
     current_key: str | None = None
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].rstrip()
+        line = _strip_comment(raw).rstrip()
         if not line:
             continue
         if not line.startswith(" ") and ":" in line:
@@ -187,8 +206,10 @@ def _check_terminal_contradiction(data: dict[str, Any] | None, path: Path, issue
     """G1: a Succeeded terminal must not contradict its own evidence.
 
     Runs in both validation modes because JSON Schema cannot express the
-    cross-field rule that a success claim requires false_completion=false AND at
-    least one met criterion.
+    cross-field rule that a success claim requires false_completion=false, at
+    least one met criterion, AND a non-empty evidence list — mirroring the
+    write-time refusal in loop/emit.py (an evidence-free Succeeded is a claim
+    with nothing behind it).
     """
 
     if not isinstance(data, dict) or data.get("state") != "Succeeded":
@@ -201,6 +222,11 @@ def _check_terminal_contradiction(data: dict[str, Any] | None, path: Path, issue
     if not isinstance(criteria, dict) or not any(v is True for v in criteria.values()):
         issues.append(
             ContractIssue("contradictory_terminal", "Succeeded terminal has no met (true) entry in criteria_met", path)
+        )
+    evidence = data.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        issues.append(
+            ContractIssue("contradictory_terminal", "Succeeded terminal has empty evidence[] (G1)", path)
         )
 
 
@@ -246,7 +272,67 @@ def _verify_script_paths(paths: LoopPaths) -> list[Path]:
     return [scripts / "verify-fast", scripts / "verify-fast.sh", scripts / "verify-full", scripts / "verify-full.sh"]
 
 
+def _task_verify_values(tasks: dict[str, Any] | None) -> list[str]:
+    """Non-empty ``verify`` strings declared by the tasks, in order."""
+    if not isinstance(tasks, dict):
+        return []
+    task_list = tasks.get("tasks")
+    if not isinstance(task_list, list):
+        return []
+    values: list[str] = []
+    for task in task_list:
+        if isinstance(task, dict):
+            verify = task.get("verify")
+            if isinstance(verify, str) and verify.strip():
+                values.append(verify.strip())
+    return values
+
+
+def _check_verify_surface(paths: LoopPaths, tasks: dict[str, Any] | None, issues: list[dict]) -> None:
+    """Every loop needs a verification surface, and a declared one must resolve.
+
+    (a) If NO verify-* script exists AND no task declares a verify command, the
+        contract can never gate anything — ``missing_verify_surface``.
+    (b) A task ``verify`` whose first whitespace token is path-shaped (contains
+        "/") must resolve relative to the workspace — a dangling script path is
+        ``unresolved_task_verify``. A plain command (``pytest -q``) is not a path
+        and is not existence-checked.
+
+    Runs in both validation modes.
+    """
+    any_script = any(p.is_file() for p in _verify_script_paths(paths))
+    verify_values = _task_verify_values(tasks)
+    if not any_script and not verify_values:
+        issues.append(
+            ContractIssue(
+                "missing_verify_surface",
+                "no verify-* script exists and no task declares a verify command",
+                paths.tasks,
+            )
+        )
+    for value in verify_values:
+        first = value.split()[0]
+        if "/" not in first:
+            continue
+        if not (paths.workspace / first).exists():
+            issues.append(
+                ContractIssue(
+                    "unresolved_task_verify",
+                    f"task verify path {first!r} does not resolve under the workspace",
+                    paths.tasks,
+                )
+            )
+
+
 def _check_stub_verify_scripts(paths: LoopPaths, issues: list[dict]) -> None:
+    """Flag verify-* scripts that still carry the scaffold's stub markers.
+
+    The ``stub:`` / ``replace with real command`` markers are an OPT-IN
+    convention: a loop that wants doctor to refuse an un-filled gate leaves them
+    in until the real command lands. The templates ship WITHOUT them so a fresh
+    scaffold is doctor-clean — the presence of a marker is a deliberate signal,
+    never the default state.
+    """
     for script in _verify_script_paths(paths):
         if not script.exists() or not script.is_file():
             continue
@@ -344,8 +430,22 @@ def _validate_record(data: dict[str, Any], schema_key: str, path: Path, mode: st
         _structural_record_check(data, _load_schema_file(filename), path, issues)
 
 
+# The canonical rollout / candidate ledger file (scripts/rollout_ledger.py,
+# schemas/rollout-record.schema.json). doctor validates THIS as a rollout ledger;
+# any other .loop/*.jsonl is foreign and skipped rather than force-validated
+# against the rollout schema.
+ROLLOUT_LEDGER_NAMES = ("rollout.jsonl",)
+
+
 def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) -> None:
-    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        # A ledger that is not valid UTF-8 fails closed — decoding it lossily
+        # (errors="ignore") would let a record with corrupt bytes validate clean.
+        issues.append(ContractIssue("invalid_encoding", f"{path.name}: not valid UTF-8: {exc}", path))
+        return
+    for lineno, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
@@ -372,9 +472,11 @@ def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) 
             if data is not None:
                 _validate_record(data, "repair", record_path, mode, issues)
                 checked.add("repair")
-    for ledger_path in sorted(paths.loop_dir.glob("*.jsonl")):
-        _validate_jsonl(ledger_path, "rollout", mode, issues)
-        checked.add("rollout")
+    for name in ROLLOUT_LEDGER_NAMES:
+        ledger_path = paths.loop_dir / name
+        if ledger_path.is_file():
+            _validate_jsonl(ledger_path, "rollout", mode, issues)
+            checked.add("rollout")
     receipts_dir = paths.loop_dir / "receipts"
     if receipts_dir.is_dir():
         for receipt_path in sorted(receipts_dir.glob("*.jsonl")):
@@ -421,6 +523,7 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     if not paths.runlog.exists():
         issues.append(ContractIssue("missing_file", "missing RUNLOG.md", paths.runlog))
     _check_stub_verify_scripts(paths, issues)
+    _check_verify_surface(paths, tasks, issues)
     records_checked = _validate_optional_records(paths, mode, issues)
 
     schemas_checked = list(SCHEMA_IDS) + [
