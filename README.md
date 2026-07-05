@@ -216,7 +216,7 @@ terminal outcome:
   .loop/
     manifest.yaml        # contract metadata
     state.json           # live FSM cursor
-    terminal_state.json  # final exit record, written once
+    terminal_state.json  # final exit record; written once — emit refuses overwrite without force=True
     artifacts/           # evidence bundles and intermediate outputs
     approvals/           # approval requests and resolutions
     checkpoints/         # recoverable snapshots

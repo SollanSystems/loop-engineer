@@ -8,6 +8,8 @@ is enforced HERE, at write time, before doctor ever sees the file.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -62,8 +64,25 @@ def _read_state(paths) -> dict[str, Any]:
     return data
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Whole-file write via a temp file in the SAME directory then os.replace, so a
+    crash mid-write can never leave truncated JSON. The temp file is removed on any
+    failure, leaving no litter."""
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _write_state(paths, state: dict[str, Any]) -> None:
-    paths.state.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(paths.state, json.dumps(state, indent=2) + "\n")
 
 
 def append_iteration(
@@ -180,12 +199,17 @@ def terminate(
     iteration_id: int | None = None,
     false_completion: bool = False,
     lessons_ref: str | None = None,
+    force: bool = False,
 ) -> Path:
     """Write .loop/terminal_state.json (and stamp state.json.terminal_state).
 
     Refuses an evidence-free Succeeded — the G1 cross-check at write time:
     Succeeded requires non-empty evidence, at least one met criterion, and
     false_completion=False.
+
+    The terminal record is written once: a second terminate on an existing
+    terminal file is refused unless force=True (the deliberate-overwrite escape
+    hatch).
     """
     if state not in TERMINAL_STATES:
         raise EmitError(f"unknown terminal state {state!r}; expected one of {TERMINAL_STATES}")
@@ -199,6 +223,12 @@ def terminate(
     if not all(isinstance(v, bool) for v in criteria_met.values()):
         raise EmitError("criteria_met values must be booleans")
     paths = _require_contract(target)
+    terminal_path = paths.loop_dir / "terminal_state.json"
+    if terminal_path.is_file() and not force:
+        raise EmitError(
+            f"terminal already written at {terminal_path} — the terminal record is "
+            f"written once; pass force=True to deliberately overwrite it"
+        )
     current = _read_state(paths)
 
     terminal: dict[str, Any] = {
@@ -217,13 +247,12 @@ def terminate(
     if lessons_ref is not None:
         terminal["lessons_ref"] = lessons_ref
 
-    terminal_path = paths.loop_dir / "terminal_state.json"
     issues: list[dict] = []
     _validate_terminal(terminal, terminal_path, issues)
     if issues:
         raise EmitError(f"terminal failed validation before write: {issues}")
 
-    terminal_path.write_text(json.dumps(terminal, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(terminal_path, json.dumps(terminal, indent=2) + "\n")
     current["terminal_state"] = state
     _write_state(paths, current)
     return terminal_path

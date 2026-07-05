@@ -113,3 +113,66 @@ def test_terminate_rejects_non_boolean_criteria_met_value(workspace):
 def test_writes_refused_without_a_contract(tmp_path):
     with pytest.raises(emit.EmitError):
         emit.append_iteration(tmp_path / "nowhere", iteration_id=1, outcome="task_passed")
+
+
+def _loop_leftovers(workspace):
+    return sorted(p.name for p in (workspace / ".loop").rglob("*.tmp"))
+
+
+def test_terminate_refuses_overwrite_of_existing_terminal(workspace):
+    emit.terminate(
+        workspace, state="Succeeded", criteria_met={"1": True},
+        evidence=["artifact.txt"], reason="first", iteration_id=1,
+    )
+    terminal_path = workspace / ".loop" / "terminal_state.json"
+    before = terminal_path.read_text(encoding="utf-8")
+
+    with pytest.raises(emit.EmitError) as exc:
+        emit.terminate(
+            workspace, state="FailedBlocked", criteria_met={"1": False},
+            evidence=[], reason="second",
+        )
+    # names the written-once contract and the force escape hatch
+    assert "written once" in str(exc.value)
+    assert "force=True" in str(exc.value)
+    # the refused call left the original terminal record byte-for-byte intact
+    assert terminal_path.read_text(encoding="utf-8") == before
+    assert not _loop_leftovers(workspace)
+
+
+def test_terminate_force_overwrites(workspace):
+    emit.terminate(
+        workspace, state="Succeeded", criteria_met={"1": True},
+        evidence=["artifact.txt"], reason="first", iteration_id=1,
+    )
+    emit.terminate(
+        workspace, state="FailedBlocked", criteria_met={"1": False},
+        evidence=[], reason="deliberate override", force=True,
+    )
+    data = json.loads((workspace / ".loop" / "terminal_state.json").read_text(encoding="utf-8"))
+    assert data["state"] == "FailedBlocked"
+    state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
+    assert state["terminal_state"] == "FailedBlocked"
+    assert not _loop_leftovers(workspace)
+
+
+def test_terminate_leaves_no_tmp_litter_on_success(workspace):
+    emit.terminate(
+        workspace, state="Succeeded", criteria_met={"1": True},
+        evidence=["artifact.txt"], reason="ok", iteration_id=1,
+    )
+    assert not _loop_leftovers(workspace)
+
+
+def test_terminate_leaves_no_tmp_litter_on_invalid_terminate(workspace):
+    with pytest.raises(emit.EmitError):
+        emit.terminate(
+            workspace, state="Succeeded", criteria_met={"1": True}, evidence=[],
+        )
+    assert not (workspace / ".loop" / "terminal_state.json").exists()
+    assert not _loop_leftovers(workspace)
+
+
+def test_append_iteration_leaves_no_tmp_litter(workspace):
+    emit.append_iteration(workspace, iteration_id=1, outcome="task_passed", task_id="T1")
+    assert not _loop_leftovers(workspace)
