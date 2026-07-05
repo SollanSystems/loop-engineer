@@ -38,17 +38,32 @@ runs:
       env:
         LOOP_VERSION: "${{ inputs.version }}"
       run: |
+        # Install WITH the schema extras on both paths: the gate surface must run
+        # real JSON-Schema validation, not the CLI's pure-stdlib structural default.
         if [ -n "$LOOP_VERSION" ]; then
-          python -m pip install --quiet "loop-engineer==$LOOP_VERSION"
+          python -m pip install --quiet "loop-engineer[schemas,yaml]==$LOOP_VERSION"
         else
-          python -m pip install --quiet "${{ github.action_path }}"
+          python -m pip install --quiet "${{ github.action_path }}[schemas,yaml]"
         fi
 
     - name: loop doctor (hard gate)
       shell: bash
       env:
         LOOP_PATH: "${{ inputs.path }}"
-      run: loop doctor "$LOOP_PATH"
+      run: |
+        # -eo pipefail (GitHub's bash default) makes a doctor failure fail the step
+        # despite the tee. Then assert the strict validation path actually ran, so a
+        # future packaging regression that drops the extras fails loudly here. The
+        # check reads one fixed field from doctor's own JSON — no fragile parsing.
+        loop doctor "$LOOP_PATH" | tee "${RUNNER_TEMP}/doctor.json"
+        python - "${RUNNER_TEMP}/doctor.json" <<'PY'
+        import json, sys
+        mode = json.load(open(sys.argv[1])).get("validation_mode")
+        if mode != "jsonschema":
+            print(f"::error::loop doctor ran in {mode!r} mode, not 'jsonschema' — "
+                  "the gate is installed without its [schemas] extra")
+            raise SystemExit(1)
+        PY
 
     - name: loop inspect (scorecard)
       shell: bash
