@@ -304,9 +304,14 @@ refuses an evidence-free `Succeeded` at write time. Recipe:
     path: "."
 ```
 
-`doctor` failure fails the job; the inspect verdict is warn-only unless you set
-`fail-under-score`. Pre-commit users: hook id `loop-doctor`. This repo dogfoods
-the same action in CI against its flagship example contract
+`doctor` failure fails the job (and the action installs the `[schemas]` extra so
+`doctor` runs real JSON-Schema validation, not the structural fallback). The
+inspect **score is an advisory heuristic** — useful as a trend, but a determined
+author can game it, so it is warn-only unless you set `fail-under-score`;
+**`loop doctor` is the hard gate.** The optional PR comment is sticky — it edits
+one scorecard comment in place across re-runs. Pre-commit users: hook id
+`loop-doctor` (its `additional_dependencies` pin the schema extras too). This repo
+dogfoods the same action in CI against its flagship example contract
 ([`examples/coverage-repair`](examples/coverage-repair)) — the gate gates its maker.
 
 ---

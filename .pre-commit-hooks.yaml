@@ -3,5 +3,9 @@
   description: "Validate the repo's .loop/ contract objects; fails on a dishonest or malformed contract."
   entry: loop doctor .
   language: python
+  # The CLI default is pure-stdlib structural validation; the gate surface runs
+  # the strict path. pre-commit installs these into the hook's isolated env so
+  # loop/contract.py takes the jsonschema branch and PyYAML parses the manifest.
+  additional_dependencies: ["jsonschema>=4", "pyyaml>=6"]
   pass_filenames: false
   always_run: true

@@ -31,6 +31,22 @@ def test_hook_definition_is_sound():
     assert hook["always_run"] is True
 
 
+def test_hook_installs_the_schema_extras_so_it_runs_the_strict_gate():
+    # The CLI's pure-stdlib structural default is deliberate, but the pre-commit
+    # gate must run real JSON-Schema validation — otherwise a type-invalid
+    # contract passes the shipped hook. pre-commit installs additional_dependencies
+    # into the hook's isolated env.
+    (hook,) = _hooks()
+    deps = hook.get("additional_dependencies", [])
+    joined = " ".join(deps).lower()
+    assert "jsonschema" in joined, (
+        "loop-doctor hook must install jsonschema so validation runs in strict mode"
+    )
+    assert "pyyaml" in joined or "yaml" in joined, (
+        "loop-doctor hook must install pyyaml so the manifest parses via PyYAML"
+    )
+
+
 def test_entry_command_matches_a_declared_console_script():
     text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'loop = "loop.__main__:main"' in text
