@@ -190,6 +190,41 @@ def test_read_manifest_returns_dict_on_malformed_yaml(tmp_path):
     assert isinstance(result, dict)
 
 
+def test_f6_fallback_yaml_keeps_hash_inside_quotes():
+    # F6: the fallback parser stripped everything after the first '#' before it
+    # ever looked at quotes, so goal: "reach #1" truncated to '"reach'. A '#'
+    # inside a quoted scalar is data, not a comment.
+    from loop.contract import _fallback_yaml
+
+    assert _fallback_yaml('goal: "reach #1"\n') == {"goal": "reach #1"}
+    assert _fallback_yaml("goal: 'reach #1'\n") == {"goal": "reach #1"}
+    # A genuine unquoted trailing comment is still stripped.
+    assert _fallback_yaml("goal: ship  # real comment\n") == {"goal": "ship"}
+    # And a nested (one-level) mapping value keeps its quoted '#' too.
+    assert _fallback_yaml('policies:\n  note: "see #3"\n') == {"policies": {"note": "see #3"}}
+
+
+def test_f6_both_manifest_parse_paths_agree_on_quoted_hash(tmp_path, monkeypatch):
+    # F6: PyYAML and the fallback subset parser must agree that a '#' inside a
+    # quoted value survives. Pin both paths — the real library, and the fallback
+    # forced by hiding the yaml module (import yaml -> ImportError -> fallback).
+    import sys
+
+    from loop.contract import read_manifest
+
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text('schema: loop-engineer/manifest@1\ngoal: "reach #1"\n', encoding="utf-8")
+
+    yaml = pytest.importorskip("yaml")
+    real = read_manifest(manifest)
+    assert real["goal"] == "reach #1"
+
+    monkeypatch.setitem(sys.modules, "yaml", None)  # import yaml now raises ImportError
+    fallback = read_manifest(manifest)
+    assert fallback["goal"] == "reach #1"
+    assert fallback["goal"] == real["goal"]
+
+
 def test_doctor_does_not_crash_on_malformed_manifest(tmp_path):
     # F1 (blast radius): the doctor CLI validates a foreign contract via the same
     # read_manifest; a malformed manifest must produce an actionable report, not a

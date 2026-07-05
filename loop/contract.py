@@ -59,6 +59,25 @@ def _parse_scalar(value: str) -> Any:
     return value
 
 
+def _strip_comment(raw: str) -> str:
+    """Drop a trailing ``#`` comment, but only when the ``#`` is unquoted.
+
+    A ``#`` inside a single- or double-quoted scalar is data (``"reach #1"``),
+    not a comment; and — like YAML — a ``#`` only opens a comment at line start
+    or after whitespace, so an unquoted ``reach#1`` is left intact.
+    """
+
+    in_single = in_double = False
+    for i, ch in enumerate(raw):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i]
+    return raw
+
+
 def _fallback_yaml(text: str) -> dict[str, Any]:
     """Small YAML subset parser for the manifest shapes this project emits.
 
@@ -69,7 +88,7 @@ def _fallback_yaml(text: str) -> dict[str, Any]:
     root: dict[str, Any] = {}
     current_key: str | None = None
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].rstrip()
+        line = _strip_comment(raw).rstrip()
         if not line:
             continue
         if not line.startswith(" ") and ":" in line:
