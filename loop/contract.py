@@ -485,6 +485,37 @@ def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) 
     return checked
 
 
+def _derive_lifecycle(state: Any, terminal: Any, terminal_exists: bool) -> str:
+    """Report which lifecycle band a loop is in — additive reporting only, never
+    an issue source. Total and pure: never raises.
+
+    Per the ratified rule:
+      1. state parsed with a non-null terminal_state, OR terminal_state.json
+         present  → ``terminated:<X>`` where X is the terminal file's ``state``
+         (dict + string) if available, else state.json's ``terminal_state`` if a
+         string, else ``unknown``.
+      2. state parsed and iteration_id is 0 / "0"  → ``planned``.
+      3. state parsed  → ``running``.
+      4. else  → ``unknown``.
+    """
+    state_is_dict = isinstance(state, dict)
+    terminal_state_val = state.get("terminal_state") if state_is_dict else None
+    if (state_is_dict and terminal_state_val is not None) or terminal_exists:
+        if isinstance(terminal, dict) and isinstance(terminal.get("state"), str):
+            resolved = terminal["state"]
+        elif isinstance(terminal_state_val, str):
+            resolved = terminal_state_val
+        else:
+            resolved = "unknown"
+        return f"terminated:{resolved}"
+    if state_is_dict:
+        iteration_id = state.get("iteration_id")
+        if iteration_id == 0 or iteration_id == "0":
+            return "planned"
+        return "running"
+    return "unknown"
+
+
 def validate_contract(target: str | Path) -> dict[str, Any]:
     paths = resolve_loop_paths(target)
     issues: list[dict] = []
@@ -530,11 +561,14 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
         schema_id for key, schema_id in _RECORD_SCHEMA_IDS if key in records_checked
     ]
 
+    lifecycle = _derive_lifecycle(state, terminal, paths.terminal.exists())
+
     return {
         "ok": not issues,
         "paths": paths.to_json(),
         "validation_mode": mode,
         "schemas_checked": schemas_checked,
+        "lifecycle": lifecycle,
         "issues": issues,
     }
 

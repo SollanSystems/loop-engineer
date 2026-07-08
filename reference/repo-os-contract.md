@@ -13,6 +13,36 @@ in `loop-patterns.md`; the safety/terminal semantics live in `safety-and-approva
 
 ---
 
+## 0. The contract is a versioned, tool-agnostic standard
+
+This document is the **normative standard** for the repo-OS contract. It is not a
+description of one tool's private file format: it is a **portable, tool-agnostic on-disk
+standard**. Any surface that can read a repo, run a shell command, and write files can emit or
+consume it — Loop Engineer is the *reference implementation*, not the only permitted producer.
+
+- **Conformance is defined by the published JSON Schemas** in `schemas/*.schema.json`, not by
+  any one validator's source code. Every schema-bearing artifact carries a `schema` key, and
+  every schema an `$id`, of the form **`loop-engineer/<artifact>@<major>`**
+  (e.g. `loop-engineer/state@1`). The major integer in that identifier is the version an
+  external emitter targets.
+- **Within a major, changes are strictly additive and optional.** Every artifact schema sets
+  `"additionalProperties": true`, so a validator for major *N* accepts any artifact whose
+  required keys and types match major *N* and **ignores unknown keys** — a newer emitter's
+  extra fields never reject a valid v1 artifact. Adding an optional key, or a new optional
+  file, does not bump the major.
+- **Breaking changes get a new major and a new `$id`.** Removing or renaming a required key,
+  changing a type, or tightening an enum ships as `loop-engineer/<artifact>@2` with a new
+  `$id`. Both majors may be published and validated **side by side**.
+- **Stability tiers.** The artifact table (§11) records each artifact's tier. For v1:
+  **manifest / state / tasks / terminal are `stable`**; **receipt / repair-record /
+  rollout-record are `provisional`** (the newest surfaces, whose additive shape may still be
+  refined within `@1`).
+
+A third-party harness whose output satisfies the §14 conformance checklist may claim it
+**"emits a Loop-Engineer-conformant contract v1."**
+
+---
+
 ## 1. The full repo-OS tree
 
 ```
@@ -378,6 +408,134 @@ terminal_states:                              # the canonical 7, verbatim
 The `inputs`/`outputs`/`permissions`/`approval_gates`/`terminal_states` keys mirror the spec's
 interface-contract table directly; `[[loop-contract]]` scaffolds this manifest from the
 architecture decision record that `[[loop-architect]]` emits.
+
+---
+
+## 11. Artifact & schema reference
+
+Every schema-bearing artifact in the contract, its on-disk location, the schema that defines it,
+its embedded `$id`, its **required keys** (read verbatim from `schemas/*.schema.json` — an
+emitter MUST supply all of them), its lifecycle role, and its stability tier (§0). Required keys
+are the floor; `additionalProperties: true` means an artifact may carry more.
+
+| Artifact | Contract path | Schema file | `$id` | Required keys | Lifecycle role | Tier |
+|---|---|---|---|---|---|---|
+| manifest | `.loop/manifest.yaml` | `schemas/manifest.schema.json` | `loop-engineer/manifest@1` | `schema`, `loop`, `policies`, `terminal_states` | The explicit, machine-readable operating contract for one loop (§10). | **stable** |
+| state | `.loop/state.json` | `schemas/state.schema.json` | `loop-engineer/state@1` | `schema`, `iteration_id`, `state`, `plan_version`, `budget_remaining` | The live FSM cursor — the source of machine truth for resume (§7). | **stable** |
+| tasks | `TASKS.json` *(workspace root)* | `schemas/tasks.schema.json` | `loop-engineer/tasks@1` | `schema`, `tasks`; each task: `id`, `title`, `status`, `criterion_ref`, `verify`, `depends_on`, `attempts`, `evidence` | The machine-readable task queue (§5). | **stable** |
+| terminal | `.loop/terminal_state.json` | `schemas/terminal.schema.json` | `loop-engineer/terminal@1` | `schema`, `state`, `criteria_met`, `evidence`, `false_completion` | The single end record, written once at loop end (§8). | **stable** |
+| receipt | `.loop/receipts/*.jsonl` | `schemas/receipt.schema.json` | `loop-engineer/receipt@1` | `schema`, `iteration_id`, `role`, `model`, `outcome` | Append-one-per-line dispatch/cost trail (role vs model, cost-per-success). | *provisional* |
+| repair-record | `.loop/repair/<iteration_id>.json` | `schemas/repair-record.schema.json` | `loop-engineer/repair@1` | `schema`, `iteration_id`, `attempt`, `failure_mode`, `hypothesis`, `repair_action`, `verification_before`, `verification_after`, `remaining_delta`, `productive` | One bounded repair pass (diagnosis shape); the canonical repair-productivity input (§13). | *provisional* |
+| rollout-record | `.loop/rollout.jsonl` | `schemas/rollout-record.schema.json` | `loop-engineer/rollout@1` | `id`, `parent`, `verdict`, `score`, `score_delta`, `coherent_with_prior_winner`, `productive` | One candidate adjudication in a rollout / genetic-hardening ledger (§13). | *provisional* |
+
+The rollout-record's required set is the only one that does **not** require a `schema` envelope
+key (the ledger writer today emits bare records); the schema permits one via
+`additionalProperties`, but does not demand it. `doctor` validates receipts and repair/rollout
+records **only when the files are present** (§14 C1–C3): an in-flight loop that has not yet
+produced a trail still conforms.
+
+---
+
+## 12. Lifecycle vocabulary
+
+The 7 terminal states (§8) are the **frozen** set of ways a loop *ends*. Before it ends, a loop
+also holds non-terminal lifecycle values while it is *scaffolded but not started* or *running*.
+These non-terminal values are **not** terminal states and never appear in the 7-member
+`terminal_state` enum. Two rules make an in-flight loop a first-class, conformant state.
+
+### 12.1 The terminal-file-iff rule
+
+`terminal_state.json` is required **iff** `state.json`'s `terminal_state` is non-null.
+
+- While `state.json` reports `terminal_state: null`, the **absence** of `.loop/terminal_state.json`
+  is **conformant** — the loop is in-flight, not failing validation. (`validate_contract` gates
+  the terminal-file read on `state.terminal_state`; a null with no file is treated as an
+  in-flight loop, not a `missing_file` issue.)
+- A non-null `terminal_state` **without** the terminal file is a `missing_file` failure.
+
+**Why the iff, not "always require a terminal file":** a gate that demands a terminal record from
+a live loop pushes an operator to *write a terminal state onto a loop that has not terminated* —
+a fabricated end record. That is exactly the false completion this contract exists to prevent.
+The iff rule removes the incentive: an honest in-flight loop is green without inventing an ending.
+
+### 12.2 The `doctor` lifecycle line
+
+`doctor` (`validate_contract`) adds a `lifecycle` field to its report so an operator sees *why*
+no terminal file is expected. It is derived (total and pure — never an issue source) as:
+
+1. **`terminated:<X>`** — if `state.json` parsed with a non-null `terminal_state`, **or**
+   `.loop/terminal_state.json` exists. `<X>` is the terminal file's `state` value when the file
+   parses to a dict with a string `state`; else `state.json`'s `terminal_state` when that is a
+   string; else `unknown`.
+2. **`planned`** — else, if `state.json` parsed and its `iteration_id` is `0` (or `"0"`):
+   scaffolded, not yet run.
+3. **`running`** — else, if `state.json` parsed: executing.
+4. **`unknown`** — else (no parseable `state.json`).
+
+`planned`, `running`, and `unknown` are lifecycle-report values only; none is a terminal state,
+and no terminal state ever surfaces as one of them. The `terminated:<X>` form is the only overlap
+point, and there `<X>` is always drawn from the frozen 7 (or `unknown`).
+
+---
+
+## 13. Two distinct record shapes — repair-record vs rollout-record
+
+The repair-record and the rollout-record are **different artifacts** that share only a
+`productive` boolean; they must not be conflated (this section exists so no one conflates them
+again). They differ in shape, location, and what `productive` measures:
+
+| | repair-record (`loop-engineer/repair@1`) | rollout-record (`loop-engineer/rollout@1`) |
+|---|---|---|
+| **Shape** | **Diagnosis** of one bounded repair pass | **Ledger** entry adjudicating one rollout candidate |
+| **Location** | `.loop/repair/<iteration_id>.json` (one JSON object per file) | `.loop/rollout.jsonl` (append one JSON object per line) |
+| **Key fields** | `failure_mode`, `hypothesis`, `repair_action`, `verification_before`, `verification_after`, `remaining_delta`, `productive` | `id`, `parent`, `verdict`, `score`, `score_delta`, `coherent_with_prior_winner`, `productive` |
+| **`productive` means** | repair-productivity: `verification_after.score > verification_before.score` | rollout-productivity: `score_delta` is not null and `> 0` |
+| **Feeds** | the repair-productivity metric / baseline (`loop-repair`) | the flywheel's candidate-hardening view (`loop-flywheel`) |
+
+The repair-record is the diagnosis shape the repair skill prescribes and the eval structural
+invariant pins; the rollout-record is genome/candidate bookkeeping. Publishing them as two `$id`s
+resolves the historic "two 7-field shapes both called *the* repair record" ambiguity.
+
+---
+
+## 14. Conformance checklist
+
+A harness that satisfies **every** item below may claim it **"emits a Loop-Engineer-conformant
+contract v1."** Each item is a third-party-checkable statement against the published schemas.
+Items **C1–C3 are checked-when-present** — an in-flight loop that has not yet emitted a receipt,
+repair, or rollout trail still conforms. `scripts/test_conformance.py` executes this checklist in
+CI against the flagship example ([`examples/coverage-repair`](../examples/coverage-repair)) and a
+fresh template scaffold, so a drift between this doc, the schemas, and the shipped scaffold cannot
+land silently.
+
+**A. Artifacts present & well-formed**
+- **A1** — `.loop/manifest.yaml` validates against `loop-engineer/manifest@1` (including the
+  canonical 7 `terminal_states`, verbatim and in order).
+- **A2** — `.loop/state.json` validates against `loop-engineer/state@1`.
+- **A3** — `TASKS.json` validates against `loop-engineer/tasks@1`; no duplicate task ids; no task
+  marked `done` without `evidence`.
+- **A4** — `RUNLOG.md` is present.
+
+**B. Lifecycle honesty**
+- **B1** — Exactly one of: (`state.terminal_state` is null **and** no `terminal_state.json`) **or**
+  (`terminal_state` is one of the canonical 7 **and** `terminal_state.json` is present and valid).
+- **B2** — `terminal_state.json`, when present, validates against `loop-engineer/terminal@1` with a
+  `criteria_met` object, an `evidence` list, and an explicit `false_completion` boolean; a
+  `Succeeded` terminal additionally has `false_completion=false`, at least one true criterion, and
+  non-empty `evidence`.
+
+**C. Evidentiary trail (checked when present)**
+- **C1** — every `.loop/receipts/*.jsonl` line validates against `loop-engineer/receipt@1`.
+- **C2** — every `.loop/repair/*.json` validates against `loop-engineer/repair@1`.
+- **C3** — `.loop/rollout.jsonl`, when present, validates against `loop-engineer/rollout@1`.
+
+**D. Versioning**
+- **D1** — every artifact's `schema` key names a published, current-major schema `$id`.
+- **D2** — unknown keys are tolerated (additive fields never reject a v1 artifact).
+
+**E. Lifecycle report**
+- **E1** — `doctor` reports a `lifecycle` value consistent with B1: `terminated:<state>` iff the
+  terminal pair is present and valid; `planned` / `running` otherwise (§12.2).
 
 ---
 
