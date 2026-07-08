@@ -18,14 +18,17 @@ assertions the loop makes about itself. The three grades are:
 
   * **invoked** (full credit) — a ``scripts/verify-*`` gate *executes* a holdout
     / anti-cheat gate script: an interpreter (``python``/``python3``/``python3.N``/
-    ``uv``/``bash``/``sh``/``exec``) runs a gate script named in its arguments
+    ``uv run``/``bash``/``sh``/``exec``, optionally behind a transparent wrapper
+    like ``env``/``time``/``nohup``) runs a gate script named in its arguments
     (``python3 scripts/holdout_gate.py``), or the gate script is invoked directly
     by path (``./scripts/holdout_gate.py``). A command that only *references* the
-    file — ``echo``/``printf`` printing it, or ``grep``/``cat``/``ls``/``test``/
-    ``head``/``wc``/``find`` reading, listing, or searching it — earns *nothing*.
-    OR ``RUNLOG.md`` / ``.loop/receipts/*.jsonl`` records an actual run (a gate
-    token AND a run-word on one line — a ``holdout_gate`` verdict / anti-cheat
-    scan result — not a bare token in stuffed prose).
+    file — ``echo``/``printf`` printing it, ``grep``/``cat``/``ls``/``test``/
+    ``head``/``wc``/``find`` reading it, a trailing ``# comment`` naming it, or a
+    redirection using it as a sink — earns *nothing*. A workspace-relative gate
+    path must exist on disk; only unresolvable paths (``$VAR``/absolute) earn
+    shape-only credit. OR ``RUNLOG.md`` / ``.loop/receipts/*.jsonl`` records an
+    actual run (the gate ``.py`` path AND a verdict word on one line — not a bare
+    token in stuffed prose; ordinary English like "ran"/"result" never counts).
   * **wired** (partial credit, half the weight) — a gate script file exists
     (``scripts/holdout_gate.py`` / ``anticheat_scan.py`` / ``anti_cheat.py``)
     and is referenced from the contract's verify surface (SPEC / WORKFLOW /
@@ -123,7 +126,7 @@ _TERMINAL_WEIGHT = 40  # points for full 7-of-7 terminal-state coverage
 # recorded run from mere prose ("anti-cheat", "false-completion").
 _GATE_TOKENS = ("holdout_gate", "anticheat_scan", "anti_cheat")
 _GATE_SCRIPTS = ("holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
-_GATE_RUN_WORDS = ("verdict", "scan", "result", "passed", "failed", "ran", "clean", "flagged")
+_GATE_RUN_WORDS = ("verdict", "pass", "fail", "flagged", "clean", "exit 0")
 _FALSE_COMPLETION_PARTIAL_DIVISOR = 2  # wired-but-unrun earns half the weight
 
 # A gate script referenced as a *.py path — the invocation shape a real verify
@@ -134,9 +137,15 @@ _GATE_SCRIPT_RE = re.compile(r"\b(?:holdout_gate|anticheat_scan|anti_cheat)\.py\
 # actually *runs* a gate script. Either an interpreter leads the command and a
 # gate script is named in its arguments, or the gate script is invoked directly
 # by path. Everything else — a reference via echo/printf/grep/cat/ls/test/head/
-# wc/find, or any other non-interpreter command — earns nothing.
-_GATE_INTERPRETERS = frozenset({"python", "python3", "uv", "bash", "sh", "exec"})
+# wc/find, or any other non-interpreter command — earns nothing. `uv` executes
+# only through its `run` subcommand (pip install / add merely reference).
+_GATE_INTERPRETERS = frozenset({"python", "python3", "bash", "sh", "exec"})
 _VERSIONED_PYTHON_RE = re.compile(r"^python3\.\d+$")
+# Wrapper commands that transparently run their argument command.
+_TRANSPARENT_PREFIXES = frozenset({"env", "time", "nohup", "nice", "command"})
+# A token that is (or opens) a shell redirection: everything after it is a file
+# operand, not part of the executed command (`python3 x.py > holdout_gate.py`).
+_REDIRECTION_RE = re.compile(r"^\d*(>>?|<)")
 # Split a shell line into command segments so a real invocation chained after an
 # inert emitter (`echo x && python3 ...holdout_gate.py`) is still discovered.
 _SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[;|()&]")
@@ -265,12 +274,21 @@ def _leading_command(segment: str) -> str:
 
 
 def _shell_tokens(segment: str) -> list[str]:
-    """Tokenize a shell segment (subshell openers stripped, quotes removed)."""
+    """Tokenize a shell segment (subshell openers stripped, quotes removed).
+
+    Unquoted ``#`` starts a comment — everything after it is prose, not command
+    content, so a gate named only in a trailing comment never tokenizes.
+    """
     seg = segment.lstrip("({ \t")
     try:
-        return shlex.split(seg, posix=True)
+        return shlex.split(seg, posix=True, comments=True)
     except ValueError:
-        return seg.split()
+        tokens: list[str] = []
+        for tok in seg.split():
+            if tok.startswith("#"):
+                break
+            tokens.append(tok)
+        return tokens
 
 
 def _basename(token: str) -> str:
@@ -282,23 +300,63 @@ def _is_gate_interpreter(token: str) -> bool:
     return token in _GATE_INTERPRETERS or bool(_VERSIONED_PYTHON_RE.match(token))
 
 
-def _segment_runs_gate(segment: str) -> bool:
+def _statically_resolvable(token: str) -> bool:
+    """A gate path we can check on disk: workspace-relative, no expansion."""
+    return not (token.startswith(("/", "~")) or "$" in token or "`" in token)
+
+
+def _gate_on_disk(workspace: Path, token: str) -> bool:
+    rel = token[2:] if token.startswith("./") else token
+    if (workspace / rel).is_file():
+        return True
+    return "/" not in rel and (workspace / "scripts" / rel).is_file()
+
+
+def _gate_arg_credits(workspace: Path, token: str) -> bool:
+    """A token earns gate credit: names a gate script that plausibly exists.
+
+    A workspace-relative path must exist on disk — an invocation SHAPE of a
+    non-existent gate is stolen valor ("invoked" full credit must not have a
+    weaker precondition than "wired" half credit, which checks existence).
+    Unresolvable paths ($VAR / absolute / backticks) keep shape-only credit:
+    the flagship's gate lives outside the example workspace behind ``$REPO``.
+    """
+    if _basename(token) not in _GATE_SCRIPTS:
+        return False
+    if not _statically_resolvable(token):
+        return True
+    return _gate_on_disk(workspace, token)
+
+
+def _segment_runs_gate(segment: str, workspace: Path) -> bool:
     """True iff this shell segment genuinely *executes* a gate script.
 
-    Allowlisted shapes only: an interpreter (python/python3/python3.N/uv/bash/sh/
-    exec) whose arguments name a gate script, or the gate script invoked directly
-    by path (`./scripts/holdout_gate.py`). A leading grep/cat/ls/test/head/wc/find
-    — or echo/printf — that merely references the file is not an execution.
+    Allowlisted shapes only: an interpreter (python/python3/python3.N/uv run/
+    bash/sh/exec, optionally behind env/time/nohup/nice/command) whose arguments
+    name a gate script, or the gate script invoked directly by path
+    (`./scripts/holdout_gate.py`). A leading grep/cat/ls/test/head/wc/find — or
+    echo/printf — that merely references the file is not an execution; neither
+    is a gate path that appears only as a redirection sink.
     """
     tokens = _shell_tokens(segment)
+    for i, tok in enumerate(tokens):
+        if _REDIRECTION_RE.match(tok):
+            tokens = tokens[:i]
+            break
+    while tokens and tokens[0] in _TRANSPARENT_PREFIXES:
+        tokens = tokens[1:]
     if not tokens:
         return False
     lead, args = tokens[0], tokens[1:]
     if _basename(lead) in _GATE_SCRIPTS:
-        return True
-    if _is_gate_interpreter(lead):
-        return any(_basename(arg) in _GATE_SCRIPTS for arg in args)
-    return False
+        return _gate_arg_credits(workspace, lead)
+    if lead == "uv":
+        if not args or args[0] != "run":
+            return False
+        args = args[1:]
+    elif not _is_gate_interpreter(lead):
+        return False
+    return any(_gate_arg_credits(workspace, arg) for arg in args)
 
 
 def _gate_invoked_in_verify(workspace: Path) -> bool:
@@ -318,7 +376,7 @@ def _gate_invoked_in_verify(workspace: Path) -> bool:
                 segment = segment.strip()
                 if not segment or not _GATE_SCRIPT_RE.search(segment):
                     continue
-                if _segment_runs_gate(segment):
+                if _segment_runs_gate(segment, workspace):
                     return True
     return False
 
@@ -342,14 +400,20 @@ def _verify_script_has_substance(workspace: Path) -> bool:
     return False
 
 
-def _records_gate_run(low: str) -> bool:
-    """A gate token AND an independent run-word share one lowered line.
+def _records_gate_run(low: str, require_script_path: bool = False) -> bool:
+    """A gate token AND an independent verdict word share one lowered line.
 
-    The run-word is checked against the residue *after* the gate tokens are
-    removed, so a token that itself contains a run-word (``anticheat_scan`` ⊃
-    ``scan``) cannot self-satisfy — a bare token earns nothing.
+    The verdict word is checked against the residue *after* the gate tokens are
+    removed, so a token that itself contains one cannot self-satisfy — a bare
+    token earns nothing. The word list is verdict vocabulary only: ordinary
+    English ("ran", "result", "the deadline passed") is narration, not a record.
+    With ``require_script_path`` (the RUNLOG bar) the line must name the actual
+    gate ``.py`` path, not just the bare token.
     """
-    if not any(token in low for token in _GATE_TOKENS):
+    if require_script_path:
+        if not _GATE_SCRIPT_RE.search(low):
+            return False
+    elif not any(token in low for token in _GATE_TOKENS):
         return False
     residue = low
     for token in _GATE_TOKENS:
@@ -372,7 +436,7 @@ def _receipt_records_gate(line: str) -> bool:
 def _gate_run_recorded(paths) -> bool:
     """RUNLOG.md / .loop/receipts/*.jsonl record an actual gate run."""
     for line in _read_text(paths.runlog).splitlines():
-        if _records_gate_run(line.lower()):
+        if _records_gate_run(line.lower(), require_script_path=True):
             return True
     receipts = paths.loop_dir / "receipts"
     if receipts.is_dir():

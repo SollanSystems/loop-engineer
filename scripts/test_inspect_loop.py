@@ -445,13 +445,18 @@ def test_documented_cli_by_path_reads_dotloop_manifest(tmp_path):
 # --- M3: false-completion credit grades on execution evidence, not tokens ----
 
 
-def _verify_gate_loop(root: pathlib.Path, name: str, verify_body: str) -> pathlib.Path:
+def _verify_gate_loop(
+    root: pathlib.Path, name: str, verify_body: str, gate_files: bool = False
+) -> pathlib.Path:
     """A loop whose only signal is a single verify-safety script body."""
     d = root / name
     (d / "scripts").mkdir(parents=True)
     (d / "scripts" / "verify-safety").write_text(
         "#!/bin/sh\n" + verify_body, encoding="utf-8"
     )
+    if gate_files:
+        (d / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+        (d / "scripts" / "anticheat_scan.py").write_text("# gate\n", encoding="utf-8")
     return d
 
 
@@ -483,7 +488,9 @@ def test_real_gate_invocations_keep_invoked_credit(tmp_path):
         'echo "gate:" && python3 scripts/holdout_gate.py\n',
     )
     for i, body in enumerate(real):
-        loop = _verify_gate_loop(tmp_path, f"real{i}", body)
+        # rv2: gate files exist on disk — invocation credit requires the real
+        # precondition; the $REPO shape stays shape-only (unresolvable path).
+        loop = _verify_gate_loop(tmp_path, f"real{i}", body, gate_files=True)
         assert il._gate_invoked_in_verify(loop) is True, body
 
 
@@ -766,6 +773,8 @@ def test_allowlisted_invocations_keep_invoked_credit(tmp_path):
         (loop / "scripts" / "verify-fast").write_text(
             "#!/bin/sh\n" + body, encoding="utf-8"
         )
+        (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+        (loop / "scripts" / "anticheat_scan.py").write_text("# gate\n", encoding="utf-8")
         assert il._gate_invoked_in_verify(loop) is True, body
 
 
@@ -776,6 +785,7 @@ def test_versioned_python_interpreter_invocation_counts(tmp_path):
     (loop / "scripts" / "verify-fast").write_text(
         "#!/bin/sh\npython3.12 scripts/holdout_gate.py --strict\n", encoding="utf-8"
     )
+    (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
     assert il._gate_invoked_in_verify(loop) is True
 
 
@@ -883,3 +893,124 @@ def test_fresh_scaffold_keeps_independent_verification_credit(tmp_path):
     report = il.inspect_loop(str(target))
     present = " ".join(report["present"]).lower()
     assert "independent verification" in present
+
+
+# --- re-verify round 2: non-executing content must not launder "invoked", ----
+# --- and genuine wrapped/uv-run invocations must keep it ----------------------
+
+
+def _rv2_loop(tmp_path, name, verify_line, gate_file=False):
+    loop = tmp_path / name
+    (loop / ".loop").mkdir(parents=True)
+    (loop / "scripts").mkdir()
+    (loop / "scripts" / "verify-fast").write_text(
+        f"#!/bin/sh\n{verify_line}\n", encoding="utf-8"
+    )
+    if gate_file:
+        (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+    return loop
+
+
+def test_trailing_comment_naming_gate_earns_no_invoked_credit(tmp_path):
+    # rv2 blocker 1: a gate named only in a trailing shell comment is never run —
+    # the actual command is a no-op interpreter call.
+    for i, line in enumerate([
+        "python3 -V  # scripts/holdout_gate.py anti-cheat",
+        "python3 --version # holdout_gate.py",
+    ]):
+        loop = _rv2_loop(tmp_path, f"cmt{i}", line, gate_file=True)
+        assert il._gate_invoked_in_verify(loop) is False, line
+
+
+def test_redirection_sink_naming_gate_earns_no_invoked_credit(tmp_path):
+    # rv2 blocker 1: a gate path that is only a redirect target is never executed.
+    for i, line in enumerate([
+        "python3 realwork.py > scripts/holdout_gate.py",
+        "python3 realwork.py 2>scripts/holdout_gate.py",
+    ]):
+        loop = _rv2_loop(tmp_path, f"redir{i}", line, gate_file=True)
+        assert il._gate_invoked_in_verify(loop) is False, line
+
+
+def test_uv_non_run_subcommands_earn_no_invoked_credit(tmp_path):
+    # rv2 blocker 1: only `uv run` executes; pip install / add merely reference.
+    for i, line in enumerate([
+        "uv pip install scripts/holdout_gate.py",
+        "uv add scripts/holdout_gate.py",
+    ]):
+        loop = _rv2_loop(tmp_path, f"uv{i}", line, gate_file=True)
+        assert il._gate_invoked_in_verify(loop) is False, line
+    runs = _rv2_loop(tmp_path, "uvrun", "uv run scripts/holdout_gate.py", gate_file=True)
+    assert il._gate_invoked_in_verify(runs) is True
+
+
+def test_invoked_requires_gate_file_for_resolvable_paths(tmp_path):
+    # rv2 blocker 3: a genuine invocation SHAPE naming a workspace-relative gate
+    # that does not exist earns nothing — "invoked" (full credit) must not have a
+    # weaker precondition than "wired" (half credit, which checks existence).
+    ghost = _rv2_loop(tmp_path, "ghost", "python3 scripts/holdout_gate.py")
+    assert il._gate_invoked_in_verify(ghost) is False
+    report = il.inspect_loop(str(ghost))
+    assert report["score"] < 80
+    assert report["verdict"] != "strong"
+
+    real = _rv2_loop(tmp_path, "real", "python3 scripts/holdout_gate.py", gate_file=True)
+    assert il._gate_invoked_in_verify(real) is True
+
+
+def test_unresolvable_gate_paths_keep_shape_credit(tmp_path):
+    # rv2 blocker 3 counter-case: a $VAR path cannot be checked statically — the
+    # flagship's `python3 "$REPO/scripts/holdout_gate.py"` (gate lives at repo
+    # root, outside the example workspace) must keep credit.
+    loop = _rv2_loop(tmp_path, "var", 'python3 "$REPO/scripts/holdout_gate.py"')
+    assert il._gate_invoked_in_verify(loop) is True
+
+
+def test_by_path_invocation_requires_gate_file(tmp_path):
+    ghost = _rv2_loop(tmp_path, "bypath", "./scripts/holdout_gate.py")
+    assert il._gate_invoked_in_verify(ghost) is False
+    real = _rv2_loop(tmp_path, "bypath2", "./scripts/holdout_gate.py", gate_file=True)
+    assert il._gate_invoked_in_verify(real) is True
+
+
+def test_wrapper_prefixed_real_invocations_keep_credit(tmp_path):
+    # rv2 note: honest wrapper prefixes are transparent, not disqualifying.
+    for i, line in enumerate([
+        "time python3 scripts/holdout_gate.py",
+        "env python3 scripts/holdout_gate.py",
+        "nohup python3 scripts/holdout_gate.py",
+    ]):
+        loop = _rv2_loop(tmp_path, f"wrap{i}", line, gate_file=True)
+        assert il._gate_invoked_in_verify(loop) is True, line
+
+
+def test_runlog_common_english_prose_earns_no_recorded_credit(tmp_path):
+    # rv2 blocker 2: narrative sentences whose only "run-word" is ordinary English
+    # (passed/ran/result/clean) are self-narration, not gate records.
+    for i, line in enumerate([
+        "Iteration 3: the review deadline passed before we could wire a real holdout_gate.",
+        "as a result, holdout_gate is our chosen plan",
+        "we ran out of time to wire holdout_gate",
+        "keep the holdout_gate design clean",
+    ]):
+        loop = tmp_path / f"prose{i}"
+        (loop / ".loop").mkdir(parents=True)
+        (loop / "RUNLOG.md").write_text(line + "\n", encoding="utf-8")
+        paths = il.resolve_loop_paths(loop)
+        assert il._gate_run_recorded(paths) is False, line
+
+
+def test_runlog_record_requires_script_path_not_bare_token(tmp_path):
+    # rv2 blocker 2: RUNLOG credit needs the actual .py path plus a verdict word —
+    # a bare token with prose around it is not a record.
+    bare = tmp_path / "baretok"
+    (bare / ".loop").mkdir(parents=True)
+    (bare / "RUNLOG.md").write_text("holdout_gate verdict: pass\n", encoding="utf-8")
+    assert il._gate_run_recorded(il.resolve_loop_paths(bare)) is False
+
+    real = tmp_path / "realrec"
+    (real / ".loop").mkdir(parents=True)
+    (real / "RUNLOG.md").write_text(
+        "gate: scripts/holdout_gate.py -> verdict PASS (0 flagged)\n", encoding="utf-8"
+    )
+    assert il._gate_run_recorded(il.resolve_loop_paths(real)) is True
