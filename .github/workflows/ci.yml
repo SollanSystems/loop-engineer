@@ -59,7 +59,7 @@ jobs:
       - name: Install recipe dependencies
         run: python -m pip install --upgrade pip pyyaml pytest jsonschema langgraph
       - name: LangGraph recipe end-to-end
-        run: python -B -m pytest -q -p no:cacheprovider scripts/test_langgraph_recipe.py
+        run: python -B -m pytest -q -p no:cacheprovider scripts/test_langgraph_recipe.py scripts/test_langgraph_recipe_st3.py
 
   action-dogfood:
     name: action (dogfood on flagship example)

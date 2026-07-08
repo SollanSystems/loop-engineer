@@ -1,34 +1,52 @@
-# LangGraph recipe — proof-of-done through `loop.emit`
+# LangGraph recipe — gate the graph, then emit proof-of-done
 
 A runnable [LangGraph](https://github.com/langchain-ai/langgraph) graph whose
-**terminal node writes the loop contract** — evidence-backed state the `loop`
-CLI can independently validate. LangGraph keeps its own runtime; `loop.emit` is
-a pure-stdlib writer that refuses to record a dishonest result.
+`END` is reachable **only through a `certify` node**. LangGraph keeps its own
+runtime; Loop Engineer adds the contract/proof tier above it — evidence-backed
+state the `loop` CLI can independently validate and score.
 
 ## What it shows
 
-`graph_example.py` runs three plain-function nodes — `do_work` writes
-`artifact.txt`, `verify` re-reads it from disk, and `conclude` records the
-outcome:
+`graph_example.py` runs two plain-function nodes:
 
-- On a real pass, `conclude` calls `emit.terminate(..., state="Succeeded",
-  evidence=["artifact.txt"])`.
-- A lying `Succeeded` — no evidence, or no met criterion — raises `EmitError`
-  **before anything hits disk**. That is the same cross-check `loop doctor`
-  enforces, applied at write time.
+- `do_work` writes `artifact.txt`.
+- `certify` — the only edge into `END` — runs the same **visible + withheld
+  holdout** split the loop optimized against through the real `holdout_gate.decide`
+  and `anticheat_scan.scan`, projects the verdict through `to_terminal_state`,
+  and records it via `loop.emit`. It writes two evidence artifacts a scorecard
+  can join: the verbatim gate verdict (`holdout-verdict.json`) and a verify
+  bundle (`verify-T1.json`).
+
+On a real pass the terminal is `Succeeded` with evidence, and `loop metrics`
+scores the run clean: `false_completion_rate 0.0`, `evidence_backed: true`, the
+two FCR methods agree.
+
+### The `--sabotage-holdout` false-completion demo
+
+```bash
+python graph_example.py sabotaged-run/ --sabotage-holdout
+```
+
+`do_work` now writes output that passes the **visible** check (the file exists)
+but fails the **holdout** (the content is wrong). That is the measurable
+false-completion event: the terminal becomes `FailedUnverifiable` with
+`false_completion: true` — **never** `Succeeded`. The dishonest completion is
+recorded, not laundered.
 
 ## Run it
 
 ```bash
 pip install loop-engineer langgraph
 python graph_example.py demo-run/
-loop doctor demo-run/          # -> {"ok": true, ...}
+loop doctor demo-run/            # -> {"ok": true, ...}
+loop metrics demo-run/           # -> clean scorecard
 ```
 
-`demo-run/.loop/terminal_state.json` ends `Succeeded` with `evidence`; `loop
-doctor` validates it independently of the graph that wrote it.
+The gate tools (`holdout_gate`, `anticheat_scan`) resolve from `loop._resources`
+— the wheel bundles them, so a plain `pip install` is enough; running from a
+repo checkout picks them up from `scripts/` too.
 
-## The 10-line integration
+## The general pattern
 
-The general pattern (any graph, any terminal node) lives in
+The complement framing and the copy-paste (zero-install) projection live in
 [`docs/integrations/langgraph.md`](../../docs/integrations/langgraph.md).
