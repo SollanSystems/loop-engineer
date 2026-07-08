@@ -508,9 +508,12 @@ def test_bare_gate_token_in_runlog_earns_no_recorded_credit(tmp_path):
 
 
 def test_recorded_gate_run_with_run_word_earns_credit(tmp_path):
-    # M3(b): a real recorded run — token AND an independent run-word on one line.
+    # M3(b): a real recorded run — token AND an independent run-word on one line,
+    # with the gate script present on disk (rv3: a record implies a real gate).
     loop = tmp_path / "rl2"
     (loop / ".loop").mkdir(parents=True)
+    (loop / "scripts").mkdir()
+    (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
     (loop / "RUNLOG.md").write_text(
         "gate: scripts/holdout_gate.py target/manifest.json -> verdict Succeeded\n",
         encoding="utf-8",
@@ -523,6 +526,8 @@ def test_receipts_jsonl_records_gate_run(tmp_path):
     # M3(b): a structured receipt line is parsed as JSON and matched on fields.
     loop = tmp_path / "rc"
     (loop / ".loop" / "receipts").mkdir(parents=True)
+    (loop / "scripts").mkdir()
+    (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
     (loop / ".loop" / "receipts" / "run.jsonl").write_text(
         json.dumps({"event": "holdout_gate", "verdict": "Succeeded"}) + "\n",
         encoding="utf-8",
@@ -1000,17 +1005,81 @@ def test_runlog_common_english_prose_earns_no_recorded_credit(tmp_path):
         assert il._gate_run_recorded(paths) is False, line
 
 
+def _rv2_runlog_loop(tmp_path, name, line, gate_file=True):
+    loop = tmp_path / name
+    (loop / ".loop").mkdir(parents=True)
+    (loop / "RUNLOG.md").write_text(line + "\n", encoding="utf-8")
+    if gate_file:
+        (loop / "scripts").mkdir()
+        (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+    return il.resolve_loop_paths(loop)
+
+
 def test_runlog_record_requires_script_path_not_bare_token(tmp_path):
     # rv2 blocker 2: RUNLOG credit needs the actual .py path plus a verdict word —
-    # a bare token with prose around it is not a record.
-    bare = tmp_path / "baretok"
-    (bare / ".loop").mkdir(parents=True)
-    (bare / "RUNLOG.md").write_text("holdout_gate verdict: pass\n", encoding="utf-8")
-    assert il._gate_run_recorded(il.resolve_loop_paths(bare)) is False
+    # a bare token with prose around it is not a record (gate file present, so
+    # the .py-path requirement is the discriminating layer).
+    bare = _rv2_runlog_loop(tmp_path, "baretok", "holdout_gate verdict: pass")
+    assert il._gate_run_recorded(bare) is False
 
-    real = tmp_path / "realrec"
-    (real / ".loop").mkdir(parents=True)
-    (real / "RUNLOG.md").write_text(
-        "gate: scripts/holdout_gate.py -> verdict PASS (0 flagged)\n", encoding="utf-8"
+    real = _rv2_runlog_loop(
+        tmp_path, "realrec", "gate: scripts/holdout_gate.py -> verdict PASS (0 flagged)"
     )
-    assert il._gate_run_recorded(il.resolve_loop_paths(real)) is True
+    assert il._gate_run_recorded(real) is True
+
+
+def test_runlog_record_requires_gate_script_on_disk(tmp_path):
+    # rv3: a record-shaped line about a gate that exists nowhere on disk is a
+    # claim about a tool that does not exist — no credit.
+    ghost = _rv2_runlog_loop(
+        tmp_path, "ghostrec",
+        "gate: scripts/holdout_gate.py -> verdict PASS (0 flagged)", gate_file=False,
+    )
+    assert il._gate_run_recorded(ghost) is False
+
+
+def test_substring_run_words_earn_no_recorded_credit(tmp_path):
+    # rv3: verdict words match whole words only — cleanup/passphrase/surpassed
+    # must never satisfy the bar the way clean/pass do (gate file present, .py
+    # path named: the word boundary is the only discriminating layer).
+    for i, line in enumerate([
+        "We designed scripts/holdout_gate.py but ran out of time; cleanup pending.",
+        "blocked: scripts/holdout_gate.py needs a passphrase we do not have yet.",
+        "scripts/holdout_gate.py budget surpassed this iteration.",
+    ]):
+        paths = _rv2_runlog_loop(tmp_path, f"substr{i}", line)
+        assert il._gate_run_recorded(paths) is False, line
+
+
+def test_substring_run_words_in_receipts_earn_no_credit(tmp_path):
+    # rv3: the receipt path shares the word-boundary bar.
+    loop = tmp_path / "rcsub"
+    (loop / ".loop" / "receipts").mkdir(parents=True)
+    (loop / "scripts").mkdir()
+    (loop / "scripts" / "holdout_gate.py").write_text("# gate\n", encoding="utf-8")
+    (loop / ".loop" / "receipts" / "run.jsonl").write_text(
+        json.dumps({"note": "will add holdout_gate later", "status": "surpassed budget"})
+        + "\n",
+        encoding="utf-8",
+    )
+    assert il._gate_run_recorded(il.resolve_loop_paths(loop)) is False
+
+
+def test_compound_redirect_sinks_earn_no_invoked_credit(tmp_path):
+    # rv3: `>&` / `>|` / `&>` contain segment-split characters — the severed sink
+    # must not read as a bare-path gate invocation.
+    for i, line in enumerate([
+        "python3 realwork.py >& scripts/holdout_gate.py",
+        "python3 realwork.py >| scripts/holdout_gate.py",
+        "python3 realwork.py &> scripts/holdout_gate.py",
+    ]):
+        loop = _rv2_loop(tmp_path, f"cmpd{i}", line, gate_file=True)
+        assert il._gate_invoked_in_verify(loop) is False, line
+
+
+def test_real_invocation_with_fd_redirect_keeps_credit(tmp_path):
+    # rv3 counter-case: stripping redirections must not strip the command.
+    loop = _rv2_loop(
+        tmp_path, "fdredir", "python3 scripts/holdout_gate.py 2>&1", gate_file=True
+    )
+    assert il._gate_invoked_in_verify(loop) is True

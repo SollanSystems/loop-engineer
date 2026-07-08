@@ -27,8 +27,9 @@ assertions the loop makes about itself. The three grades are:
     redirection using it as a sink — earns *nothing*. A workspace-relative gate
     path must exist on disk; only unresolvable paths (``$VAR``/absolute) earn
     shape-only credit. OR ``RUNLOG.md`` / ``.loop/receipts/*.jsonl`` records an
-    actual run (the gate ``.py`` path AND a verdict word on one line — not a bare
-    token in stuffed prose; ordinary English like "ran"/"result" never counts).
+    actual run (the gate ``.py`` path AND a whole-word verdict token on one line,
+    with a gate script present on disk — not a bare token in stuffed prose;
+    ordinary English like "ran"/"result"/"cleanup"/"passphrase" never counts).
   * **wired** (partial credit, half the weight) — a gate script file exists
     (``scripts/holdout_gate.py`` / ``anticheat_scan.py`` / ``anti_cheat.py``)
     and is referenced from the contract's verify surface (SPEC / WORKFLOW /
@@ -126,7 +127,11 @@ _TERMINAL_WEIGHT = 40  # points for full 7-of-7 terminal-state coverage
 # recorded run from mere prose ("anti-cheat", "false-completion").
 _GATE_TOKENS = ("holdout_gate", "anticheat_scan", "anti_cheat")
 _GATE_SCRIPTS = ("holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
-_GATE_RUN_WORDS = ("verdict", "pass", "fail", "flagged", "clean", "exit 0")
+# Verdict vocabulary, matched on WORD BOUNDARIES: "cleanup"/"passphrase"/
+# "surpassed" must never satisfy the bar the way "clean"/"pass" do.
+_GATE_RUN_WORDS_RE = re.compile(
+    r"\b(?:verdict|pass|passed|fail|failed|flagged|clean)\b|\bexit 0\b"
+)
 _FALSE_COMPLETION_PARTIAL_DIVISOR = 2  # wired-but-unrun earns half the weight
 
 # A gate script referenced as a *.py path — the invocation shape a real verify
@@ -146,6 +151,13 @@ _TRANSPARENT_PREFIXES = frozenset({"env", "time", "nohup", "nice", "command"})
 # A token that is (or opens) a shell redirection: everything after it is a file
 # operand, not part of the executed command (`python3 x.py > holdout_gate.py`).
 _REDIRECTION_RE = re.compile(r"^\d*(>>?|<)")
+# Strip whole redirection expressions (operator + file operand) from a line
+# BEFORE segment splitting: compound operators (`>&`, `>|`, `&>`) contain the
+# very characters the segment splitter cuts on, so a redirect sink would
+# otherwise be severed into its own segment and read as a bare-path invocation.
+_REDIRECTION_STRIP_RE = re.compile(
+    r"(?:\d*(?:>>|>\||>&|>|<<-|<<|<&|<)|&>>?)\s*\S*"
+)
 # Split a shell line into command segments so a real invocation chained after an
 # inert emitter (`echo x && python3 ...holdout_gate.py`) is still discovered.
 _SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[;|()&]")
@@ -372,6 +384,10 @@ def _gate_invoked_in_verify(workspace: Path) -> bool:
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
+            # Redirection expressions go first: `>&`/`>|` contain segment-split
+            # characters, so a sink severed into its own segment would read as
+            # a bare-path invocation of a file the command never executes.
+            stripped = _REDIRECTION_STRIP_RE.sub(" ", stripped)
             for segment in _SEGMENT_SPLIT_RE.split(stripped):
                 segment = segment.strip()
                 if not segment or not _GATE_SCRIPT_RE.search(segment):
@@ -418,7 +434,7 @@ def _records_gate_run(low: str, require_script_path: bool = False) -> bool:
     residue = low
     for token in _GATE_TOKENS:
         residue = residue.replace(token, " ")
-    return any(word in residue for word in _GATE_RUN_WORDS)
+    return bool(_GATE_RUN_WORDS_RE.search(residue))
 
 
 def _receipt_records_gate(line: str) -> bool:
@@ -434,7 +450,13 @@ def _receipt_records_gate(line: str) -> bool:
 
 
 def _gate_run_recorded(paths) -> bool:
-    """RUNLOG.md / .loop/receipts/*.jsonl record an actual gate run."""
+    """RUNLOG.md / .loop/receipts/*.jsonl record an actual gate run.
+
+    A record of a run implies a gate that can run: with no gate script anywhere
+    on disk, record-shaped prose is a claim about a tool that does not exist.
+    """
+    if not _script_exists(paths.workspace, *_GATE_SCRIPTS):
+        return False
     for line in _read_text(paths.runlog).splitlines():
         if _records_gate_run(line.lower(), require_script_path=True):
             return True
