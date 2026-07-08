@@ -14,7 +14,60 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
-## Unreleased
+## 0.7.0 — 2026-07-08
+
+**ST2 — the portable standard.** The on-disk contract is now a documented,
+versioned, tool-agnostic standard, not an implicit format one validator happens
+to enforce. `reference/repo-os-contract.md` is promoted to the normative spec:
+a stability note (§0 — `$id` majors of the form `loop-engineer/<artifact>@<major>`,
+strictly additive within a major, breaking changes ship as a new major side by
+side), an artifact/schema table across all 7 published schemas with required
+keys read verbatim from `schemas/*.schema.json` (§11), the lifecycle vocabulary
+and terminal-file-iff rule (§12), the repair-record vs rollout-record two-shape
+clarification (§13), and a conformance checklist (§14, items A1–E1) any harness
+can satisfy to claim it "emits a Loop-Engineer-conformant contract v1."
+
+### Added
+- **`doctor` lifecycle line** — `validate_contract` (and so `loop doctor`)
+  reports `lifecycle: planned | running | terminated:<State> | unknown`,
+  derived from `state.json` and the terminal file. Additive reporting only —
+  never an issue source — so an operator sees *why* no terminal file is
+  expected on an in-flight loop instead of being pushed to fabricate one.
+  DG-3 regression tests pin both directions in both validation modes: a
+  null-terminal loop without `terminal_state.json` is conformant; a non-null
+  `terminal_state` without the file still fails.
+- **Round-trip template regression** (`scripts/test_template_roundtrip.py`) —
+  every `templates/*` artifact, filled with schema-valid values, passes
+  `validate_contract` with zero issues in both validation modes, for both an
+  in-flight and a terminated scaffold. The DG-class template↔validator↔schema
+  drift cannot silently return.
+- **Runnable conformance checklist** (`scripts/test_conformance.py`) — executes
+  checklist items A1–E1 in CI against the flagship example
+  (`examples/coverage-repair`) and a fresh template scaffold, including
+  additive-key tolerance (D2) and lifecycle honesty (E1). A doc-parity test
+  pins every checklist ID to the normative doc so the checklist and its
+  documentation cannot drift apart.
+- **README "A versioned, conformance-checkable standard"** — a pointer
+  subsection linking the promoted normative doc.
+
+### Fixed (external-review patch set, PRs #27–#30)
+- **doctor evidence and surface fixes (#27)** — an empty-evidence `Succeeded`
+  now fails validation in both modes (G1 cross-check); ledger validation is
+  scoped to the canonical rollout/receipt files instead of force-validating
+  foreign `.loop/*.jsonl`, and fails closed on corrupt UTF-8; the fallback YAML
+  parser no longer strips `#` inside quoted strings; missing verify scripts and
+  dangling task file targets are surfaced as issues.
+- **atomic terminate (#28)** — `loop.emit.terminate` writes the terminal record
+  exactly once, atomically; a second call raises `EmitError` instead of
+  silently overwriting the loop's end record.
+- **strict-by-install gates (#29)** — the GitHub Action and the pre-commit hook
+  install the `[schemas]` extra so consumer repos gate in real JSON-Schema
+  mode, not the structural fallback; the Action's PR comment is sticky and its
+  score parsing robust.
+- **inspector scores execution evidence (#30)** — `loop inspect` credits
+  verification gates on execution evidence rather than keyword presence, so a
+  keyword-stuffed contract can no longer buy a "strong" scorecard while the
+  gate-backed flagship example keeps its score.
 
 **B1 — the writer API.** `loop.emit` lets a foreign runtime (LangGraph, a plain
 script, any orchestrator) record an evidence-backed loop contract without
