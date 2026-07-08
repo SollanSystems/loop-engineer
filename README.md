@@ -5,7 +5,7 @@
 [![CI](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/badge/release-0.6.1-blue)](https://github.com/SollanSystems/loop-engineer/tags)
+[![Release](https://img.shields.io/badge/release-0.7.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
 
 Long-running agents commit **false completion**. After context compaction they
 forget what "done" meant, optimize to the visible test, patch in circles, and
@@ -238,6 +238,14 @@ maps to a success criterion, its verifier passes, and evidence is recorded.
 
 See `reference/repo-os-contract.md` for the canonical artifact schemas.
 
+### A versioned, conformance-checkable standard
+
+The on-disk contract is a **documented, versioned, tool-agnostic standard** — conformance is
+defined by the published `schemas/*.schema.json` (`$id` `loop-engineer/<artifact>@<major>`,
+additive within a major), and a runnable **conformance checklist** (A1–E1) lets any harness claim
+*"emits a Loop-Engineer-conformant contract v1."* See
+[`reference/repo-os-contract.md`](reference/repo-os-contract.md) §0 / §11 / §14.
+
 ---
 
 ## Install
@@ -389,8 +397,8 @@ license, and README differentiation.
 
 ## Status
 
-- Version: `0.6.1`
-- Release tag: `v0.6.1` (PyPI publish trigger; plugin tags through 0.6.0 used `loop-engineer--v<version>`)
+- Version: `0.7.0`
+- Release tag: `v0.7.0` (PyPI publish trigger; plugin tags through 0.6.0 used `loop-engineer--v<version>`)
 - License: MIT
 - Primary interface: Claude Code plugin
 - Portable core: Python CLI + JSON schemas

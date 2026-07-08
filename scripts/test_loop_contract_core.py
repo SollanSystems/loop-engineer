@@ -553,6 +553,145 @@ def test_f7_doctor_on_file_target_matches_dir_target(tmp_path):
     assert file_report["paths"] == dir_report["paths"]
 
 
+def _force_structural_mode(monkeypatch):
+    """Make `_validation_mode` report the stdlib structural fallback even when
+    jsonschema is installed, so a test can pin lifecycle in BOTH modes cheaply.
+    """
+    import loop.contract as contract
+
+    monkeypatch.setattr(contract, "_validation_mode", lambda: "structural-fallback")
+
+
+@pytest.mark.parametrize("mode", ["jsonschema", "structural-fallback"])
+def test_dg3_inflight_loop_with_null_terminal_is_conformant(tmp_path, monkeypatch, mode):
+    # DG-3 (a): a scaffolded loop with terminal_state:null and NO
+    # terminal_state.json is a first-class conformant state — it passes doctor
+    # clean and reports a non-terminal lifecycle, never a fabricated terminal.
+    if mode == "jsonschema":
+        pytest.importorskip("jsonschema")
+    else:
+        _force_structural_mode(monkeypatch)
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "inflight")
+    # A fresh scaffold is iteration_id "0" / terminal_state null.
+    report = doctor_report(target)
+    assert report["ok"] is True, report["issues"]
+    assert report["validation_mode"] == mode
+    assert report["lifecycle"] == "planned"
+
+    # Advance iteration past 0 and the same null-terminal loop reads "running".
+    state_path = target / ".loop" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["iteration_id"] = 3
+    state["state"] = "execute"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    running = doctor_report(target)
+    assert running["ok"] is True, running["issues"]
+    assert running["lifecycle"] == "running"
+
+
+@pytest.mark.parametrize("mode", ["jsonschema", "structural-fallback"])
+def test_dg3_non_null_terminal_without_file_fails_but_reports_terminated(tmp_path, monkeypatch, mode):
+    # DG-3 (b): a state.json declaring a non-null terminal_state with NO
+    # terminal_state.json is a broken terminal pair — doctor fails with a
+    # missing_file issue, yet lifecycle still names the claimed terminal so the
+    # operator sees WHY it failed rather than a bare missing-file.
+    if mode == "jsonschema":
+        pytest.importorskip("jsonschema")
+    else:
+        _force_structural_mode(monkeypatch)
+    from loop.contract import doctor_report
+
+    target = _scaffold(tmp_path, "orphan-terminal")
+    state_path = target / ".loop" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["iteration_id"] = 2
+    state["terminal_state"] = "Succeeded"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    # Ensure no terminal file exists anywhere the resolver would find it.
+    for candidate in (target / ".loop" / "terminal_state.json", target / "terminal_state.json"):
+        if candidate.exists():
+            candidate.unlink()
+
+    report = doctor_report(target)
+    assert report["ok"] is False
+    assert any(i["code"] == "missing_file" for i in report["issues"]), report["issues"]
+    assert report["lifecycle"] == "terminated:Succeeded"
+
+
+@pytest.mark.parametrize("mode", ["jsonschema", "structural-fallback"])
+def test_dg3_terminated_contract_reports_state_from_terminal_file(tmp_path, monkeypatch, mode):
+    # DG-3 (c): a genuinely terminated contract (terminal file present) reports
+    # lifecycle "terminated:<state>" taken from the terminal file. Exercised on
+    # the shipped examples/coverage-repair fixture (workspace-root terminal file).
+    if mode == "jsonschema":
+        pytest.importorskip("jsonschema")
+    else:
+        _force_structural_mode(monkeypatch)
+    from loop.contract import doctor_report
+
+    example = ROOT / "examples" / "coverage-repair"
+    report = doctor_report(example)
+    assert report["lifecycle"] == "terminated:Succeeded"
+    assert report["validation_mode"] == mode
+
+
+@pytest.mark.parametrize("mode", ["jsonschema", "structural-fallback"])
+def test_dg3_missing_state_json_reports_unknown_lifecycle(tmp_path, monkeypatch, mode):
+    # DG-3 (d): with no readable state.json and no terminal file, the lifecycle
+    # is "unknown" — the rule is total and never raises on an empty/garbage dir.
+    if mode == "jsonschema":
+        pytest.importorskip("jsonschema")
+    else:
+        _force_structural_mode(monkeypatch)
+    from loop.contract import doctor_report
+
+    bare = tmp_path / "bare"
+    (bare / ".loop").mkdir(parents=True)
+    report = doctor_report(bare)
+    assert report["lifecycle"] == "unknown"
+
+
+def test_dg3_unreadable_state_json_reports_unknown_lifecycle(tmp_path):
+    # DG-3 (d): a present-but-unparseable state.json still yields "unknown"
+    # (state parsed to None) rather than crashing the lifecycle derivation.
+    from loop.contract import doctor_report
+
+    bare = tmp_path / "corrupt"
+    (bare / ".loop").mkdir(parents=True)
+    (bare / ".loop" / "state.json").write_text("{ not json", encoding="utf-8")
+    report = doctor_report(bare)
+    assert report["lifecycle"] == "unknown"
+
+
+def test_dg3_lifecycle_derivation_is_total_and_pure():
+    # E1 unit: the pure derivation covers each branch deterministically, never
+    # raising, independent of the filesystem.
+    from loop.contract import _derive_lifecycle
+
+    assert _derive_lifecycle({"iteration_id": 0, "terminal_state": None}, None, False) == "planned"
+    assert _derive_lifecycle({"iteration_id": "0", "terminal_state": None}, None, False) == "planned"
+    assert _derive_lifecycle({"iteration_id": 5, "terminal_state": None}, None, False) == "running"
+    # terminal file dict state wins over state.json's terminal_state.
+    assert (
+        _derive_lifecycle(
+            {"iteration_id": 2, "terminal_state": "FailedBudget"},
+            {"state": "Succeeded"},
+            True,
+        )
+        == "terminated:Succeeded"
+    )
+    # non-null terminal_state with no parseable terminal dict falls back to it.
+    assert (
+        _derive_lifecycle({"iteration_id": 2, "terminal_state": "FailedBlocked"}, None, False)
+        == "terminated:FailedBlocked"
+    )
+    # terminal file exists but neither source yields a string state.
+    assert _derive_lifecycle(None, None, True) == "terminated:unknown"
+    assert _derive_lifecycle(None, None, False) == "unknown"
+
+
 def test_loop_doctor_flags_stub_verify_scripts(tmp_path):
     workspace = _write_valid_loop(tmp_path)
     (workspace / "scripts" / "verify-fast").write_text(
