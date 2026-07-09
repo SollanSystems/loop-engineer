@@ -1,7 +1,7 @@
 """Deterministic flakiness probe: run the visible suite under 5 fixed
 PYTHONHASHSEED values; the score is the passing fraction. Before the T1
 repair the tie order tracked set-iteration order, so some seeds failed
-(committed red bundle: score 0.4); after it, 5/5 pass every time."""
+(committed red bundle: score 0.6); after it, 5/5 pass every time."""
 
 import json
 import os
