@@ -20,6 +20,25 @@ python3 -m loop inspect  examples/coverage-repair
 
 If you don't have the deps, prefix with `uv run --with pyyaml --with pytest`.
 
+## Start here — the contributor funnel
+
+Every open starter issue names **the gate that proves the fix** — a
+deterministic command that is red before your change and green after. That is
+the whole review bar (see the ground rule above).
+
+- [`good first issue`](https://github.com/SollanSystems/loop-engineer/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  — small, bounded, gate-verifiable fixes.
+- [`help wanted`](https://github.com/SollanSystems/loop-engineer/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+  — integration recipes (OpenHands, ruflo — designs already written in
+  `docs/superpowers/specs/2026-06-30-st3-integration-adapters.md`) and
+  foreign-harness gap reports (`docs/gap-reports/`).
+
+The contribution target for anything that emits or consumes contract
+artifacts is the standard: `reference/repo-os-contract.md` — a harness that
+satisfies the §14 conformance checklist (A1–E1) may claim it emits a
+Loop-Engineer-conformant contract v1. Drafts for the seeded issues live in
+`docs/contributing/issues/` and are filed on GitHub at release time.
+
 ## Repository layout
 
 | Path | What lives here |
