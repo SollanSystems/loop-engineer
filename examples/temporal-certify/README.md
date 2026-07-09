@@ -15,10 +15,13 @@ evidence-backed state the `loop` CLI can independently validate and score.
   runs the same **visible + withheld holdout** split the loop optimized against
   through the real `holdout_gate.decide` and `anticheat_scan.scan`, projects the
   verdict through `to_terminal_state`, and records it via `loop.emit`. It writes
-  the verbatim gate verdict (`holdout-verdict.json`) as evidence.
+  two evidence artifacts a scorecard can join: the verbatim gate verdict
+  (`holdout-verdict.json`) and a verify bundle (`verify-T1.json`).
 
 Activities do the I/O; the `@workflow.defn` class stays deterministic. On a real
-pass the terminal is `Succeeded` with evidence.
+pass the terminal is `Succeeded` with evidence, and `loop metrics` scores the run
+clean: `false_completion_rate 0.0`, `evidence_backed: true`, the two FCR methods
+agree.
 
 ### The `--sabotage-holdout` false-completion demo
 

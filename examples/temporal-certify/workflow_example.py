@@ -69,12 +69,26 @@ async def certify_activity(args: WorkArgs) -> dict:
     gate = holdout_gate.decide(visible, holdout)
     ac = anticheat_scan.scan(diff_text="", trajectory=[str(artifact)])
 
+    # Evidence artifacts: the gate verdict + a verify bundle metrics can join —
+    # `loop metrics` scores a success claim as a false completion unless a green
+    # verify bundle backs it (same pair the LangGraph recipe writes).
     art_dir = ws / ".loop" / "artifacts"
     art_dir.mkdir(parents=True, exist_ok=True)
     (art_dir / "holdout-verdict.json").write_text(json.dumps(gate, indent=2) + "\n", encoding="utf-8")
+    bundle = {
+        "task": "T1",
+        "verify": "certify activity — holdout_gate.decide over visible+holdout",
+        "outcome": "PASS" if gate["verdict"] == "Succeeded" else "FAIL",
+        "iteration_id": 1,
+        "criteria": {"1": gate["verdict"] == "Succeeded"},
+    }
+    (art_dir / "verify-T1.json").write_text(json.dumps(bundle, indent=2) + "\n", encoding="utf-8")
 
     terminal = to_terminal_state(
-        outcome=EngineOutcome(reached_end=True, artifacts=[".loop/artifacts/holdout-verdict.json"]),
+        outcome=EngineOutcome(
+            reached_end=True,
+            artifacts=[".loop/artifacts/verify-T1.json", ".loop/artifacts/holdout-verdict.json"],
+        ),
         gate_verdict=gate, anticheat=ac,
         criteria_met={"1": gate["verdict"] == "Succeeded"},
     )
@@ -83,6 +97,7 @@ async def certify_activity(args: WorkArgs) -> dict:
         str(ws), iteration_id=1, outcome="task_passed" if passed else "task_failed",
         task_id="T1", actions=["do_work_activity wrote artifact.txt", "certify_activity gated it"],
         verify_cmd="holdout_gate.decide(visible, holdout)", verify_outcome=gate["verdict"],
+        notes="verify bundle: verify-T1.json; gate verdict: holdout-verdict.json",
     )
     emit.append_receipt(str(ws), iteration_id=1, role="orchestrate", model="deterministic-demo", outcome="ok")
     emit.terminate(
@@ -138,6 +153,12 @@ def certify_workflow_failure(workspace: str, cause: BaseException | None) -> dic
 
 async def run_and_certify(client: Client, workspace: str, *, sabotage: bool, wf_id: str) -> dict:
     emit.open_contract(workspace)
+    # The fresh scaffold's RUNLOG carries a placeholder example iteration (its
+    # unfilled outcome renders as "REPLACE"); start the demo's run history clean
+    # so `loop metrics` scores only the workflow's own iterations.
+    (Path(workspace) / "RUNLOG.md").write_text(
+        f"# RUNLOG.md — {Path(workspace).name}\n", encoding="utf-8"
+    )
     try:
         return await client.execute_workflow(
             CertifiedGoalWorkflow.run, WorkArgs(workspace=workspace, sabotage=sabotage),

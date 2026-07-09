@@ -54,6 +54,15 @@ def _doctor(workspace: Path) -> dict:
     return json.loads(proc.stdout)
 
 
+def _metrics(workspace: Path) -> dict:
+    proc = subprocess.run(
+        [sys.executable, "-B", "-m", "loop", "metrics", str(workspace)],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return json.loads(proc.stdout)
+
+
 def _terminal(workspace: Path) -> dict:
     return json.loads((workspace / ".loop" / "terminal_state.json").read_text())
 
@@ -98,6 +107,16 @@ def test_recipe_end_to_end(tmp_path):
     assert happy["false_completion"] is False
     assert happy["evidence"]
     assert _doctor(tmp_path / "happy")["ok"] is True
+    # The README advertises a clean scorecard — pin it (sibling ST3 invariant).
+    card = _metrics(tmp_path / "happy")
+    assert card["false_completion_rate"] == 0.0
+    assert card["false_completions"] == 0
+    assert card["iterations_claiming_success"] >= 1
+    assert card["evidence_backed"] is True
+    prov = card["provenance"]
+    assert prov["unmatched_verify"] == []
+    assert prov["unrecognized_outcomes"] == []
+    assert prov["fcr_methods_agree"] is True
 
     sab = _terminal(tmp_path / "sabotaged")
     assert sab["state"] == "FailedUnverifiable"
