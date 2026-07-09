@@ -1,0 +1,8 @@
+{
+  "visible": [
+    { "id": "visible-stability", "cmd": "python3 -B measure_stability.py" }
+  ],
+  "holdout": [
+    { "id": "holdout-order-property", "cmd": "python3 -B -m pytest -q -p no:cacheprovider test_holdout.py" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "task": "T1",
+  "verify": "target/measure_stability.py",
+  "outcome": "PASS",
+  "score": 1.0,
+  "iteration_id": 2,
+  "criteria": { "1": true },
+  "detail": "visible test passed under 5/5 probe seeds after the (priority, name) sort key"
+}

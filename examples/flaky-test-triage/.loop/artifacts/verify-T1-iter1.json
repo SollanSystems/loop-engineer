@@ -1,0 +1,8 @@
+{
+  "task": "T1",
+  "verify": "target/measure_stability.py",
+  "outcome": "FAIL",
+  "score": 0.6,
+  "iteration_id": 1,
+  "detail": "visible test passed under 3/5 probe seeds — tie order tracks set-iteration order"
+}

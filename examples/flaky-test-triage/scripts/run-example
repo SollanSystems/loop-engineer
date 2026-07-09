@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# run-example — re-derive the committed holdout verdict from a LIVE gate run,
+# then check the committed terminal claim against it.
+set -euo pipefail
+EX="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$EX/../.." && pwd)"
+
+python3 -B "$REPO/scripts/holdout_gate.py" "$EX/target/manifest.json" --cwd "$EX/target" \
+  > "$EX/.loop/artifacts/holdout-verdict.json"
+
+python3 - "$EX" <<'PY'
+import json, sys
+from pathlib import Path
+
+example = Path(sys.argv[1])
+verdict = json.loads((example / ".loop/artifacts/holdout-verdict.json").read_text())
+terminal = json.loads((example / ".loop/terminal_state.json").read_text())
+assert verdict["verdict"] == "Succeeded", verdict
+assert verdict["false_completion"] is False, verdict
+assert terminal["false_completion"] is False
+print("terminal claim BACKED by an independent holdout_gate run (verdict: Succeeded)")
+PY

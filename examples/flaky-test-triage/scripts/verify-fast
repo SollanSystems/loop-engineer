@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# verify-fast — criterion 1 quick probe: the visible suite under one fixed seed.
+set -euo pipefail
+EX="$(cd "$(dirname "$0")/.." && pwd)"
+( cd "$EX/target" && PYTHONHASHSEED=3 python3 -B -m pytest -q -p no:cacheprovider test_visible.py )
+echo "verify-fast: PASS (visible test green under seed 3)"

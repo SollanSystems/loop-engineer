@@ -1,0 +1,12 @@
+{
+  "schema": "loop-engineer/repair@1",
+  "iteration_id": "2",
+  "attempt": 1,
+  "failure_mode": "flaky",
+  "hypothesis": "next_jobs sorts by priority alone, so equal-priority jobs keep set-iteration order — stable within one interpreter, different across PYTHONHASHSEED values, which is why the visible test passes on some seeds and fails on others.",
+  "repair_action": "Changed the sort key from priority alone to (priority, name) in target/jobs.py so tie order is a function of the data. No edit to the tests, fixtures, probe script, or SPEC.md.",
+  "verification_before": { "verify_full": "FAIL", "metric": "visible_stability_score", "failing": ["seed 1", "seed 4"], "score": 0.6 },
+  "verification_after": { "verify_full": "PASS", "metric": "visible_stability_score", "failing": [], "score": 1.0 },
+  "remaining_delta": "none — 5/5 probe seeds green and the held-out order property holds",
+  "productive": true
+}

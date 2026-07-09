@@ -1,0 +1,14 @@
+{
+  "schema": "loop-engineer/terminal@1",
+  "project": "flaky-test-triage",
+  "state": "Succeeded",
+  "iteration_id": 2,
+  "terminated_at": "2026-07-08T10:31:00Z",
+  "goal": "Make the scheduler's job-order test deterministic across interpreter runs.",
+  "criteria_met": { "1": true, "2": true },
+  "evidence": [".loop/artifacts/verify-T1.json", ".loop/artifacts/holdout-verdict.json"],
+  "false_completion": false,
+  "reason": "Stability score 1.0 under all 5 probe seeds (scripts/verify-full); held-out order-independence property green via a real holdout_gate run. The repair record carries the anchored 0.6 -> 1.0 delta.",
+  "total_iterations": 2,
+  "total_repair_attempts": 1
+}

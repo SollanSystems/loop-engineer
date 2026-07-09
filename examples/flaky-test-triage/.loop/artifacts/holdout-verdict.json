@@ -1,0 +1,21 @@
+{
+  "verdict": "Succeeded",
+  "reason": "visible and holdout gates both green",
+  "passed_visible": true,
+  "passed_holdout": true,
+  "false_completion": false,
+  "visible": [
+    {
+      "id": "visible-stability",
+      "passed": true,
+      "returncode": 0
+    }
+  ],
+  "holdout": [
+    {
+      "id": "holdout-order-property",
+      "passed": true,
+      "returncode": 0
+    }
+  ]
+}
