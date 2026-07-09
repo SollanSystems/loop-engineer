@@ -33,3 +33,6 @@ Thumbs.db
 # Secrets — never commit
 .env
 *.local
+
+# Local cold-start context — deliberately untracked (see its own do-not-commit note)
+/CLAUDE.md
