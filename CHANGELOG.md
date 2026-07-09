@@ -14,6 +14,24 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## Unreleased
+
+**ST3 — integration adapters.** `loop/integrations.py`: an engine-neutral,
+pure-stdlib projection (`EngineOutcome` + `to_terminal_state`) from any
+engine's "the run ended" signal onto the 7 typed terminal states, with the
+fixed precedence safety → human → blocked → budget → spec-gap → gate verdict.
+`Succeeded` is reachable only through a green `holdout_gate.decide` verdict,
+a clean anticheat sweep, a met criterion, and evidence; `false_completion` is
+copied from the gate, never synthesized; missing gate/anticheat input fails
+closed to `FailedUnverifiable`. The LangGraph recipe is upgraded in place to
+this bar (its run now scores clean under `loop metrics` — closing the
+recorded FCR-1.0 follow-up) and a Temporal recipe lands
+(`examples/temporal-certify/`, certify-activity pattern, cancellation →
+`AbortedByHuman`, retry exhaustion → `FailedBlocked`, timeout →
+`FailedBudget`). Both recipes pin the false-completion invariant
+(visible-green/holdout-red → `FailedUnverifiable` with
+`false_completion: true`, never `Succeeded`) and pass the doctor round-trip.
+
 ## 0.7.0 — 2026-07-08
 
 **ST2 — the portable standard.** The on-disk contract is now a documented,
