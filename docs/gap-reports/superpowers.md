@@ -22,7 +22,7 @@ fixture; the low score below measures only what a spec/plan/journal layout
 
 ## §14 conformance — read against the fixture
 
-The "What the standard requires" column is verbatim from
+The "What the standard requires" column is condensed from
 [`reference/repo-os-contract.md`](../../reference/repo-os-contract.md) §14.
 
 | Item | What the standard requires | Fixture status |
