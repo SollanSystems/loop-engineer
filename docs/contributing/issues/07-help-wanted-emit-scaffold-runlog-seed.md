@@ -1,5 +1,5 @@
 <!-- title: emit.open_contract seeds a metrics-dirty RUNLOG placeholder -->
-<!-- labels: good first issue -->
+<!-- labels: help wanted -->
 
 # emit.open_contract seeds a metrics-dirty RUNLOG placeholder
 
