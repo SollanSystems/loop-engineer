@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# verify-full — criterion 1 (stability score over 5 seeds) + false-completion
+# defense: the REAL repo held-out gate over the toy target's visible + holdout.
+set -euo pipefail
+EX="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$EX/../.." && pwd)"
+
+bash "$EX/scripts/verify-fast"
+
+echo "== criterion 1: visible stability score == 1.0 over 5 probe seeds =="
+( cd "$EX/target" && python3 -B measure_stability.py )
+
+echo "== false-completion defense: held-out gate over visible + holdout =="
+python3 "$REPO/scripts/holdout_gate.py" "$EX/target/manifest.json" --cwd "$EX/target"
+echo "verify-full: PASS (criteria 1+2 verified; holdout gate green)"

@@ -68,6 +68,7 @@ if _REPO_ROOT not in sys.path:
 
 try:
     from loop.contract import TERMINAL_STATES, read_manifest
+    from loop.foreign import detect_foreign_layout, map_foreign_paths
     from loop.paths import resolve_loop_paths
 except ImportError:  # pragma: no cover - direct script copy outside repo root
     TERMINAL_STATES = (
@@ -97,6 +98,22 @@ except ImportError:  # pragma: no cover - direct script copy outside repo root
             contract = Path(target) / "loop-contract.md"
 
         return _Paths()
+
+    def detect_foreign_layout(_target):
+        return None
+
+    def map_foreign_paths(_target):
+        return None
+
+
+def _resolve_paths(target):
+    """The path-resolution seam: a recognized foreign layout maps onto the
+    same LoopPaths surface; everything else resolves natively. The scoring
+    logic below is layout-blind — signals, weights, and credit tiers are
+    identical for native and foreign targets."""
+    mapped = map_foreign_paths(target)
+    return mapped if mapped is not None else resolve_loop_paths(target)
+
 
 # Bound the read of any single target file: the corpus is substring-matched
 # against fixed signals, so the head of a file is enough and an oversized file
@@ -257,7 +274,7 @@ def _task_titles_all_placeholder(tasks: dict) -> bool:
 def _terminal_states_covered_from_contract(loop: Path) -> int:
     """Count terminal taxonomy coverage from contract-owned files only."""
 
-    paths = resolve_loop_paths(loop)
+    paths = _resolve_paths(loop)
     manifest = read_manifest(paths.manifest) or {}
     states = manifest.get("terminal_states") if isinstance(manifest, dict) else None
     if isinstance(states, list):
@@ -498,7 +515,7 @@ def _evaluate_contract_checks(loop: Path) -> dict[str, object]:
     README prose, so keyword stuffing cannot satisfy the loop contract.
     """
 
-    paths = resolve_loop_paths(loop)
+    paths = _resolve_paths(loop)
     # SPEC/WORKFLOW resolve dual-location (.loop/ ∪ root) via resolve_loop_paths;
     # a committed single-file loop-contract.md is folded in as a contract-owned
     # source for the same signals.
@@ -616,7 +633,7 @@ def inspect_loop(loop_dir: str) -> dict:
     if covered == len(TERMINAL_STATES):
         present.append(f"all {len(TERMINAL_STATES)} terminal states reachable")
     else:
-        paths = resolve_loop_paths(loop)
+        paths = _resolve_paths(loop)
         manifest = read_manifest(paths.manifest) or {}
         states = manifest.get("terminal_states") if isinstance(manifest, dict) else None
         if isinstance(states, list):
@@ -646,7 +663,7 @@ def inspect_loop(loop_dir: str) -> dict:
             "wire a holdout/anti-cheat gate"
         )
 
-    return {
+    report = {
         "target": str(loop),
         "score": score,
         "terminal_states_covered": covered,
@@ -654,6 +671,11 @@ def inspect_loop(loop_dir: str) -> dict:
         "gaps": gaps,
         "verdict": _verdict(score),
     }
+    foreign = detect_foreign_layout(loop)
+    if foreign:
+        report["foreign_layout"] = foreign
+        report["advisory"] = True
+    return report
 
 
 def main(argv: list[str]) -> int:

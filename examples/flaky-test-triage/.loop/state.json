@@ -1,0 +1,14 @@
+{
+  "schema": "loop-engineer/state@1",
+  "project": "flaky-test-triage",
+  "iteration_id": 2,
+  "state": "terminal",
+  "plan_version": 1,
+  "active_task": "T1",
+  "best_score": 1.0,
+  "failure_mode": null,
+  "pending_approval": null,
+  "budget_remaining": { "time": "14m", "cost": "0.71usd" },
+  "checkpoint_path": "",
+  "terminal_state": "Succeeded"
+}

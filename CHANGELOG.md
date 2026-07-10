@@ -14,7 +14,7 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
-## Unreleased
+## 0.8.0 — 2026-07-09
 
 **ST3 — integration adapters.** `loop/integrations.py`: an engine-neutral,
 pure-stdlib projection (`EngineOutcome` + `to_terminal_state`) from any
@@ -31,6 +31,19 @@ recorded FCR-1.0 follow-up) and a Temporal recipe lands
 `FailedBudget`). Both recipes pin the false-completion invariant
 (visible-green/holdout-red → `FailedUnverifiable` with
 `false_completion: true`, never `Succeeded`) and pass the doctor round-trip.
+
+**ST4 — contributor funnel.** `loop inspect` now recognizes a foreign
+Superpowers-style run dir read-only (`loop/foreign.py` — a layout mapper onto
+the existing `LoopPaths` seam; the M2/M3-hardened scorer is untouched and a
+foreign harness with no gate and no terminal record scores honestly low).
+The reading is checked in as `docs/gap-reports/superpowers.md` — the §14
+conformance checklist evaluated against a vendored, sanitized fixture
+(`examples/superpowers-run/`). A second runnable example lands:
+`examples/flaky-test-triage/` — doctor-clean, gate-backed, and the showcase
+for repair records (`loop metrics` derives a non-null repair-productivity of
+1.0 from its anchored red→green repair). Seven gate-backed starter issues are
+drafted under `docs/contributing/issues/` and filed at release;
+CONTRIBUTING gains the start-here funnel.
 
 ## 0.7.0 — 2026-07-08
 

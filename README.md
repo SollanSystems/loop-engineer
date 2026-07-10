@@ -5,7 +5,7 @@
 [![CI](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/badge/release-0.7.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
+[![Release](https://img.shields.io/badge/release-0.8.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
 
 Long-running agents commit **false completion**. After context compaction they
 forget what "done" meant, optimize to the visible test, patch in circles, and
@@ -307,7 +307,7 @@ refuses an evidence-free `Succeeded` at write time. Recipe:
 **CI** — one workflow step validates the contract and publishes a scorecard:
 
 ```yaml
-- uses: SollanSystems/loop-engineer@v0.7.0
+- uses: SollanSystems/loop-engineer@v0.8.0
   with:
     path: "."
 ```
@@ -397,12 +397,12 @@ license, and README differentiation.
 
 ## Status
 
-- Version: `0.7.0`
-- Release tag: `v0.7.0` (PyPI publish trigger; plugin tags through 0.6.0 used `loop-engineer--v<version>`)
+- Version: `0.8.0`
+- Release tag: `v0.8.0` (PyPI publish trigger; plugin tags through 0.6.0 used `loop-engineer--v<version>`)
 - License: MIT
 - Primary interface: Claude Code plugin
 - Portable core: Python CLI + JSON schemas
-- Current reference example: `examples/coverage-repair`
+- Current reference examples: `examples/coverage-repair`, `examples/flaky-test-triage`
 
 ---
 

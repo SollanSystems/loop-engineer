@@ -1,0 +1,23 @@
+{
+  "schema": "loop-engineer/tasks@1",
+  "project": "flaky-test-triage",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Make next_jobs tie-order deterministic (stable sort key, not set-iteration order)",
+      "status": "done",
+      "criterion_ref": "1",
+      "verify": "scripts/verify-full",
+      "depends_on": [],
+      "attempts": 2,
+      "evidence": ".loop/artifacts/verify-T1.json"
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-07-08T10:02:00Z",
+    "updated_at": "2026-07-08T10:31:00Z",
+    "total_tasks": 1,
+    "completed": 1,
+    "failed": 0
+  }
+}
