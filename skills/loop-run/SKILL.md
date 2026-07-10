@@ -1,6 +1,6 @@
 ---
 name: loop-run
-description: "The operator. Run (or resume) the agent loop's state machine one transition at a time — dispatch the next bounded task, verify it, repair or replan or pause for approval, and end in exactly one of the 7 explicit terminal states. Use when the user says 'run the loop', 'launch the goal', 'execute the agent loop', 'start the long-running run', 'resume the run', or 'kick off the harness' against an existing repo-OS contract."
+description: "The operator. Run (or resume) the agent loop's state machine one transition at a time — dispatch the next bounded task, verify it, repair or replan or pause for approval, and end in exactly one of the 7 explicit terminal states. Use when the user says 'run the agent loop', 'launch the goal', 'execute the agent loop', 'start the long-running run', 'resume the run', or 'kick off the harness' against an existing repo-OS contract."
 ---
 
 # loop-run — operate the loop
