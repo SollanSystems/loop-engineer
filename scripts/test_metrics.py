@@ -9,6 +9,8 @@ from pathlib import Path
 
 import metrics
 
+from loop import emit
+
 _REPO = Path(__file__).resolve().parent.parent
 _EXAMPLE = _REPO / "examples" / "coverage-repair"
 
@@ -687,3 +689,18 @@ def test_baseline_refuses_when_a_counted_rp_record_is_unanchored(tmp_path):
     ok, _sc, reasons = metrics.build_baseline(ws, "ws")
     assert ok is False
     assert any("anchor" in r.lower() for r in reasons)
+
+
+def test_every_emitted_outcome_token_is_recognized(tmp_path):
+    # Round-trip: every token emit.append_iteration will write must be a token
+    # metrics.py recognizes — none may leak into provenance.unrecognized_outcomes.
+    # Iterate the real tuple so a new emit outcome can't silently drift unrecognized.
+    ws = tmp_path / "ws"
+    emit.open_contract(ws)
+    # Drop the scaffold-seeded RUNLOG (it carries the {{ITERATION_OUTCOME}} placeholder,
+    # issue #40) so append_iteration writes a clean header and only real outcome tokens.
+    (ws / "RUNLOG.md").unlink()
+    for iteration_id, outcome in enumerate(emit._ITERATION_OUTCOMES, start=1):
+        emit.append_iteration(ws, iteration_id=iteration_id, outcome=outcome)
+    sc = metrics.compute_metrics(ws)
+    assert sc["provenance"]["unrecognized_outcomes"] == []

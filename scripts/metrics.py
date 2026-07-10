@@ -95,8 +95,8 @@ _SUCCESS_OUTCOME_TOKENS = _COMPLETION_OUTCOME_TOKENS + _PROGRESS_OUTCOME_TOKENS
 # (so they are not surfaced as an "unrecognized" synonym). Any outcome token in
 # neither set is surfaced under provenance.unrecognized_outcomes.
 _HONEST_RED_OUTCOME_TOKENS = (
-    "repair_triggered", "task_failed", "replan", "reverted", "revert",
-    "blocked", "terminated", "aborted", "failed",
+    "repair_triggered", "task_failed", "approval_requested", "replanned",
+    "replan", "reverted", "revert", "blocked", "terminated", "aborted", "failed",
 )
 _KNOWN_OUTCOME_TOKENS = frozenset(_SUCCESS_OUTCOME_TOKENS) | frozenset(_HONEST_RED_OUTCOME_TOKENS)
 
