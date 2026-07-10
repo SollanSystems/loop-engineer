@@ -64,7 +64,7 @@ python3 -m loop metrics examples/flaky-test-triage
 ## Run it yourself
 
 One entrypoint re-derives the committed held-out verdict from a **live** gate run and checks the
-terminal claim against it — no installs, ~1–2s:
+terminal claim against it — needs `pytest` importable by `python3` (no other installs), ~1–2s:
 
 ```bash
 bash examples/flaky-test-triage/scripts/run-example
