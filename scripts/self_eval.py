@@ -1,9 +1,13 @@
 """Deterministic structural self-eval for the loop-engineer suite.
 
 Runs the 13 structural checks the suite grades itself by (the hard pass/fail
-gate; the rubric in evals/rubric.md is the advisory layer above this). Reuses
-``validate_frontmatter`` from this same scripts/ dir rather than reimplementing
-the frontmatter parse. Expected structural facts live in
+gate for suite structure; the rubric in evals/rubric.md is the advisory layer
+above this). Most checks are documentation-completeness scans — they confirm the
+canonical vocabulary (terminal states, repair-record fields, eval layers +
+metrics) is present in the skill prose, not that a running loop enforces it. The
+runtime/behavioral gate is ``loop doctor`` and the contract's own ``verify-*``
+scripts. Reuses ``validate_frontmatter`` from this same scripts/ dir rather than
+reimplementing the frontmatter parse. Expected structural facts live in
 ``evals/cases/structural.json`` so the checks stay data-driven and in sync with
 the suite.
 
@@ -182,6 +186,9 @@ def check_links_resolve(root, facts):
     return True, "all [[links]] resolve to a skill dir or known sibling"
 
 
+# Documentation-completeness: confirms the canonical terminal-state vocabulary
+# is present in loop-run's prose (a substring scan), not runtime enforcement that
+# a loop actually reaches one of these states — that gate is loop doctor / verify-*.
 def check_terminal_states(root, facts):
     text = _read(root / "skills" / "loop-run" / "SKILL.md")
     missing = [s for s in facts["terminal_states"] if s not in text]
@@ -190,6 +197,10 @@ def check_terminal_states(root, facts):
     return True, f"loop-run names all {len(facts['terminal_states'])} terminal states"
 
 
+# Documentation-completeness for the field vocabulary: confirms the repair-record
+# field names are present in loop-repair's prose (a substring scan). The second
+# half IS structural — the examples/ failure_mode taxonomy scan parses example
+# files and rejects any failure_mode value outside the canonical taxonomy.
 def check_repair_fields(root, facts):
     text = _read(root / "skills" / "loop-repair" / "SKILL.md")
     missing = [f for f in facts["repair_record_fields"] if f not in text]
@@ -203,6 +214,9 @@ def check_repair_fields(root, facts):
     return True, f"loop-repair names all {n} repair fields; example failure_modes canonical"
 
 
+# Documentation-completeness: confirms the 7 eval-layer names + 2 first-class
+# metrics appear in loop-evals' prose (a normalized substring scan), not runtime
+# enforcement that the eval harness actually runs those layers or computes metrics.
 def check_eval_layers_and_metrics(root, facts):
     ntext = _norm(_read(root / "skills" / "loop-evals" / "SKILL.md"))
     wanted = list(facts["eval_layer_names"]) + list(facts["first_class_metrics"])
@@ -324,9 +338,9 @@ CHECKS = [
     ("frontmatter-valid", check_frontmatter_valid),
     ("references-used", check_references_used),
     ("links-resolve", check_links_resolve),
-    ("terminal-states-complete", check_terminal_states),
-    ("repair-record-fields", check_repair_fields),
-    ("eval-layers-and-metrics", check_eval_layers_and_metrics),
+    ("terminal-states-documented", check_terminal_states),
+    ("repair-record-fields-documented", check_repair_fields),
+    ("eval-layers-and-metrics-documented", check_eval_layers_and_metrics),
     ("templates-present", check_templates_present),
     ("no-secrets", check_no_secrets),
     ("dispatch-names-model", check_dispatch_names_model),

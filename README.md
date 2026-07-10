@@ -389,9 +389,12 @@ claude plugin validate --strict .claude-plugin/plugin.json
 ```
 
 The structural self-eval checks skill presence, frontmatter, cross-links,
-terminal-state coverage, repair-record fields, eval metrics, templates, secret
-patterns, dispatch examples, the bring-your-own-verifier default, the MIT
-license, and README differentiation.
+templates, secret patterns, dispatch examples, the bring-your-own-verifier
+default, the MIT license, and README differentiation. Three further checks are
+documentation-completeness scans: they confirm the canonical vocabulary for
+terminal-state coverage, repair-record fields, and eval metrics is present in the
+skill prose — not that a running loop enforces it (that runtime gate is `loop
+doctor` and the contract's own `verify-*` scripts).
 
 ---
 

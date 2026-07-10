@@ -11,7 +11,7 @@ you open a PR, all of these must be green (CI runs them on every push):
 ```bash
 # from the repo root
 python3 scripts/validate_frontmatter.py     # SKILL.md frontmatter
-python3 scripts/self_eval.py                # 13 structural invariants
+python3 scripts/self_eval.py                # 13 structural/doc-completeness invariants
 python3 -m pytest -q scripts                # the test suite
 python3 -m py_compile loop/*.py scripts/*.py
 python3 -m loop doctor   examples/coverage-repair   # quickstart still works
@@ -19,6 +19,12 @@ python3 -m loop inspect  examples/coverage-repair
 ```
 
 If you don't have the deps, prefix with `uv run --with pyyaml --with pytest`.
+
+Most `self_eval.py` checks verify documentation-completeness — that the suite's
+canonical vocabulary (terminal states, repair-record fields, eval layers +
+metrics) is present in the skill prose — not that a running loop enforces it. The
+runtime/behavioral gate is `python3 -m loop doctor` and the contract's own
+`verify-*` scripts, which is why both appear in the list above.
 
 ## Start here — the contributor funnel
 
@@ -53,7 +59,10 @@ Loop-Engineer-conformant contract v1. Drafts for the seeded issues live in
 
 ## Authoring or editing a skill
 
-The `self_eval.py` checks encode hard rules — match them or the gate fails:
+The `self_eval.py` checks encode hard rules — match them or the gate fails. Most
+are documentation-completeness checks (the canonical vocabulary must appear in the
+skill prose), not behavioral enforcement of a running loop — that gate is `loop
+doctor` and the contract's own `verify-*` scripts:
 
 - **Frontmatter** must have `name:` and `description:`. The directory name **must equal**
   the frontmatter `name`. Keep the `description` a *quoted* YAML scalar (the suite quotes
