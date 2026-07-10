@@ -1,0 +1,38 @@
+# Sprint status — canonical state ledger for the BMM implementation phase.
+# Every implementation skill reads and advances the keys below.
+
+# generated: 2026-07-09 09:12
+# project: contact-sync-cli
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic:          backlog -> in-progress -> done
+# Story:         backlog -> ready-for-dev -> in-progress -> review -> done
+# Retrospective: optional -> done
+# Action item:   open -> in-progress -> done
+
+generated: 2026-07-09 09:12
+last_updated: 2026-07-09 15:47
+project: contact-sync-cli
+project_key: NOKEY
+tracking_system: file-system
+story_location: "_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: done
+  1-1-deduplicate-csv-rows: done
+  epic-1-retrospective: done
+
+# Action items committed during the Epic 1 retrospective.
+action_items:
+  - epic: 1
+    action: "Add a fixture pair with unicode-cased emails to the dedupe test suite"
+    owner: "Priya"
+    status: open
+  - epic: 1
+    action: "Document the first-seen tie-break rule in the import CLI help text"
+    owner: "Marcus"
+    status: open

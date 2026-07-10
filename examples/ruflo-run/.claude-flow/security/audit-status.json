@@ -1,0 +1,8 @@
+{
+  "initialized": "2026-07-09T14:02:11Z",
+  "status": "CLEAN",
+  "cvesFixed": 3,
+  "totalCves": 3,
+  "lastScan": "2026-07-09T14:14:52Z",
+  "_note": "Dependency scan ran after refinement; the statusline reads this file to color the security badge."
+}

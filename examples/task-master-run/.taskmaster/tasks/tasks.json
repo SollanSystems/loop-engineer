@@ -1,0 +1,73 @@
+{
+	"master": {
+		"tasks": [
+			{
+				"id": 1,
+				"title": "Build the normalization key",
+				"description": "Collapse casing and surrounding whitespace so that equal contacts hash to one key.",
+				"status": "done",
+				"dependencies": [],
+				"priority": "high",
+				"details": "Add normalize_key(email, phone) that lowercases and strips both fields and returns them as a tuple. Route every row in import_contacts.py through it before deciding whether to insert.",
+				"testStrategy": "Run the unit suite over mixed-case fixtures; every casing and padding variant of a single contact must collapse to the same key.",
+				"subtasks": [
+					{
+						"id": 1,
+						"title": "Write normalize_key with mixed-case unit tests",
+						"description": "Implement the key function and cover it with fixtures that vary casing and whitespace.",
+						"status": "done",
+						"dependencies": [],
+						"details": "Implemented the lowercase-and-strip key and added 15 fixtures.\n<info added on 2026-07-09T14:22:05Z>\nAll 15 unit tests pass. Uppercase, title-case, and space-padded variants of one contact now map to a single key.\n</info>"
+					}
+				]
+			},
+			{
+				"id": 2,
+				"title": "Make the import idempotent",
+				"description": "Skip inserts whose key already exists and prove a second import adds nothing.",
+				"status": "done",
+				"dependencies": [1],
+				"priority": "high",
+				"details": "Track seen keys in a set; on a collision count the skip instead of inserting. Re-running the import must leave the row count unchanged.",
+				"testStrategy": "Import the two sample files and assert 41 unique rows from 57 input rows; run the import a second time and assert 0 new rows.",
+				"subtasks": [
+					{
+						"id": 1,
+						"title": "Guard the insert on a seen-key set",
+						"description": "Count skips on collision and verify a re-run is a no-op.",
+						"status": "done",
+						"dependencies": [],
+						"details": "Guarded the insert path on a seen-key set.\n<info added on 2026-07-09T15:04:41Z>\nThe first import produced 41 unique contacts from 57 rows. A second run inserted 0 rows, confirming idempotency.\n</info>"
+					}
+				]
+			},
+			{
+				"id": 3,
+				"title": "Log dropped duplicates",
+				"description": "Record every dropped duplicate with its source file and line number.",
+				"status": "done",
+				"dependencies": [2],
+				"priority": "medium",
+				"details": "When a row is skipped, append a line to dedupe.log naming the source file, the source line number, and the key it duplicated.",
+				"testStrategy": "After an import, confirm dedupe.log lists all dropped rows and that each recorded source line number resolves to a real input row.",
+				"subtasks": [
+					{
+						"id": 1,
+						"title": "Append dropped rows to dedupe.log",
+						"description": "Write one audit line per skipped row and spot-check it against the inputs.",
+						"status": "done",
+						"dependencies": [],
+						"details": "Appended each skipped row to dedupe.log.\n<info added on 2026-07-09T15:39:12Z>\ndedupe.log recorded all 16 dropped rows (57 minus 41) with source file and line number. Three entries were spot-checked against the input files and matched.\n</info>"
+					}
+				]
+			}
+		],
+		"metadata": {
+			"created": "2026-07-09T14:02:00.000Z",
+			"updated": "2026-07-09T15:39:12.000Z",
+			"description": "Master tag for the csv-dedupe import fix",
+			"taskCount": 3,
+			"completedCount": 3
+		}
+	}
+}

@@ -1,0 +1,32 @@
+<context>
+# Overview
+[State the problem this product solves, who feels it, and why solving it matters.]
+
+# Core Features
+[List each major feature with what it does, why it earns a place, and a high-level
+sketch of the mechanics behind it.]
+
+# User Experience
+[Sketch the people who use this and the paths they take through it, including any
+interface constraints.]
+</context>
+<PRD>
+# Technical Architecture
+[Name the components, the data they move, the interfaces between them, and what the
+system runs on.]
+
+# Development Roadmap
+[Divide the build into phases by scope alone. Spell out precisely what each phase
+ships so it can be sliced into work items afterward; leave timelines out entirely.]
+
+# Logical Dependency Chain
+[Order the work so the foundation comes first and something usable appears as early
+as possible, with each piece atomic yet extendable.]
+
+# Risks and Mitigations
+[Name the technical risks, the smallest viable slice to prove the approach, and how
+constraints will be handled.]
+
+# Appendix
+[Attach supporting research and any precise specifications worth pinning down.]
+</PRD>

@@ -1,0 +1,17 @@
+# Task ID: 1
+# Title: Build the normalization key
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: Collapse casing and surrounding whitespace so that equal contacts hash to one key.
+# Details:
+Add normalize_key(email, phone) that lowercases and strips both fields and
+returns them as a tuple. Route every row in import_contacts.py through it before
+deciding whether to insert, so that casing differences between the two source
+files can no longer produce distinct keys for the same contact.
+
+# Test Strategy:
+Run the unit suite over mixed-case fixtures; every casing and padding variant of
+a single contact must collapse to the same key. Verified 2026-07-09: all 15 unit
+tests pass and the uppercase, title-case, and space-padded variants of one
+contact now map to a single key.

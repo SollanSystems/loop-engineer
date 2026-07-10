@@ -1,0 +1,42 @@
+<context>
+# Overview
+import_contacts.py loads two contact exports into one table. When the same person
+appears in both files with different casing, the loader treats the rows as
+distinct and writes duplicates. This PRD scopes a deduplicating import that keeps
+one row per real contact and leaves an audit trail of what it dropped.
+
+# Core Features
+- A normalization key that folds email and phone to a casing-insensitive form so
+  variants of one contact resolve to a single identity.
+- An idempotent insert path that skips a row whose key was already written, so
+  re-running the import changes nothing.
+- A dedupe log that records every dropped row with its source file and line.
+
+# User Experience
+The operator runs the import from the command line and reads a short summary plus
+dedupe.log. No interface beyond the CLI is in scope.
+</context>
+<PRD>
+# Technical Architecture
+A single Python module keys each row through normalize_key(email, phone), tracks
+seen keys in an in-memory set, inserts first-seen rows, and appends skipped rows
+to dedupe.log. No schema change and no new dependency are required.
+
+# Development Roadmap
+Phase 1 delivers the normalization key. Phase 2 adds the idempotent insert guard.
+Phase 3 adds the dedupe log. Each phase is independently testable and ships in
+order.
+
+# Logical Dependency Chain
+The key must exist before the insert guard can compare keys, and the insert guard
+must exist before there are skipped rows to log. The chain is therefore key, then
+guard, then log.
+
+# Risks and Mitigations
+The main risk is an over-broad key that merges two genuinely different people;
+the mitigation is to key on both email and phone rather than either alone, and to
+assert the exact expected unique count in the test suite.
+
+# Appendix
+Sample inputs total 57 rows and are expected to reduce to 41 unique contacts.
+</PRD>
