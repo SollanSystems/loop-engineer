@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import metrics
 from loop import emit
 from loop.contract import validate_contract
 
@@ -22,6 +23,14 @@ def workspace(tmp_path):
 
 def test_open_contract_is_doctor_clean(workspace):
     assert validate_contract(workspace)["ok"] is True
+
+
+def test_open_contract_is_metrics_clean(workspace):
+    # The seeded RUNLOG is reference-only prose — no `## Iteration` block, so a
+    # fresh scaffold must score zero iterations and no outcome tokens.
+    scorecard = metrics.compute_metrics(workspace)
+    assert scorecard["provenance"]["unrecognized_outcomes"] == []
+    assert scorecard["iterations_claiming_success"] == 0
 
 
 def test_append_iteration_writes_parseable_runlog_and_updates_state(workspace):

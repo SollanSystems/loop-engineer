@@ -153,12 +153,6 @@ def certify_workflow_failure(workspace: str, cause: BaseException | None) -> dic
 
 async def run_and_certify(client: Client, workspace: str, *, sabotage: bool, wf_id: str) -> dict:
     emit.open_contract(workspace)
-    # The fresh scaffold's RUNLOG carries a placeholder example iteration (its
-    # unfilled outcome renders as "REPLACE"); start the demo's run history clean
-    # so `loop metrics` scores only the workflow's own iterations.
-    (Path(workspace) / "RUNLOG.md").write_text(
-        f"# RUNLOG.md — {Path(workspace).name}\n", encoding="utf-8"
-    )
     try:
         return await client.execute_workflow(
             CertifiedGoalWorkflow.run, WorkArgs(workspace=workspace, sabotage=sabotage),

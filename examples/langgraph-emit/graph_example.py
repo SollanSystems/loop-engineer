@@ -99,12 +99,6 @@ def certify(state: State) -> dict:
 
 def main(workspace: str, sabotage: bool) -> int:
     emit.open_contract(workspace)
-    # The fresh scaffold's RUNLOG carries a placeholder example iteration (its
-    # unfilled outcome renders as "REPLACE"); start the demo's run history clean
-    # so `loop metrics` scores only the graph's own iterations.
-    (Path(workspace) / "RUNLOG.md").write_text(
-        f"# RUNLOG.md — {Path(workspace).name}\n", encoding="utf-8"
-    )
     graph = (
         StateGraph(State)
         .add_node(do_work)

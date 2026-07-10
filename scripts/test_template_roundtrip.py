@@ -90,21 +90,8 @@ def _fill_values() -> dict[str, str]:
         "ARTIFACT_PATH": ".loop/artifacts/verify-T1.json",
         "FALSE_COMPLETION": "false",     # boolean
         "TERMINAL_REASON": "fast gate passed with evidence",
-        # --- RUNLOG.md prose ---
-        "ITERATION_DATE": "2026-06-30",
-        "STATE_NAME": "running",
-        "ACTION_1": "ran the fast gate",
-        "ACTION_2": "recorded evidence",
-        "VERIFY_GATE": "verify-fast",
-        "VERIFY_OUTCOME": "PASS",
-        "VERIFY_CMD": "scripts/verify-fast",
-        "SCORE_BEFORE": "0.0",
-        "SCORE_AFTER": "1.0",
-        "ITERATION_OUTCOME": "task_passed",
-        "REPAIR_ACTION": "n/a",
-        "REPAIR_ATTEMPT": "0",
-        "IMPROVEMENT_FLAG": "n/a",
-        "ITERATION_NOTES": "clean first pass",
+        # RUNLOG.md seeds a reference-only preamble that declares only
+        # {{PROJECT_NAME}}, so it needs no per-iteration prose fill.
         # --- SPEC / WORKFLOW / AGENTS / EVALS prose ---
         "NON_GOAL_1": "no production writes",
         "NON_GOAL_2": "no schema changes",
