@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Covers .github/workflows/*.yml and the root composite action.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Runtime is stdlib-only; this watches the optional extras and any future pins.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
