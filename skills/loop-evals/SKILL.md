@@ -1,6 +1,6 @@
 ---
 name: loop-evals
-description: "Design the evaluation harness for an agent loop — the proof layer that makes a loop trustworthy instead of merely confident. Use when asked to evaluate a loop, build an eval/verification harness or suite, measure how well a loop or agent system works, decide what to test, catch false completions, or grade a long-running agentic run. Lays out the 7-layer eval suite, makes false-completion-rate and repair-productivity first-class metrics, enforces deterministic-first-then-rubric, calibrates the judge, and keeps the regression harness repo-native. Delegates the deterministic gate to the contract's own verify scripts (with /verify-slice as an optional upgrade) — it designs the criteria, it does not build a new verification engine."
+description: "Design the evaluation harness for an agent loop — the proof layer that makes a loop trustworthy instead of merely confident. Use when asked to evaluate a loop, build an eval/verification harness or suite, measure how well a loop or agent system works, decide what to test, catch false completions, or grade a run's outcome against its SPEC. Delegates the deterministic gate to the contract's own verify scripts (with /verify-slice as an optional upgrade) — it designs the criteria, it does not build a new verification engine."
 ---
 
 # loop-evals — design the harness that proves the loop
