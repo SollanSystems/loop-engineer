@@ -1,19 +1,20 @@
-# Ephemeral workbench
-.tmp/
+# Ephemeral workbench (root-anchored: examples/*-run fixtures may legitimately
+# contain same-named dirs — .claude/, .taskmaster/, memory/ — that MUST track)
+/.tmp/
 
 # Loop run telemetry (operating-contract state for the self-improvement run; not plugin content)
-.loop/
+/.loop/
 
 # Machine-local Claude Code config + GSD audit telemetry (not plugin content)
-.claude/
-.gsd/
+/.claude/
+/.gsd/
 
 # Local session memory / private build narrative (not plugin content)
-memory/
+/memory/
 
 # Workbench dirs (review scratch + roadmap drafts; not plugin content)
-review/
-roadmap/
+/review/
+/roadmap/
 
 # Python
 __pycache__/

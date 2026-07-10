@@ -1,0 +1,22 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python 3.11, standard-library csv module, pytest.
+  Data source: two operator-maintained contact export files that overlap.
+  Product language: describe observable import behavior and the record that
+  survives a collision, not the internal loop that produces it.
+  Constraint: the importer must stay re-runnable — a second pass over the
+  same inputs adds no rows.
+
+rules:
+  proposal:
+    - State the duplicate-row symptom in terms an operator would report.
+    - Name the surviving record explicitly rather than saying "the correct one".
+  specs:
+    - Give every requirement at least one WHEN/THEN scenario.
+    - Include a scenario for the idempotent second run.
+  design:
+    - Record why the collision key is case-folded, not just that it is.
+  tasks:
+    - Keep each task independently checkable.
+    - Close with a Verification section that runs the tests and a manual smoke.

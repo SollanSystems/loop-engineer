@@ -98,10 +98,11 @@ That path is worked end-to-end for a real engine in
 
 ## This is a seed
 
-This is the first entry in an "inspect N public harnesses" scoreboard: read a
-foreign layout read-only, name the gaps a contract would close, keep every
-claim checkable against a vendored fixture. Contributions of further gap
-reports are welcome — this file is the template. See the drafted contributor
+This was the first entry in the "inspect N public harnesses" scoreboard —
+now live at [`scoreboard.md`](scoreboard.md) with nine harnesses read the same
+way: a foreign layout read read-only, the gaps a contract would close named,
+every claim checkable against a vendored fixture. Contributions of further gap
+reports are welcome — this file is the deep-dive template. See the drafted contributor
 issue
 [`docs/contributing/issues/06-help-wanted-gap-reports.md`](../contributing/issues/06-help-wanted-gap-reports.md)
 (`help wanted: gap reports`, filed on GitHub at release).

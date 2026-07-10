@@ -1,0 +1,30 @@
+{
+  "loop_id": "prp-loop-2026-07-09T14:01:55Z",
+  "feature": "Deduplicate contact imports by a normalized email+phone key",
+  "stage": "done",
+  "cycle": 0,
+  "max_cycles": 3,
+  "max_implement_iterations": 10,
+  "clean_bar": "Critical or Important",
+  "validate_cmd": "pytest -q",
+  "until": null,
+  "base": "main",
+  "status": "done",
+  "artifacts": {
+    "plan_path": ".claude/PRPs/plans/csv-dedupe.plan.md",
+    "branch": "feature/csv-dedupe",
+    "pr_number": 42,
+    "pr_url": "https://github.com/example-org/contacts-tool/pull/42",
+    "review_verdicts": [
+      ".claude/PRPs/reviews/pr-42-cycle-0.verdict.json"
+    ]
+  },
+  "history": [
+    { "stage": "plan", "cycle": 0, "result": "ok", "at": "2026-07-09T14:05:03Z" },
+    { "stage": "implement", "cycle": 0, "result": "green@2", "at": "2026-07-09T14:48:19Z" },
+    { "stage": "pr", "cycle": 0, "result": "#42", "at": "2026-07-09T14:52:40Z" },
+    { "stage": "review", "cycle": 0, "result": "clean", "at": "2026-07-09T15:19:07Z" }
+  ],
+  "started_at": "2026-07-09T14:01:55Z",
+  "updated_at": "2026-07-09T15:19:07Z"
+}

@@ -1,0 +1,10 @@
+[prp-loop] STAGE plan
+[prp-loop] plan -> .claude/PRPs/plans/csv-dedupe.plan.md
+[prp-loop] STAGE implement
+[prp-loop] implement iteration 1/10 (cycle 0)
+[prp-loop] implement iteration 2/10 (cycle 0)
+[prp-loop] STAGE pr
+[prp-loop] pr -> #42 https://github.com/example-org/contacts-tool/pull/42
+[prp-loop] STAGE review
+[prp-loop] review CLEAN — pipeline complete
+[prp-loop] DONE. PR: https://github.com/example-org/contacts-tool/pull/42

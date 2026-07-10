@@ -1,0 +1,37 @@
+{
+	"meta": {
+		"generatedAt": "2026-07-09T14:05:31.000Z",
+		"tasksAnalyzed": 3,
+		"totalTasks": 3,
+		"analysisCount": 3,
+		"thresholdScore": 5,
+		"projectName": "csv-dedupe",
+		"usedResearch": false
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "Build the normalization key",
+			"complexityScore": 3,
+			"recommendedSubtasks": 1,
+			"expansionPrompt": "Break the normalization key into implementing normalize_key with lowercase and strip, then covering it with mixed-case and whitespace fixtures.",
+			"reasoning": "A small pure function with a clear contract; the only real work is choosing which fields to fold and writing thorough casing fixtures."
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "Make the import idempotent",
+			"complexityScore": 4,
+			"recommendedSubtasks": 1,
+			"expansionPrompt": "Break the idempotency work into guarding the insert on a seen-key set and asserting a second import inserts zero rows.",
+			"reasoning": "Depends on the key and touches the insert path, but the logic is a single set membership check with a count, so complexity stays low."
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "Log dropped duplicates",
+			"complexityScore": 3,
+			"recommendedSubtasks": 1,
+			"expansionPrompt": "Break the logging work into appending one audit line per skipped row and verifying the recorded source line numbers resolve.",
+			"reasoning": "Straightforward append-only logging; the only care needed is carrying the source file and line number through to the skip point."
+		}
+	]
+}

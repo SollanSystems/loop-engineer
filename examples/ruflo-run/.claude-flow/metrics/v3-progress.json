@@ -1,0 +1,26 @@
+{
+  "version": "3.0.0",
+  "initialized": "2026-07-09T14:02:11Z",
+  "domains": {
+    "completed": 1,
+    "total": 1,
+    "status": "COMPLETE"
+  },
+  "ddd": {
+    "progress": 100,
+    "modules": 1,
+    "totalFiles": 3,
+    "totalLines": 214
+  },
+  "swarm": {
+    "activeAgents": 0,
+    "maxAgents": 8,
+    "topology": "hierarchical-mesh"
+  },
+  "learning": {
+    "status": "READY",
+    "patternsLearned": 3,
+    "sessionsCompleted": 1
+  },
+  "_note": "Snapshot after the csv-dedupe feature closed; agents drained back to idle."
+}

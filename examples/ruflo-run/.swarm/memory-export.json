@@ -1,0 +1,78 @@
+{
+  "schema": "ruflo-memory-export/v1",
+  "exportedAt": "2026-07-09T14:16:03Z",
+  "namespace": null,
+  "count": 7,
+  "entries": [
+    {
+      "key": "spec-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"requirements\":{\"functional\":[\"FR-1: collapse rows sharing a normalized email+phone key to one retained row\",\"FR-2: keep the first-seen row and discard later duplicates\",\"FR-3: append each dropped row and its source line number to dedupe.log\"],\"nonFunctional\":[\"NFR-1: a re-run over unchanged input inserts zero additional rows\"]},\"acceptanceCriteria\":[\"AC-1: Given the two seed files, when the import runs, then 41 unique contacts remain from 57 input rows\",\"AC-2: Given a completed import, when the same files import again, then zero new rows are written\",\"AC-3: Given a dropped duplicate, when it is skipped, then its source file and line number appear in dedupe.log\"],\"constraints\":[\"case-insensitive match on email and phone only\",\"retention order is first-seen wins\",\"no external service calls during import\"],\"edgeCases\":[\"EC-1: a row missing either email or phone\",\"EC-2: the same contact repeated three times across both files\",\"EC-3: whitespace-padded values that normalize to an existing key\"],\"integrationPoints\":[\"IP-1: src/import_contacts.py write path into the contacts table\"]}",
+      "createdAt": "2026-07-09T14:04:18Z",
+      "updatedAt": "2026-07-09T14:04:18Z",
+      "accessCount": 5,
+      "hasEmbedding": true,
+      "size": 1024
+    },
+    {
+      "key": "pseudo-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"algorithms\":[\"track a set of seen keys; for each row compute normalize_key(email, phone); insert only when the key is absent, otherwise log and skip\"],\"dataStructures\":[\"seen: set of (email, phone) string tuples\",\"dropped: list of (source_file, line_no) records\"],\"controlFlow\":[\"happy path: unseen key -> insert -> mark seen\",\"duplicate: known key -> append to dedupe.log -> continue\",\"missing field: normalize to an empty component -> still keyed and deduped\"],\"complexity\":{\"time\":\"O(n) over input rows\",\"space\":\"O(u) for u unique keys\"}}",
+      "createdAt": "2026-07-09T14:06:52Z",
+      "updatedAt": "2026-07-09T14:06:52Z",
+      "accessCount": 3,
+      "hasEmbedding": true,
+      "size": 612
+    },
+    {
+      "key": "arch-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"boundedContexts\":[\"contact-import\"],\"apiContracts\":[\"normalize_key(email: str, phone: str) -> tuple[str, str]\",\"dedupe_rows(rows: Iterable[Row]) -> DedupeResult\"],\"moduleBoundaries\":{\"entry\":\"src/import_contacts.py\",\"noCircularDeps\":true},\"infrastructure\":{\"persistence\":\"append-only dedupe.log plus the contacts table\",\"messaging\":\"none\",\"config\":\"seed file paths passed as arguments\"}}",
+      "createdAt": "2026-07-09T14:08:40Z",
+      "updatedAt": "2026-07-09T14:08:40Z",
+      "accessCount": 3,
+      "hasEmbedding": true,
+      "size": 520
+    },
+    {
+      "key": "refine-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"reviewFindings\":[{\"severity\":\"medium\",\"note\":\"strip surrounding whitespace before lowercasing so padded values collapse to the same key\",\"resolved\":true}],\"coveragePercent\":92,\"performanceResults\":{\"rows\":57,\"durationMs\":38},\"iterations\":2}",
+      "createdAt": "2026-07-09T14:11:29Z",
+      "updatedAt": "2026-07-09T14:12:07Z",
+      "accessCount": 4,
+      "hasEmbedding": true,
+      "size": 336
+    },
+    {
+      "key": "complete-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"traceabilityMatrix\":[{\"ac\":\"AC-1\",\"test\":\"test_dedupe_yields_41_unique\",\"code\":\"src/import_contacts.py:44\",\"status\":\"Pass\"},{\"ac\":\"AC-2\",\"test\":\"test_second_run_is_idempotent\",\"code\":\"src/import_contacts.py:71\",\"status\":\"Pass\"},{\"ac\":\"AC-3\",\"test\":\"test_dropped_rows_are_logged\",\"code\":\"src/import_contacts.py:58\",\"status\":\"Pass\"}],\"documentationFiles\":[\"docs/import-contacts.md\"],\"deploymentChecklist\":{\"testsPassing\":true,\"documentationComplete\":true,\"migrationsPrepared\":false,\"rollbackPlanDefined\":true,\"securityReviewed\":true},\"regressionResult\":\"pass\"}",
+      "createdAt": "2026-07-09T14:14:20Z",
+      "updatedAt": "2026-07-09T14:14:20Z",
+      "accessCount": 2,
+      "hasEmbedding": true,
+      "size": 704
+    },
+    {
+      "key": "current-phase-csv-dedupe",
+      "namespace": "sparc-state",
+      "value": "{\"feature\":\"csv-dedupe\",\"currentPhase\":\"completion\",\"phaseNumber\":5,\"status\":\"complete\",\"artifacts\":[\"spec-csv-dedupe\",\"pseudo-csv-dedupe\",\"arch-csv-dedupe\",\"refine-csv-dedupe\",\"complete-csv-dedupe\"]}",
+      "createdAt": "2026-07-09T14:04:18Z",
+      "updatedAt": "2026-07-09T14:14:20Z",
+      "accessCount": 9,
+      "hasEmbedding": false,
+      "size": 232
+    },
+    {
+      "key": "gates-csv-dedupe",
+      "namespace": "sparc-gates",
+      "value": "{\"feature\":\"csv-dedupe\",\"gates\":[{\"phase\":1,\"name\":\"specification\",\"result\":\"pass\",\"criteria\":\"3 acceptance criteria plus constraints and edge cases recorded\"},{\"phase\":2,\"name\":\"pseudocode\",\"result\":\"pass\",\"criteria\":\"all ACs covered, error paths explicit\"},{\"phase\":3,\"name\":\"architecture\",\"result\":\"pass\",\"criteria\":\"typed contracts, no circular dependencies\"},{\"phase\":4,\"name\":\"refinement\",\"result\":\"pass\",\"coverage\":92,\"criteria\":\"all ACs have passing tests, review approved, coverage >= 80%\"},{\"phase\":5,\"name\":\"completion\",\"result\":\"pass\",\"truthScore\":0.97,\"criteria\":\"all tests green, docs complete, deployment checklist verified\"}]}",
+      "createdAt": "2026-07-09T14:05:02Z",
+      "updatedAt": "2026-07-09T14:14:31Z",
+      "accessCount": 6,
+      "hasEmbedding": false,
+      "size": 720
+    }
+  ]
+}
