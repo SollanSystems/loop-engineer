@@ -6,22 +6,24 @@ import sys
 from pathlib import Path
 
 from .contract import VALIDATION_MODES, ValidationModeError, doctor_report
+from .plan import validate_plan
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics")
+_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics> <workspace-or-.loop>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
 {_USAGE}
        {_PROG} metrics [--baseline] <workspace-or-.loop>
        {_PROG} doctor|validate|verify [--mode basic|strict|release] <workspace-or-.loop>
+       {_PROG} plan-lint [--mode basic|strict|release] <plan-file>
 
 commands:
   scaffold   Write a fresh, doctor-clean loop contract into <target>.
@@ -34,14 +36,18 @@ commands:
              real .loop/ evidence (RUNLOG, verify bundles, held-out gate, repair
              records) and emit a JSON scorecard. With --baseline, write a
              checked-in baseline scorecard — refused unless the run is gate-backed.
+  plan-lint  Validate a loop-engineer/plan@1 Loop Plan IR document: task-kind
+             fields, dependency-graph acyclicity, and the terminal-state
+             mapping. --mode selects validation strength, same as doctor.
 
 arguments:
-  <target>   A workspace root or its .loop/ directory.
+  <target>     A workspace root or its .loop/ directory (all commands except plan-lint).
+  <plan-file>  A single loop-engineer/plan@1 JSON file (plan-lint only).
 
 options:
   --mode {{basic,strict,release}}
-                (doctor/validate/verify only) basic forces structural checks;
-                strict/release require jsonschema. Default: auto-detect.
+                (doctor/validate/verify/plan-lint only) basic forces structural
+                checks; strict/release require jsonschema. Default: auto-detect.
   --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
                 run; exits non-zero and writes nothing otherwise.
   -h, --help    Show this help and exit.
@@ -155,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     mode = None
-    if command in {"doctor", "validate", "verify"}:
+    if command in {"doctor", "validate", "verify", "plan-lint"}:
         try:
             mode, argv = _extract_mode_flag(argv)
         except ValueError as exc:
@@ -175,12 +181,14 @@ def main(argv: list[str] | None = None) -> int:
     target = Path(argv[0])
 
     if command in _READ_COMMANDS and not target.exists():
-        print(
-            f"{command}: target path does not exist: {target}\n"
-            f"       pass an existing workspace root or its .loop/ directory "
-            f"(run `{_PROG} scaffold {target}` to create a new contract).",
-            file=sys.stderr,
-        )
+        if command == "plan-lint":
+            hint = "pass an existing loop-engineer/plan@1 JSON file"
+        else:
+            hint = (
+                f"pass an existing workspace root or its .loop/ directory "
+                f"(run `{_PROG} scaffold {target}` to create a new contract)"
+            )
+        print(f"{command}: target path does not exist: {target}\n       {hint}.", file=sys.stderr)
         return 2
 
     if command == "scaffold":
@@ -197,6 +205,13 @@ def main(argv: list[str] | None = None) -> int:
     if command in {"doctor", "validate", "verify"}:
         try:
             return _print_json(doctor_report(target, mode=mode))
+        except ValidationModeError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            return 2
+
+    if command == "plan-lint":
+        try:
+            return _print_json(validate_plan(target, mode=mode))
         except ValidationModeError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
             return 2

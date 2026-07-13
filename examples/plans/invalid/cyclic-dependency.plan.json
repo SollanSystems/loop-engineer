@@ -1,0 +1,11 @@
+{
+  "schema": "loop-engineer/plan@1",
+  "goal": "Deliberately invalid fixture: exercises loop/plan.py's cycle detector.",
+  "acceptance_criteria": [{ "id": "AC1", "description": "unreachable — this plan is intentionally cyclic" }],
+  "tasks": [
+    { "id": "task-a", "kind": "tool", "title": "A", "depends_on": ["task-c"], "tool_name": "noop", "verify": "true" },
+    { "id": "task-b", "kind": "tool", "title": "B", "depends_on": ["task-a"], "tool_name": "noop", "verify": "true" },
+    { "id": "task-c", "kind": "tool", "title": "C", "depends_on": ["task-b"], "tool_name": "noop", "verify": "true" }
+  ],
+  "terminal_state_mapping": { "success": "Succeeded", "failure": "FailedUnverifiable" }
+}

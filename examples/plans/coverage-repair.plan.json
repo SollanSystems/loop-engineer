@@ -1,0 +1,32 @@
+{
+  "schema": "loop-engineer/plan@1",
+  "goal": "Eliminate the known flaky-test cluster in the coverage-repair example without weakening any existing assertion.",
+  "constraints": ["no new third-party test dependencies", "must not increase full-suite runtime by more than 10%"],
+  "acceptance_criteria": [
+    { "id": "AC1", "description": "All previously flaky tests pass 20/20 consecutive runs" },
+    { "id": "AC2", "description": "No regression in the existing suite" }
+  ],
+  "tasks": [
+    { "id": "collect-logs", "kind": "agent", "title": "Collect recent CI failure logs", "depends_on": [], "role": "read", "verify": "scripts/verify-fast" },
+    { "id": "diagnose-flakiness", "kind": "agent", "title": "Diagnose the flaky-test cluster", "depends_on": ["collect-logs"], "role": "reason", "verify": "scripts/verify-fast" },
+    { "id": "run-flaky-detector", "kind": "tool", "title": "Run the flaky-test detector", "depends_on": ["diagnose-flakiness"], "tool_name": "pytest-flaky-detector", "verify": "scripts/verify-fast" },
+    { "id": "repair-branch-a", "kind": "agent", "title": "Repair candidate A", "depends_on": ["run-flaky-detector"], "role": "write", "verify": "scripts/verify-full" },
+    { "id": "repair-branch-b", "kind": "agent", "title": "Repair candidate B", "depends_on": ["run-flaky-detector"], "role": "write", "verify": "scripts/verify-full" },
+    { "id": "join-repairs", "kind": "join", "title": "Join repair candidates", "depends_on": ["repair-branch-a", "repair-branch-b"], "join_on": ["repair-branch-a", "repair-branch-b"] },
+    { "id": "verify-fast-gate", "kind": "gate", "title": "Fast deterministic gate", "depends_on": ["join-repairs"], "verify": "scripts/verify-fast" },
+    { "id": "independent-review", "kind": "agent", "title": "Independent adversarial review", "depends_on": ["verify-fast-gate"], "role": "verify", "verify": "scripts/verify-safety" },
+    { "id": "ship-approval", "kind": "approval", "title": "Release sign-off", "depends_on": ["independent-review"], "approval_gate": "release-sign-off" },
+    { "id": "manual-changelog-entry", "kind": "human", "title": "Add CHANGELOG entry", "depends_on": ["ship-approval"], "instructions": "Add a one-line CHANGELOG entry summarizing the flaky-test fix once ship-approval is granted." },
+    { "id": "regression-sweep", "kind": "subloop", "title": "Full regression sweep", "depends_on": ["manual-changelog-entry"], "subloop_ref": "loop-engineer/plan@1:regression-sweep-v1" },
+    { "id": "succeeded", "kind": "terminal", "title": "Succeeded", "depends_on": ["regression-sweep"], "terminal_state": "Succeeded" }
+  ],
+  "completion_policy": { "mode": "all_required" },
+  "terminal_state_mapping": {
+    "success": "Succeeded", "budget_exhausted": "FailedBudget", "verifier_veto": "FailedSafety", "unresolvable_flake": "FailedUnverifiable", "external_ci_outage": "FailedBlocked", "spec_ambiguous": "FailedSpecGap", "operator_abort": "AbortedByHuman"
+  },
+  "approval_gates": ["release-sign-off"],
+  "verifiers": ["scripts/verify-fast", "scripts/verify-full", "scripts/verify-safety"],
+  "budgets": { "max_iterations": 12, "wall_clock_minutes": 90 },
+  "defaults": { "retry": { "max_attempts": 2, "backoff": "exponential", "timeout_seconds": 600 } },
+  "model_policy": { "read": "fast_low_cost", "reason": "deep_reasoning", "write": "code_generation", "verify": "independent_review" }
+}

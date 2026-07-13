@@ -240,3 +240,62 @@ def test_mode_is_not_consumed_by_other_commands(tmp_path):
     )
     assert result.returncode == 0
     assert (tmp_path / "--mode").is_dir()
+
+
+def test_help_lists_plan_lint_command():
+    assert "plan-lint" in _run("--help").stdout
+
+
+def test_help_documents_plan_lint_mode_flag():
+    assert "plan-lint [--mode basic|strict|release] <plan-file>" in _run("--help").stdout
+
+
+def test_plan_lint_missing_target_argument_prints_usage_and_exits_nonzero():
+    result = _run("plan-lint")
+    assert result.returncode != 0
+    assert "usage" in result.stderr.lower()
+    assert "Traceback" not in result.stderr
+
+
+def test_plan_lint_nonexistent_file_gives_distinct_actionable_error(tmp_path):
+    missing = tmp_path / "does-not-exist.plan.json"
+    result = _run("plan-lint", str(missing))
+    assert result.returncode != 0
+    assert "loop-engineer/plan@1 JSON file" in result.stderr
+    assert "scaffold" not in result.stderr
+
+
+def test_plan_lint_valid_golden_example_exits_zero():
+    import importlib.util
+
+    mode = "release" if importlib.util.find_spec("jsonschema") is not None else "basic"
+    result = _run("plan-lint", "--mode", mode, "examples/plans/coverage-repair.plan.json")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["ok"] is True
+
+
+def test_plan_lint_cyclic_example_exits_nonzero():
+    result = _run("plan-lint", "examples/plans/invalid/cyclic-dependency.plan.json")
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report["ok"] is False
+    assert any(issue["code"] == "cyclic_dependency" for issue in report["issues"])
+
+
+def test_plan_lint_basic_mode_also_catches_cycle():
+    result = _run("plan-lint", "--mode", "basic", "examples/plans/invalid/cyclic-dependency.plan.json")
+    assert result.returncode == 1
+    assert any(issue["code"] == "cyclic_dependency" for issue in json.loads(result.stdout)["issues"])
+
+
+def test_plan_lint_reports_plan_schema_id():
+    result = _run("plan-lint", "--mode", "basic", "examples/plans/coverage-repair.plan.json")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["schemas_checked"] == ["loop-engineer/plan@1"]
+
+
+def test_plan_lint_accepts_mode_flag_like_doctor():
+    result = _run("plan-lint", "--mode", "bogus", "examples/plans/coverage-repair.plan.json")
+    assert result.returncode == 2
+    assert "usage" in result.stderr.lower()
+    assert "Traceback" not in result.stderr

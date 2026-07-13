@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/plan@1",
+  "title": "Loop Engineer Plan @1",
+  "description": "The Loop Plan IR (ADR 0001): a canonical, validated description of a goal, its tasks, and its policies that an execution runtime interprets. Kernel-validated only in v1 — not yet an artifact `loop doctor` reads from a scaffolded workspace; see reference/repo-os-contract.md #15. Cross-field rules JSON Schema cannot express (dependency-graph acyclicity, task-id/criterion-id uniqueness, per-kind required fields, terminal-state-mapping vocabulary, approval-gate referential integrity) are enforced by loop/plan.py in both validation modes.",
+  "type": "object",
+  "required": ["schema", "goal", "acceptance_criteria", "tasks", "terminal_state_mapping"],
+  "properties": {
+    "schema": { "const": "loop-engineer/plan@1" },
+    "goal": { "type": "string", "minLength": 1 },
+    "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "acceptance_criteria": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "description"], "properties": { "id": { "type": "string", "minLength": 1 }, "description": { "type": "string", "minLength": 1 } }, "additionalProperties": true } },
+    "tasks": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "kind", "title", "depends_on"], "properties": { "id": { "type": "string", "minLength": 1 }, "kind": { "enum": ["agent", "tool", "gate", "approval", "join", "subloop", "human", "terminal"] }, "title": { "type": "string", "minLength": 1 }, "depends_on": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "role": { "enum": ["read", "reason", "write", "verify"] }, "verify": { "type": "string", "minLength": 1 }, "tool_name": { "type": "string", "minLength": 1 }, "approval_gate": { "type": "string", "minLength": 1 }, "join_on": { "type": "array", "minItems": 2, "items": { "type": "string", "minLength": 1 } }, "subloop_ref": { "type": "string", "minLength": 1 }, "instructions": { "type": "string", "minLength": 1 }, "terminal_state": { "enum": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"] }, "retry": { "type": "object", "properties": { "max_attempts": { "type": "integer", "minimum": 0 }, "backoff": { "enum": ["none", "fixed", "exponential"] }, "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 } }, "additionalProperties": true } }, "additionalProperties": true } },
+    "completion_policy": { "type": ["object", "null"], "required": ["mode"], "properties": { "mode": { "const": "all_required" } }, "additionalProperties": false, "default": { "mode": "all_required" } },
+    "terminal_state_mapping": { "type": "object", "minProperties": 1, "propertyNames": { "type": "string", "minLength": 1 }, "additionalProperties": { "enum": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"] } },
+    "approval_gates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "verifiers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "budgets": { "type": "object" },
+    "defaults": { "type": "object", "properties": { "retry": { "type": "object", "properties": { "max_attempts": { "type": "integer", "minimum": 0 }, "backoff": { "enum": ["none", "fixed", "exponential"] }, "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 } }, "additionalProperties": true } }, "additionalProperties": true },
+    "model_policy": { "type": "object", "properties": { "read": { "enum": ["fast_low_cost", "deep_reasoning", "code_generation", "independent_review"] }, "reason": { "enum": ["fast_low_cost", "deep_reasoning", "code_generation", "independent_review"] }, "write": { "enum": ["fast_low_cost", "deep_reasoning", "code_generation", "independent_review"] }, "verify": { "enum": ["fast_low_cost", "deep_reasoning", "code_generation", "independent_review"] } }, "additionalProperties": false }
+  },
+  "additionalProperties": true
+}

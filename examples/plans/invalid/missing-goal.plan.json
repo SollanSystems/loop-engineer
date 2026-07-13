@@ -1,0 +1,6 @@
+{
+  "schema": "loop-engineer/plan@1",
+  "acceptance_criteria": [{ "id": "AC1", "description": "n/a" }],
+  "tasks": [{ "id": "only-task", "kind": "human", "title": "Manual step", "depends_on": [], "instructions": "n/a" }],
+  "terminal_state_mapping": { "success": "Succeeded" }
+}

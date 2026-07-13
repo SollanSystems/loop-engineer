@@ -92,3 +92,14 @@ def test_both_console_scripts_are_installed(wheel_env, tmp_path):
         proc = subprocess.run([str(exe), "--version"], cwd=tmp_path, capture_output=True, text=True)
         assert proc.returncode == 0, f"{name}: {proc.stderr}"
         assert proc.stdout.strip()
+
+
+def test_plan_lint_from_wheel_only(wheel_env, tmp_path):
+    # No jsonschema in this venv (pip wheel --no-deps): proves plan-lint's
+    # structural-fallback mode genuinely runs from a repo-checkout-free install.
+    plan_file = REPO_ROOT / "examples" / "plans" / "coverage-repair.plan.json"
+    result = _run(wheel_env, ["plan-lint", str(plan_file)], cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["ok"] is True
+    assert report["validation_mode"] == "structural-fallback"

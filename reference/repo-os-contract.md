@@ -544,6 +544,42 @@ land silently.
 
 ---
 
+## 15. `loop-engineer/plan@1` — the Loop Plan IR
+
+`schemas/plan.schema.json` defines a canonical, validated description of a
+goal, its tasks, and its policies — the document a future execution runtime
+interprets (ADR 0001). It is authored and linted as a **standalone JSON
+file**, validated by `loop plan-lint <file>` / `loop.plan.validate_plan()`.
+
+**Scope boundary:** unlike manifest/state/tasks/terminal (§11), plan@1 is
+**not yet** an artifact `loop doctor` reads from a scaffolded workspace —
+it has no `.loop/`-relative home today. The execution-runtime milestone
+that materializes a plan into a live `TASKS.json` will make that call.
+
+**Task kinds:** `agent | tool | gate | approval | join | subloop | human |
+terminal` — each carries a common `id`/`kind`/`title`/`depends_on` base
+plus kind-specific required fields (`loop/plan.py::_KIND_REQUIRED_FIELDS`).
+
+**Capability-based model policy** (issue #56, ADR 0001 consequence 5): an
+optional top-level `model_policy` maps roles (`read`/`reason`/`write`/
+`verify`) to capabilities (`fast_low_cost`/`deep_reasoning`/
+`code_generation`/`independent_review`) — never a vendor model name. An
+`agent`-kind task declares a `role`; a provider profile resolves the
+capability to an actual model **outside** the portable contract, recorded
+to a receipt for reproducibility, not to the plan.
+
+**Cross-field rules JSON Schema cannot express** (enforced by
+`loop/plan.py`, in both validation modes): task-id and
+acceptance-criteria-id uniqueness, dangling `depends_on`/`join_on`
+references, dependency-graph acyclicity, per-kind required fields, and
+`approval_gates` referential integrity.
+
+Golden examples: `examples/plans/coverage-repair.plan.json` (valid, all 8
+kinds); `examples/plans/invalid/` (deliberately broken fixtures used by
+the negative tests).
+
+---
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents
