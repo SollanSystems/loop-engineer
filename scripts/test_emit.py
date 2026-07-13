@@ -1,9 +1,12 @@
-"""B1 acceptance: emit writes schema-valid artifacts by construction and refuses
-an evidence-free Succeeded at write time (G1 enforced before validate time)."""
+"""B1 acceptance: emit writes schema-valid artifacts by construction and
+refuses a Succeeded claim unless every required criterion has evidence-backed
+proof (G1 enforced before validate time)."""
 
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -43,7 +46,7 @@ def test_append_iteration_writes_parseable_runlog_and_updates_state(workspace):
     assert "`task_passed`" in text
 
     state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
-    assert state["iteration_id"] == "1"
+    assert state["iteration_id"] == 1
     assert state["active_task"] == "T1"
     assert validate_contract(workspace)["ok"] is True
 
@@ -71,12 +74,13 @@ def test_append_receipt_rejects_bad_role(workspace):
 
 def test_terminate_succeeded_with_evidence_passes_doctor(workspace):
     terminal = emit.terminate(
-        workspace, state="Succeeded", criteria_met={"1": True},
+        workspace, state="Succeeded", criteria_met={"1": True, "2": True},
         evidence=["artifact.txt"], reason="verified", iteration_id=1,
     )
     data = json.loads(terminal.read_text(encoding="utf-8"))
     assert data["schema"] == "loop-engineer/terminal@1"
     assert data["false_completion"] is False
+    assert data["completion_policy"] == {"mode": "all_required"}
     state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
     assert state["terminal_state"] == "Succeeded"
     assert validate_contract(workspace)["ok"] is True
@@ -87,6 +91,7 @@ def test_terminate_succeeded_with_evidence_passes_doctor(workspace):
     [
         dict(criteria_met={"1": True}, evidence=[]),                      # evidence-free
         dict(criteria_met={"1": False}, evidence=["a.txt"]),              # no met criterion
+        dict(criteria_met={"1": True, "2": False}, evidence=["a.txt"]),  # partial proof
         dict(criteria_met={}, evidence=["a.txt"]),                        # empty criteria
         dict(criteria_met={"1": True}, evidence=["a.txt"], false_completion=True),  # G1 contradiction
     ],
@@ -124,6 +129,34 @@ def test_writes_refused_without_a_contract(tmp_path):
         emit.append_iteration(tmp_path / "nowhere", iteration_id=1, outcome="task_passed")
 
 
+@pytest.mark.parametrize("iteration_id", [-1, True, "1"])
+def test_append_iteration_rejects_noncanonical_iteration_ids(workspace, iteration_id):
+    with pytest.raises(emit.EmitError, match="non-negative integer"):
+        emit.append_iteration(workspace, iteration_id=iteration_id, outcome="task_passed")
+
+
+def test_terminate_rejects_unsupported_completion_policy(workspace):
+    with pytest.raises(emit.EmitError, match="unsupported completion policy"):
+        emit.terminate(
+            workspace,
+            state="Succeeded",
+            criteria_met={"1": True},
+            evidence=["artifact.txt"],
+            completion_policy={"mode": "any_required"},
+        )
+
+
+def test_terminate_rejects_duplicate_or_blank_evidence(workspace):
+    for evidence in (["a.txt", "a.txt"], [""]):
+        with pytest.raises(emit.EmitError):
+            emit.terminate(
+                workspace,
+                state="FailedUnverifiable",
+                criteria_met={"1": False},
+                evidence=evidence,
+            )
+
+
 def _loop_leftovers(workspace):
     return sorted(p.name for p in (workspace / ".loop").rglob("*.tmp"))
 
@@ -141,29 +174,69 @@ def test_terminate_refuses_overwrite_of_existing_terminal(workspace):
             workspace, state="FailedBlocked", criteria_met={"1": False},
             evidence=[], reason="second",
         )
-    # names the written-once contract and the force escape hatch
-    assert "written once" in str(exc.value)
-    assert "force=True" in str(exc.value)
+    assert "immutable" in str(exc.value)
     # the refused call left the original terminal record byte-for-byte intact
     assert terminal_path.read_text(encoding="utf-8") == before
     assert not _loop_leftovers(workspace)
 
 
-def test_terminate_force_overwrites(workspace):
+def test_terminate_force_is_refused_and_preserves_original(workspace):
     emit.terminate(
         workspace, state="Succeeded", criteria_met={"1": True},
         evidence=["artifact.txt"], reason="first", iteration_id=1,
     )
-    emit.terminate(
-        workspace, state="FailedBlocked", criteria_met={"1": False},
-        evidence=[], reason="deliberate override", force=True,
-    )
-    data = json.loads((workspace / ".loop" / "terminal_state.json").read_text(encoding="utf-8"))
-    assert data["state"] == "FailedBlocked"
+    terminal_path = workspace / ".loop" / "terminal_state.json"
+    before = terminal_path.read_text(encoding="utf-8")
+
+    with pytest.raises(emit.EmitError, match="immutable"):
+        emit.terminate(
+            workspace, state="FailedBlocked", criteria_met={"1": False},
+            evidence=[], reason="deliberate override", force=True,
+        )
+
+    assert terminal_path.read_text(encoding="utf-8") == before
     state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
-    assert state["terminal_state"] == "FailedBlocked"
+    assert state["terminal_state"] == "Succeeded"
     assert not _loop_leftovers(workspace)
 
+
+
+def test_concurrent_terminators_create_exactly_one_terminal(workspace):
+    barrier = threading.Barrier(2)
+
+    def attempt(state, criteria_met, evidence):
+        barrier.wait()
+        try:
+            emit.terminate(
+                workspace,
+                state=state,
+                criteria_met=criteria_met,
+                evidence=evidence,
+                reason=f"candidate {state}",
+                iteration_id=1,
+            )
+        except emit.EmitError as exc:
+            return ("refused", str(exc))
+        return ("created", state)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            pool.submit(attempt, "Succeeded", {"1": True}, ["artifact.txt"]),
+            pool.submit(attempt, "FailedBlocked", {"1": False}, []),
+        ]
+        outcomes = [future.result() for future in results]
+
+    assert [kind for kind, _ in outcomes].count("created") == 1
+    assert [kind for kind, _ in outcomes].count("refused") == 1
+    assert "immutable" in next(message for kind, message in outcomes if kind == "refused")
+
+    terminal_path = workspace / ".loop" / "terminal_state.json"
+    terminal = json.loads(terminal_path.read_text(encoding="utf-8"))
+    winner = next(value for kind, value in outcomes if kind == "created")
+    assert terminal["state"] == winner
+    state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
+    assert state["terminal_state"] == winner
+    assert not _loop_leftovers(workspace)
 
 def test_terminate_leaves_no_tmp_litter_on_success(workspace):
     emit.terminate(
@@ -184,4 +257,43 @@ def test_terminate_leaves_no_tmp_litter_on_invalid_terminate(workspace):
 
 def test_append_iteration_leaves_no_tmp_litter(workspace):
     emit.append_iteration(workspace, iteration_id=1, outcome="task_passed", task_id="T1")
+    assert not _loop_leftovers(workspace)
+
+
+def test_sync_state_to_terminal_reconciles_unstamped_state(workspace):
+    emit.terminate(
+        workspace, state="Succeeded", criteria_met={"1": True},
+        evidence=["artifact.txt"], reason="ok", iteration_id=1,
+    )
+    terminal_path = workspace / ".loop" / "terminal_state.json"
+    before = terminal_path.read_text(encoding="utf-8")
+    state_path = workspace / ".loop" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["terminal_state"] = None
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+    synced = emit.sync_state_to_terminal(workspace)
+
+    assert synced == state_path
+    assert json.loads(state_path.read_text(encoding="utf-8"))["terminal_state"] == "Succeeded"
+    assert terminal_path.read_text(encoding="utf-8") == before
+    assert not _loop_leftovers(workspace)
+
+
+def test_sync_state_to_terminal_requires_a_terminal_record(workspace):
+    with pytest.raises(emit.EmitError, match="nothing to sync"):
+        emit.sync_state_to_terminal(workspace)
+
+
+def test_terminate_wraps_link_failure_as_emit_error(workspace, monkeypatch):
+    def _refuse_link(src, dst):
+        raise PermissionError("hard links not supported")
+
+    monkeypatch.setattr(emit.os, "link", _refuse_link)
+    with pytest.raises(emit.EmitError, match="terminal write failed"):
+        emit.terminate(
+            workspace, state="Succeeded", criteria_met={"1": True},
+            evidence=["artifact.txt"], reason="ok", iteration_id=1,
+        )
+    assert not (workspace / ".loop" / "terminal_state.json").exists()
     assert not _loop_leftovers(workspace)

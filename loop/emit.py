@@ -1,8 +1,8 @@
 """Writer API for foreign runtimes (B1). A writer, never a runtime: it renders
 contract artifacts and refuses dishonest ones — no orchestration, no execution.
 
-The G1 cross-check (a Succeeded terminal needs evidence and a met criterion)
-is enforced HERE, at write time, before doctor ever sees the file.
+The G1 cross-check (a Succeeded terminal needs evidence and every required
+criterion) is enforced HERE, at write time, before doctor ever sees the file.
 """
 
 from __future__ import annotations
@@ -14,6 +14,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from .completion import (
+    CompletionPolicyError,
+    criteria_satisfy_completion,
+    normalize_completion_policy,
+    unmet_required_criteria,
+)
 from .contract import (
     TERMINAL_STATES,
     _validate_record,
@@ -72,6 +78,8 @@ def _atomic_write_text(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp_name, path)
     except BaseException:
         try:
@@ -79,6 +87,35 @@ def _atomic_write_text(path: Path, text: str) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def _atomic_create_text(path: Path, text: str) -> None:
+    """Create ``path`` exactly once from a fully-written same-directory temp file.
+
+    The hard-link step is atomic and refuses an existing destination, closing the
+    check-then-replace race that would otherwise let concurrent terminators
+    overwrite one another.  The destination never names a partially-written file.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.link(tmp_name, path)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+
+
+def _require_iteration_id(value: object, *, optional: bool = False) -> int | None:
+    if optional and value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise EmitError("iteration_id must be a non-negative integer")
+    return value
 
 
 def _write_state(paths, state: dict[str, Any]) -> None:
@@ -101,6 +138,7 @@ def append_iteration(
     .loop/state.json's iteration_id/active_task."""
     if outcome not in _ITERATION_OUTCOMES:
         raise EmitError(f"unknown iteration outcome {outcome!r}; expected one of {_ITERATION_OUTCOMES}")
+    _require_iteration_id(iteration_id)
     paths = _require_contract(target)
 
     lines = [
@@ -139,7 +177,7 @@ def append_iteration(
         fh.write("\n".join(lines))
 
     state = _read_state(paths)
-    state["iteration_id"] = str(iteration_id)
+    state["iteration_id"] = iteration_id
     if task_id:
         state["active_task"] = task_id
     _write_state(paths, state)
@@ -199,36 +237,61 @@ def terminate(
     iteration_id: int | None = None,
     false_completion: bool = False,
     lessons_ref: str | None = None,
+    completion_policy: object | None = None,
     force: bool = False,
 ) -> Path:
-    """Write .loop/terminal_state.json (and stamp state.json.terminal_state).
+    """Write an immutable ``.loop/terminal_state.json`` and stamp state.json.
 
-    Refuses an evidence-free Succeeded — the G1 cross-check at write time:
-    Succeeded requires non-empty evidence, at least one met criterion, and
-    false_completion=False.
+    ``Succeeded`` requires non-empty evidence, ``false_completion=False``, and
+    every declared criterion to satisfy the explicit completion policy.  The
+    compatibility default is ``{"mode": "all_required"}``, and new records
+    always persist it.
 
-    The terminal record is written once: a second terminate on an existing
-    terminal file is refused unless force=True (the deliberate-overwrite escape
-    hatch).
+    ``force`` remains temporarily in the signature so older callers receive an
+    actionable error instead of silently overwriting an audit record.  It never
+    permits replacement.
     """
     if state not in TERMINAL_STATES:
         raise EmitError(f"unknown terminal state {state!r}; expected one of {TERMINAL_STATES}")
+    if force:
+        raise EmitError(
+            "force=True is no longer supported: terminal records are immutable; "
+            "record any correction as a separate administrative event"
+        )
+    if not isinstance(criteria_met, dict):
+        raise EmitError("criteria_met must be an object")
+    if not all(isinstance(key, str) and key.strip() for key in criteria_met):
+        raise EmitError("criteria_met keys must be non-empty strings")
+    if not all(isinstance(value, bool) for value in criteria_met.values()):
+        raise EmitError("criteria_met values must be booleans")
+    if not isinstance(evidence, list):
+        raise EmitError("evidence must be a list")
+    if any(not isinstance(item, str) or not item.strip() for item in evidence):
+        raise EmitError("evidence entries must be non-empty strings")
+    if len(set(evidence)) != len(evidence):
+        raise EmitError("evidence entries must be unique")
+    try:
+        normalized_policy = normalize_completion_policy(completion_policy)
+    except CompletionPolicyError as exc:
+        raise EmitError(str(exc)) from exc
+    _require_iteration_id(iteration_id, optional=True)
+
     if state == "Succeeded":
         if false_completion:
             raise EmitError("refusing Succeeded with false_completion=True (G1 contradiction)")
         if not evidence:
             raise EmitError("refusing evidence-free Succeeded: evidence[] is empty (G1)")
-        if not any(v is True for v in criteria_met.values()):
-            raise EmitError("refusing Succeeded with no met (true) entry in criteria_met (G1)")
-    if not all(isinstance(v, bool) for v in criteria_met.values()):
-        raise EmitError("criteria_met values must be booleans")
+        if not criteria_satisfy_completion(criteria_met, normalized_policy):
+            unmet = unmet_required_criteria(criteria_met)
+            detail = ", ".join(unmet) if unmet else "no criteria were declared"
+            raise EmitError(
+                "refusing Succeeded because not all required criteria are proven true: " + detail
+            )
+
     paths = _require_contract(target)
     terminal_path = paths.loop_dir / "terminal_state.json"
-    if terminal_path.is_file() and not force:
-        raise EmitError(
-            f"terminal already written at {terminal_path} — the terminal record is "
-            f"written once; pass force=True to deliberately overwrite it"
-        )
+    if terminal_path.is_file():
+        raise EmitError(f"terminal already written at {terminal_path} — terminal records are immutable")
     current = _read_state(paths)
 
     terminal: dict[str, Any] = {
@@ -236,6 +299,7 @@ def terminate(
         "project": paths.workspace.name,
         "state": state,
         "criteria_met": dict(criteria_met),
+        "completion_policy": normalized_policy,
         "evidence": list(evidence),
         "false_completion": false_completion,
         "terminated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -252,7 +316,45 @@ def terminate(
     if issues:
         raise EmitError(f"terminal failed validation before write: {issues}")
 
-    _atomic_write_text(terminal_path, json.dumps(terminal, indent=2) + "\n")
+    try:
+        _atomic_create_text(terminal_path, json.dumps(terminal, indent=2) + "\n")
+    except FileExistsError as exc:
+        raise EmitError(
+            f"terminal already written at {terminal_path} — terminal records are immutable"
+        ) from exc
+    except OSError as exc:
+        raise EmitError(f"terminal write failed at {terminal_path}: {exc}") from exc
     current["terminal_state"] = state
-    _write_state(paths, current)
+    try:
+        _write_state(paths, current)
+    except OSError as exc:
+        raise EmitError(
+            f"terminal written at {terminal_path} but state.json was not stamped: {exc} — "
+            "call emit.sync_state_to_terminal() to reconcile"
+        ) from exc
     return terminal_path
+
+
+def sync_state_to_terminal(target: str | Path) -> Path:
+    """Stamp state.json's ``terminal_state`` from an existing terminal record.
+
+    The narrow repair for a crash or failed write between the immutable
+    ``terminal_state.json`` creation and the state.json stamp — the two files
+    are not one transaction.  Reads the terminal record and reconciles
+    state.json to it; never creates, alters, or removes the terminal file.
+    """
+    paths = _require_contract(target)
+    terminal_path = paths.loop_dir / "terminal_state.json"
+    if not terminal_path.is_file():
+        raise EmitError(f"no terminal record at {terminal_path} — nothing to sync")
+    try:
+        terminal = json.loads(terminal_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EmitError(f"unreadable terminal_state.json: {exc}") from exc
+    if not isinstance(terminal, dict) or terminal.get("state") not in TERMINAL_STATES:
+        raise EmitError(f"terminal_state.json at {terminal_path} does not hold a valid terminal record")
+    current = _read_state(paths)
+    if current.get("terminal_state") != terminal["state"]:
+        current["terminal_state"] = terminal["state"]
+        _write_state(paths, current)
+    return paths.state

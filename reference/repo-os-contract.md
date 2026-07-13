@@ -296,6 +296,7 @@ sets it; resolution clears it; the loop never spawns a fresh untracked attempt (
 | `state` | enum | One of the 7 above. |
 | `iteration_id` | int | Final iteration count. |
 | `criteria_met` | object | `{ "<criterion#>": true\|false }` for every `SPEC.md` criterion. |
+| `completion_policy` | object | Completion rule for the criteria map. v1 supports `{ "mode": "all_required" }`; legacy records without the field are interpreted the same way. Optional (additive). Note: a pre-migration `Succeeded` record whose criteria map contains any `false` value fails this rule and needs re-verification. |
 | `evidence` | string[] | Paths to the verification bundles backing the verdict. |
 | `false_completion` | bool | True if the loop had earlier *claimed* success that verification later refuted (feeds the false-completion-rate metric). |
 | `reason` | string | One line: why this terminal state, especially for any `Failed*`/`Aborted*`. |
@@ -307,6 +308,7 @@ sets it; resolution clears it; the loop never spawns a fresh untracked attempt (
   "state": "Succeeded",
   "iteration_id": 2,
   "criteria_met": { "1": true, "2": true },
+  "completion_policy": { "mode": "all_required" },
   "evidence": [".loop/artifacts/verify-T2.json", ".loop/artifacts/verify-T1.json"],
   "false_completion": false,
   "reason": "All SPEC criteria verified: coverage 0.83 >= 0.80; validation tests pass.",
@@ -521,8 +523,9 @@ land silently.
   (`terminal_state` is one of the canonical 7 **and** `terminal_state.json` is present and valid).
 - **B2** — `terminal_state.json`, when present, validates against `loop-engineer/terminal@1` with a
   `criteria_met` object, an `evidence` list, and an explicit `false_completion` boolean; a
-  `Succeeded` terminal additionally has `false_completion=false`, at least one true criterion, and
-  non-empty `evidence`.
+  `Succeeded` terminal additionally has `false_completion=false`, every declared criterion true
+  under `completion_policy.mode=all_required` (legacy records without the field are interpreted
+  the same way), and non-empty `evidence`.
 
 **C. Evidentiary trail (checked when present)**
 - **C1** — every `.loop/receipts/*.jsonl` line validates against `loop-engineer/receipt@1`.

@@ -416,3 +416,21 @@ def test_cli_exit_zero_when_terminal(tmp_path):
 
     # A finished loop is a clean exit, not an intervention.
     assert runtime_monitor.main([str(loop_dir)]) == 0
+
+
+def test_orphan_terminal_record_is_reported_done(tmp_path):
+    # A crash between the immutable terminal_state.json creation and the
+    # state.json stamp must not fool the monitor into recommending more work:
+    # the terminal record itself is authoritative.
+    state = {"active_task": "T3", "state": "execute", "iteration_id": 3}
+    runlog = _runlog([(1, "T3", 0.5), (2, "T3", 0.5), (3, "T3", 0.5)])
+    loop_dir = _write_loop(tmp_path, state, runlog)
+    (loop_dir / "terminal_state.json").write_text(
+        json.dumps({"schema": "loop-engineer/terminal@1", "state": "Succeeded"}),
+        encoding="utf-8",
+    )
+
+    report = runtime_monitor.health_report(loop_dir)
+
+    assert report["recommendation"] == "done"
+    assert report.get("terminal_state") == "Succeeded"

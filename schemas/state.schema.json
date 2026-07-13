@@ -2,23 +2,88 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/state@1",
   "title": "Loop Engineer State @1",
-  "description": "Reconciled with loop/contract.py and the shipped contracts (examples/coverage-repair, roadmap/v1.0). Loosened from the original: required is narrowed to the structural core the hand checks enforce (active_task/best_score/failure_mode/pending_approval/checkpoint_path moved to optional — an in-flight state legitimately omits them); iteration_id also accepts a string and best_score/pending_approval accept the richer forms real contracts emit.",
+  "description": "Runtime state for a Loop Engineer contract. New writers emit a non-negative integer iteration_id; legacy decimal strings remain read-compatible during the terminal@1/state@1 migration window.",
   "type": "object",
-  "required": ["schema", "iteration_id", "state", "plan_version", "budget_remaining"],
+  "required": [
+    "schema",
+    "iteration_id",
+    "state",
+    "plan_version",
+    "budget_remaining"
+  ],
   "properties": {
-    "schema": { "const": "loop-engineer/state@1" },
-    "iteration_id": { "type": ["integer", "string"] },
-    "state": { "type": "string" },
-    "plan_version": { "type": "integer", "minimum": 0 },
-    "active_task": { "type": ["string", "null"] },
-    "best_score": { "type": ["number", "string", "null"] },
-    "failure_mode": { "type": ["string", "null"] },
-    "pending_approval": { "type": ["string", "object", "null"] },
-    "budget_remaining": { "type": "object" },
-    "checkpoint_path": { "type": ["string", "null"] },
+    "schema": {
+      "const": "loop-engineer/state@1"
+    },
+    "iteration_id": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        }
+      ]
+    },
+    "state": {
+      "type": "string"
+    },
+    "plan_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "active_task": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "best_score": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ]
+    },
+    "failure_mode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pending_approval": {
+      "type": [
+        "string",
+        "object",
+        "null"
+      ]
+    },
+    "budget_remaining": {
+      "type": "object"
+    },
+    "checkpoint_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "terminal_state": {
-      "type": ["string", "null"],
-      "enum": [null, "Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"]
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        null,
+        "Succeeded",
+        "FailedUnverifiable",
+        "FailedBlocked",
+        "FailedBudget",
+        "FailedSafety",
+        "FailedSpecGap",
+        "AbortedByHuman"
+      ]
     }
   },
   "additionalProperties": true
