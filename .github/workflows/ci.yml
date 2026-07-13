@@ -51,6 +51,18 @@ jobs:
           python -B -m loop doctor --mode release examples/coverage-repair
           python -B -m loop inspect examples/coverage-repair
 
+      - name: Plan lint smoke test
+        run: |
+          python -B -m loop plan-lint --mode release examples/plans/coverage-repair.plan.json
+          if python -B -m loop plan-lint --mode release examples/plans/invalid/cyclic-dependency.plan.json; then
+            echo "::error::cyclic-dependency.plan.json unexpectedly passed plan-lint"
+            exit 1
+          fi
+          if python -B -m loop plan-lint --mode release examples/plans/invalid/missing-goal.plan.json; then
+            echo "::error::missing-goal.plan.json unexpectedly passed plan-lint"
+            exit 1
+          fi
+
   recipe-langgraph:
     name: recipe (langgraph)
     runs-on: ubuntu-latest
