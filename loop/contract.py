@@ -23,12 +23,18 @@ TERMINAL_STATES = (
     "AbortedByHuman",
 )
 
+VALIDATION_MODES = ("basic", "strict", "release")
+
 SCHEMA_IDS = (
     "loop-engineer/manifest@1",
     "loop-engineer/state@1",
     "loop-engineer/tasks@1",
     "loop-engineer/terminal@1",
 )
+
+
+class ValidationModeError(RuntimeError):
+    """Raised when an explicit validation mode cannot be honored."""
 
 
 class ContractIssue(dict):
@@ -516,6 +522,24 @@ def _validation_mode() -> str:
     return "jsonschema"
 
 
+def _resolve_requested_mode(mode: str | None) -> tuple[str, str]:
+    """Resolve the caller-facing mode to the internal validation branch."""
+    if mode is None:
+        return "auto", _validation_mode()
+    if mode not in VALIDATION_MODES:
+        valid = ", ".join(VALIDATION_MODES)
+        raise ValidationModeError(f"unknown validation mode {mode!r}; expected one of: {valid}")
+    if mode == "basic":
+        return mode, "structural-fallback"
+    resolved = _validation_mode()
+    if resolved != "jsonschema":
+        raise ValidationModeError(
+            f"validation mode {mode!r} requires the jsonschema package; "
+            "install it or use --mode basic"
+        )
+    return mode, resolved
+
+
 def _jsonschema_validate(data: dict[str, Any], name: str, path: Path, issues: list[dict]) -> None:
     import jsonschema  # type: ignore
 
@@ -664,7 +688,8 @@ def _derive_lifecycle(state: Any, terminal: Any, terminal_exists: bool) -> str:
     return "unknown"
 
 
-def validate_contract(target: str | Path) -> dict[str, Any]:
+def validate_contract(target: str | Path, *, mode: str | None = None) -> dict[str, Any]:
+    requested_mode, resolved_mode = _resolve_requested_mode(mode)
     paths = resolve_loop_paths(target)
     issues: list[dict] = []
     manifest = read_manifest(paths.manifest)
@@ -677,7 +702,7 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
     else:
         terminal = _read_json(paths.terminal, issues)
 
-    mode = _validation_mode()
+    mode = resolved_mode
     if mode == "jsonschema":
         if manifest is None:
             issues.append(ContractIssue("missing_file", "missing manifest.yaml", paths.manifest))
@@ -717,11 +742,12 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
         "ok": not issues,
         "paths": paths.to_json(),
         "validation_mode": mode,
+        "requested_mode": requested_mode,
         "schemas_checked": schemas_checked,
         "lifecycle": lifecycle,
         "issues": issues,
     }
 
 
-def doctor_report(target: str | Path) -> dict[str, Any]:
-    return validate_contract(target)
+def doctor_report(target: str | Path, *, mode: str | None = None) -> dict[str, Any]:
+    return validate_contract(target, mode=mode)

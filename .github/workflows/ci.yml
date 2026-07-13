@@ -48,7 +48,7 @@ jobs:
 
       - name: Quickstart smoke test
         run: |
-          python -B -m loop doctor examples/coverage-repair
+          python -B -m loop doctor --mode release examples/coverage-repair
           python -B -m loop inspect examples/coverage-repair
 
   recipe-langgraph:

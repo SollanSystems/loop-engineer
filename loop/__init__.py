@@ -6,11 +6,12 @@ scripts consume.
 """
 
 from .paths import LoopPaths, resolve_loop_paths
-from .contract import TERMINAL_STATES, doctor_report, validate_contract
+from .contract import TERMINAL_STATES, VALIDATION_MODES, doctor_report, validate_contract
 
 __all__ = [
     "LoopPaths",
     "TERMINAL_STATES",
+    "VALIDATION_MODES",
     "doctor_report",
     "resolve_loop_paths",
     "validate_contract",
