@@ -124,6 +124,7 @@ directory, and need no agent runtime to run.
 {
   "ok": true,
   "validation_mode": "structural-fallback",
+  "requested_mode": "auto",
   "schemas_checked": [
     "loop-engineer/manifest@1",
     "loop-engineer/state@1",
@@ -138,6 +139,15 @@ directory, and need no agent runtime to run.
 default, or real JSON-Schema validation against `schemas/*.json` when the
 optional `jsonschema` dependency is present (`pip install -e ".[schemas]"`), in
 which case it reads `"jsonschema"`.
+
+For `doctor`, `validate`, and `verify`, `--mode basic|strict|release` makes the
+choice explicit. With no flag, the current auto-detect behavior is unchanged
+for backward compatibility with existing foreign and scoreboard callers.
+`--mode basic` always uses the structural fallback, regardless of whether
+`jsonschema` happens to be installed. `--mode strict` and `--mode release`
+require real JSON-Schema validation and fail non-zero rather than silently
+downgrade if the `jsonschema` extra is missing. `release` currently has the
+same behavior as `strict`; it is reserved for a stricter future policy.
 
 `inspect` is a static contract linter: it scores the loop contract's structure —
 what proof machinery is present and what is missing — without running the loop:

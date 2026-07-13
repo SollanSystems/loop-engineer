@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from .contract import doctor_report
+from .contract import VALIDATION_MODES, ValidationModeError, doctor_report
 
 _PROG = "python3 -m loop"
 
@@ -21,10 +21,11 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
 
 {_USAGE}
        {_PROG} metrics [--baseline] <workspace-or-.loop>
+       {_PROG} doctor|validate|verify [--mode basic|strict|release] <workspace-or-.loop>
 
 commands:
   scaffold   Write a fresh, doctor-clean loop contract into <target>.
-  doctor     Validate the contract objects (manifest, state, tasks, terminal).
+  doctor     Validate the contract objects; --mode selects validation strength.
   validate   Alias for doctor.
   verify     Alias for doctor — check the contract's state.
   inspect    Score an existing loop against the prime-directive checklist
@@ -38,6 +39,9 @@ arguments:
   <target>   A workspace root or its .loop/ directory.
 
 options:
+  --mode {{basic,strict,release}}
+                (doctor/validate/verify only) basic forces structural checks;
+                strict/release require jsonschema. Default: auto-detect.
   --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
                 run; exits non-zero and writes nothing otherwise.
   -h, --help    Show this help and exit.
@@ -73,6 +77,32 @@ def _version() -> str:
 def _print_json(report: dict) -> int:
     print(json.dumps(report, indent=2))
     return 0 if report.get("ok") else 1
+
+
+def _extract_mode_flag(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Extract the doctor-family validation mode without changing positional argv."""
+    mode: str | None = None
+    remaining: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--mode":
+            if index + 1 >= len(argv):
+                raise ValueError("--mode requires a value")
+            value = argv[index + 1]
+            index += 2
+        elif arg.startswith("--mode="):
+            value = arg.split("=", 1)[1]
+            index += 1
+        else:
+            remaining.append(arg)
+            index += 1
+            continue
+        if value not in VALIDATION_MODES:
+            valid = ", ".join(VALIDATION_MODES)
+            raise ValueError(f"invalid --mode value {value!r}; expected one of: {valid}")
+        mode = value
+    return mode, remaining
 
 
 def _run_metrics(argv: list[str]) -> int:
@@ -124,6 +154,15 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE, file=sys.stderr)
         return 2
 
+    mode = None
+    if command in {"doctor", "validate", "verify"}:
+        try:
+            mode, argv = _extract_mode_flag(argv)
+        except ValueError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+
     # metrics carries its own optional --baseline flag, so it parses its own args
     # before the generic single-target guards below.
     if command == "metrics":
@@ -156,7 +195,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command in {"doctor", "validate", "verify"}:
-        return _print_json(doctor_report(target))
+        try:
+            return _print_json(doctor_report(target, mode=mode))
+        except ValidationModeError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            return 2
 
     # command == "inspect": keep the historical inspector script as the scoring
     # UI over the same contract artifacts; import lazily to avoid making

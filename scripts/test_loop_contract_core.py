@@ -705,3 +705,70 @@ def test_loop_doctor_flags_stub_verify_scripts(tmp_path):
     report = json.loads(result.stdout)
     assert report["ok"] is False
     assert any(issue["code"] == "stub_verify_script" for issue in report["issues"])
+
+
+# S2: explicit public validation modes ---------------------------------------
+
+
+def test_validation_mode_public_constants_and_default_report(tmp_path):
+    from loop import VALIDATION_MODES
+    from loop.contract import validate_contract
+
+    workspace = _write_valid_loop(tmp_path)
+    report = validate_contract(workspace)
+
+    assert VALIDATION_MODES == ("basic", "strict", "release")
+    assert report["requested_mode"] == "auto"
+    assert report["validation_mode"] in {"jsonschema", "structural-fallback"}
+
+
+def test_basic_forces_structural_fallback_and_doctor_threads_mode(tmp_path):
+    from loop.contract import doctor_report, validate_contract
+
+    workspace = _write_valid_loop(tmp_path)
+    assert validate_contract(workspace, mode="basic")["validation_mode"] == "structural-fallback"
+    report = doctor_report(workspace, mode="basic")
+    assert report["requested_mode"] == "basic"
+    assert report["validation_mode"] == "structural-fallback"
+
+
+@pytest.mark.parametrize("requested", ["strict", "release"])
+def test_strict_and_release_require_jsonschema_before_reading_target(monkeypatch, tmp_path, requested):
+    import sys
+
+    from loop.contract import ValidationModeError, validate_contract
+
+    monkeypatch.setitem(sys.modules, "jsonschema", None)
+    with pytest.raises(ValidationModeError, match=r"jsonschema.*--mode basic"):
+        validate_contract(tmp_path / "missing-target", mode=requested)
+
+
+@pytest.mark.parametrize("requested", ["strict", "release"])
+def test_strict_and_release_use_jsonschema_when_available(tmp_path, requested):
+    pytest.importorskip("jsonschema")
+    from loop.contract import doctor_report
+
+    report = doctor_report(_write_valid_loop(tmp_path), mode=requested)
+    assert report["requested_mode"] == requested
+    assert report["validation_mode"] == "jsonschema"
+
+
+def test_release_currently_equals_strict_reserved_semantics(tmp_path):
+    pytest.importorskip("jsonschema")
+    from loop.contract import validate_contract
+
+    workspace = _write_valid_loop(tmp_path)
+    strict = validate_contract(workspace, mode="strict")
+    release = validate_contract(workspace, mode="release")
+    assert strict["requested_mode"] == "strict"
+    assert release["requested_mode"] == "release"
+    strict.pop("requested_mode")
+    release.pop("requested_mode")
+    assert release == strict
+
+
+def test_unknown_public_validation_mode_raises_with_valid_values(tmp_path):
+    from loop.contract import ValidationModeError, validate_contract
+
+    with pytest.raises(ValidationModeError, match=r"basic.*strict.*release"):
+        validate_contract(tmp_path, mode="turbo")

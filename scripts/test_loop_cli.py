@@ -147,3 +147,96 @@ def test_verify_is_a_wired_doctor_alias(tmp_path):
 def test_help_describes_verify_and_validate_as_aliases():
     out = _run("--help").stdout.lower()
     assert "alias" in out, "help must reconcile verify/validate as doctor aliases"
+
+
+# S2: explicit validation mode CLI ------------------------------------------------
+
+
+def test_help_documents_validation_modes():
+    out = _run("--help").stdout
+    assert "--mode" in out
+    for value in ("basic", "strict", "release"):
+        assert value in out
+
+
+def test_doctor_mode_release_and_basic_echo_requested_mode():
+    import importlib.util
+
+    strict = _run("doctor", "--mode=release", "examples/coverage-repair")
+    if importlib.util.find_spec("jsonschema") is not None:
+        assert strict.returncode == 0, strict.stderr
+        assert json.loads(strict.stdout)["requested_mode"] == "release"
+        assert json.loads(strict.stdout)["validation_mode"] == "jsonschema"
+    else:
+        assert strict.returncode == 2
+        assert strict.stdout == ""
+        assert "jsonschema" in strict.stderr
+        assert "--mode basic" in strict.stderr
+
+    basic = _run("doctor", "--mode", "basic", "examples/coverage-repair")
+    assert basic.returncode == 0, basic.stderr
+    assert json.loads(basic.stdout)["requested_mode"] == "basic"
+    assert json.loads(basic.stdout)["validation_mode"] == "structural-fallback"
+
+
+def test_doctor_default_mode_reports_auto():
+    result = _run("doctor", "examples/coverage-repair")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["requested_mode"] == "auto"
+
+
+def test_strict_mode_fails_loudly_without_jsonschema(tmp_path):
+    import os
+
+    blocker = tmp_path / "blocker"
+    blocker.mkdir()
+    (blocker / "jsonschema.py").write_text("raise ImportError('blocked for test')\n", encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join((str(blocker), str(ROOT)))}
+    result = subprocess.run(
+        [sys.executable, "-m", "loop", "doctor", "--mode", "strict", "examples/coverage-repair"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "jsonschema" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invalid_or_missing_mode_is_a_usage_error():
+    for args in (("doctor", "--mode", "bogus", "examples/coverage-repair"), ("doctor", "--mode")):
+        result = _run(*args)
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "usage" in result.stderr.lower()
+        assert "Traceback" not in result.stderr
+    assert all(value in _run("doctor", "--mode", "bogus", "examples/coverage-repair").stderr for value in ("basic", "strict", "release"))
+
+
+def test_validate_and_verify_accept_mode_as_doctor_aliases():
+    doctor = _run("doctor", "--mode", "basic", "examples/coverage-repair")
+    for command in ("validate", "verify"):
+        result = _run(command, "--mode", "basic", "examples/coverage-repair")
+        assert result.returncode == doctor.returncode
+        assert result.stdout == doctor.stdout
+
+
+def test_mode_is_not_consumed_by_other_commands(tmp_path):
+    import os
+
+    target = tmp_path / "target"
+    for command in ("inspect", "metrics"):
+        result = _run(command, "--mode", str(target))
+        assert result.returncode != 0
+
+    result = subprocess.run(
+        [sys.executable, "-m", "loop", "scaffold", "--mode", str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "--mode").is_dir()
