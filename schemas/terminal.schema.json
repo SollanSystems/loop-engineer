@@ -30,6 +30,10 @@
       "type": "integer",
       "minimum": 0
     },
+    "terminated_at": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp stamped by loop.emit.terminate(). Additive/optional; legacy records without it remain valid."
+    },
     "criteria_met": {
       "type": "object",
       "additionalProperties": {

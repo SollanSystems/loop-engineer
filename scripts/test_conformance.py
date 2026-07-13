@@ -51,7 +51,7 @@ _STATE_FILL = {
     "ITERATION_ID": "0",  # quoted in the template -> string "0" -> lifecycle "planned"
     "PLAN_VERSION": "0",
     "ACTIVE_TASK_ID": "T1",
-    "STATE": "Planned",
+    "STATE": "intake",
     "BEST_SCORE": "null",
     "FAILURE_MODE": "",
     "PENDING_APPROVAL": "null",
