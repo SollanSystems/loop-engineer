@@ -44,7 +44,7 @@ def _fill_values() -> dict[str, str]:
         "ITERATION_ID": "1",          # quoted in state (string), bare in terminal (int)
         "PLAN_VERSION": "1",          # integer
         "ACTIVE_TASK_ID": "T1",
-        "STATE": "running",
+        "STATE": "execute-task",
         "BEST_SCORE": "null",         # number | null
         "FAILURE_MODE": "",
         "PENDING_APPROVAL": "null",   # object | null

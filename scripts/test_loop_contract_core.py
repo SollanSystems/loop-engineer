@@ -584,7 +584,7 @@ def test_dg3_inflight_loop_with_null_terminal_is_conformant(tmp_path, monkeypatc
     state_path = target / ".loop" / "state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
     state["iteration_id"] = 3
-    state["state"] = "execute"
+    state["state"] = "execute-task"
     state_path.write_text(json.dumps(state), encoding="utf-8")
     running = doctor_report(target)
     assert running["ok"] is True, running["issues"]

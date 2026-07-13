@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from . import fsm
 from .completion import (
     CompletionPolicyError,
     criteria_satisfy_completion,
@@ -127,6 +128,7 @@ def append_iteration(
     *,
     iteration_id: int,
     outcome: str,
+    state: str | None = None,
     task_id: str = "",
     actions: Sequence[str] = (),
     verify_cmd: str = "",
@@ -138,8 +140,16 @@ def append_iteration(
     .loop/state.json's iteration_id/active_task."""
     if outcome not in _ITERATION_OUTCOMES:
         raise EmitError(f"unknown iteration outcome {outcome!r}; expected one of {_ITERATION_OUTCOMES}")
+    if state is not None and (not isinstance(state, str) or not state.strip()):
+        raise EmitError("state must be a non-empty string when provided")
     _require_iteration_id(iteration_id)
     paths = _require_contract(target)
+    current = _read_state(paths)
+    if state is not None:
+        if not fsm.is_legal_transition(current.get("state"), state):
+            raise EmitError(f"illegal FSM transition {current.get('state')!r} -> {state!r}")
+        current["state"] = state
+    current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     lines = [
         "",
@@ -176,11 +186,10 @@ def append_iteration(
     with runlog.open("a", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
 
-    state = _read_state(paths)
-    state["iteration_id"] = iteration_id
+    current["iteration_id"] = iteration_id
     if task_id:
-        state["active_task"] = task_id
-    _write_state(paths, state)
+        current["active_task"] = task_id
+    _write_state(paths, current)
     return runlog
 
 
@@ -324,7 +333,14 @@ def terminate(
         ) from exc
     except OSError as exc:
         raise EmitError(f"terminal write failed at {terminal_path}: {exc}") from exc
+    if not fsm.is_legal_transition(current.get("state"), fsm.TERMINAL_MARKER):
+        raise EmitError(
+            f"terminal written at {terminal_path} but state.json has no legal transition "
+            f"from {current.get('state')!r} to {fsm.TERMINAL_MARKER!r}"
+        )
+    current["state"] = fsm.TERMINAL_MARKER
     current["terminal_state"] = state
+    current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         _write_state(paths, current)
     except OSError as exc:
@@ -336,7 +352,7 @@ def terminate(
 
 
 def sync_state_to_terminal(target: str | Path) -> Path:
-    """Stamp state.json's ``terminal_state`` from an existing terminal record.
+    """Reconcile state.json's FSM marker and terminal verdict from its end record.
 
     The narrow repair for a crash or failed write between the immutable
     ``terminal_state.json`` creation and the state.json stamp — the two files
@@ -354,7 +370,14 @@ def sync_state_to_terminal(target: str | Path) -> Path:
     if not isinstance(terminal, dict) or terminal.get("state") not in TERMINAL_STATES:
         raise EmitError(f"terminal_state.json at {terminal_path} does not hold a valid terminal record")
     current = _read_state(paths)
+    changed = False
     if current.get("terminal_state") != terminal["state"]:
         current["terminal_state"] = terminal["state"]
+        changed = True
+    if current.get("state") != fsm.TERMINAL_MARKER:
+        current["state"] = fsm.TERMINAL_MARKER
+        changed = True
+    if changed:
+        current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         _write_state(paths, current)
     return paths.state

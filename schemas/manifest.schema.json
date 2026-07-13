@@ -12,6 +12,7 @@
     "outputs": { "type": "object" },
     "permissions": { "type": "array", "items": { "type": ["string", "object"] } },
     "approval_gates": { "type": "array", "items": { "type": "string" } },
+    "extra_states": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "policies": {
       "type": "object",
       "properties": {

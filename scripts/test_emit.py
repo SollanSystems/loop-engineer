@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,38 @@ def test_append_iteration_rejects_unknown_outcome(workspace):
         emit.append_iteration(workspace, iteration_id=1, outcome="totally_done")
 
 
+def test_append_iteration_advances_fsm_state_when_provided(workspace):
+    emit.append_iteration(workspace, iteration_id=1, outcome="task_passed", state="plan")
+    state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "plan"
+
+
+def test_append_iteration_rejects_illegal_fsm_transition(workspace):
+    runlog = workspace / "RUNLOG.md"
+    before = runlog.read_text(encoding="utf-8")
+    with pytest.raises(emit.EmitError):
+        emit.append_iteration(workspace, iteration_id=1, outcome="task_passed", state="verify")
+    assert runlog.read_text(encoding="utf-8") == before
+
+
+def test_append_iteration_state_defaults_to_no_op(workspace):
+    emit.append_iteration(workspace, iteration_id=1, outcome="task_passed")
+    state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "intake"
+
+
+def test_append_iteration_stamps_updated_at(workspace):
+    emit.append_iteration(workspace, iteration_id=1, outcome="task_passed")
+    state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
+    timestamp = datetime.fromisoformat(state["updated_at"])
+    assert timestamp.utcoffset() == timedelta(0)
+
+
+def test_append_iteration_rejects_blank_state(workspace):
+    with pytest.raises(emit.EmitError):
+        emit.append_iteration(workspace, iteration_id=1, outcome="task_passed", state="   ")
+
+
 def test_append_receipt_is_schema_valid(workspace):
     path = emit.append_receipt(
         workspace, iteration_id=1, role="write", model="claude-opus", outcome="ok"
@@ -84,6 +117,15 @@ def test_terminate_succeeded_with_evidence_passes_doctor(workspace):
     state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
     assert state["terminal_state"] == "Succeeded"
     assert validate_contract(workspace)["ok"] is True
+
+
+def test_terminate_sets_state_field_to_terminal(workspace):
+    emit.terminate(
+        workspace, state="FailedBlocked", criteria_met={"1": False}, evidence=[]
+    )
+    state = json.loads((workspace / ".loop" / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "terminal"
+    assert datetime.fromisoformat(state["updated_at"]).utcoffset() == timedelta(0)
 
 
 @pytest.mark.parametrize(
@@ -278,6 +320,23 @@ def test_sync_state_to_terminal_reconciles_unstamped_state(workspace):
     assert json.loads(state_path.read_text(encoding="utf-8"))["terminal_state"] == "Succeeded"
     assert terminal_path.read_text(encoding="utf-8") == before
     assert not _loop_leftovers(workspace)
+
+
+def test_sync_state_to_terminal_also_reconciles_state_field(workspace):
+    emit.terminate(
+        workspace, state="FailedBlocked", criteria_met={"1": False}, evidence=[]
+    )
+    state_path = workspace / ".loop" / "state.json"
+    current = json.loads(state_path.read_text(encoding="utf-8"))
+    current["state"] = "intake"
+    current.pop("updated_at")
+    state_path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+
+    emit.sync_state_to_terminal(workspace)
+
+    synced = json.loads(state_path.read_text(encoding="utf-8"))
+    assert synced["state"] == "terminal"
+    assert datetime.fromisoformat(synced["updated_at"]).utcoffset() == timedelta(0)
 
 
 def test_sync_state_to_terminal_requires_a_terminal_record(workspace):

@@ -238,7 +238,8 @@ Python-FSM realization is chosen, implement the ~100-line pattern or reuse the a
 | Field | Type | Meaning |
 |---|---|---|
 | `iteration_id` | int | Monotonic loop counter (matches latest `RUNLOG` entry). |
-| `state` | enum | Current FSM state (`intake` … `verify` … `terminal`). |
+| `state` | enum | Current FSM state: `intake`, `plan`, `critique-plan`, `queue-tasks`, `execute-task`, `verify`, `repair`, `replan`, `approval-wait`, or `terminal`. `loop/fsm.py` is normative for the transition table. |
+| `updated_at` | string\|null | ISO-8601 UTC timestamp of the last write by a `loop.emit` writer; additive/optional and absent on legacy artifacts. |
 | `plan_version` | int | Bumped on every replan (lets traces detect churn). |
 | `active_task` | string\|null | `TASKS.json` id currently in flight. |
 | `best_score` | number\|null | Best verification score so far (repair productivity is measured against this). |
@@ -295,6 +296,7 @@ sets it; resolution clears it; the loop never spawns a fresh untracked attempt (
 |---|---|---|
 | `state` | enum | One of the 7 above. |
 | `iteration_id` | int | Final iteration count. |
+| `terminated_at` | string | ISO-8601 UTC timestamp stamped by `loop.emit.terminate()`; additive/optional, so legacy records without it remain valid. |
 | `criteria_met` | object | `{ "<criterion#>": true\|false }` for every `SPEC.md` criterion. |
 | `completion_policy` | object | Completion rule for the criteria map. v1 supports `{ "mode": "all_required" }`; legacy records without the field are interpreted the same way. Optional (additive). Note: a pre-migration `Succeeded` record whose criteria map contains any `false` value fails this rule and needs re-verification. |
 | `evidence` | string[] | Paths to the verification bundles backing the verdict. |

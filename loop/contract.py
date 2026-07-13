@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from . import fsm
 from .completion import (
     CompletionPolicyError,
     criteria_satisfy_completion,
@@ -216,6 +217,26 @@ def _check_tasks_semantics(data: dict[str, Any] | None, path: Path, issues: list
             seen.add(task_id)
         if task.get("status") == "done" and not task.get("evidence"):
             issues.append(ContractIssue("done_without_evidence", f"task {task_id!r} done without evidence", path))
+
+
+def _check_state_vocabulary(
+    state: dict[str, Any] | None,
+    manifest: dict[str, Any] | None,
+    path: Path,
+    issues: list[dict],
+) -> None:
+    """Reject undeclared state names in both validation modes."""
+    if not isinstance(state, dict):
+        return
+    extra_states = manifest.get("extra_states") if isinstance(manifest, dict) else None
+    declared = (
+        tuple(value for value in extra_states if isinstance(value, str))
+        if isinstance(extra_states, list)
+        else ()
+    )
+    value = state.get("state")
+    if value not in fsm.ALL_STATES + declared:
+        issues.append(ContractIssue("unknown_state", f"unknown state {value!r}", path))
 
 
 def _validate_tasks(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
@@ -670,11 +691,13 @@ def validate_contract(target: str | Path) -> dict[str, Any]:
             if data is not None:
                 _jsonschema_validate(data, name, path, issues)
         # Cross-field rules JSON Schema cannot express, run in both modes.
+        _check_state_vocabulary(state, manifest, paths.state, issues)
         _check_tasks_semantics(tasks, paths.tasks, issues)
         _check_terminal_contradiction(terminal, paths.terminal, issues)
     else:
         _validate_manifest(manifest, paths.manifest, issues)
         _validate_state(state, paths.state, issues)
+        _check_state_vocabulary(state, manifest, paths.state, issues)
         _validate_tasks(tasks, paths.tasks, issues)
         _validate_terminal(terminal, paths.terminal, issues)
 

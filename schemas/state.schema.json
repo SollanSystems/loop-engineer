@@ -30,6 +30,13 @@
     "state": {
       "type": "string"
     },
+    "updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-8601 UTC timestamp of the last write by a loop.emit writer. Additive/optional; absent on legacy artifacts."
+    },
     "plan_version": {
       "type": "integer",
       "minimum": 0
