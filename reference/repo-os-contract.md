@@ -580,6 +580,42 @@ the negative tests).
 
 ---
 
+## 16. `loop-engineer/event@1` — EventStore + deterministic reducer
+
+`schemas/event.schema.json` defines one immutable, append-only fact in a run's
+event log (ADR 0001). `loop.events.SQLiteEventStore` persists events in a
+SQLite database in WAL mode with `synchronous=FULL` (every committed `append()`
+survives a crash) and DB-level `BEFORE UPDATE`/`BEFORE DELETE` triggers that
+refuse mutation or removal of a committed row, regardless of caller.
+`loop.reducer.reduce_events()` is a pure, resumable left-fold that projects an
+ordered event stream into a deterministic state/runlog/receipts view — the
+same input sequence always produces a byte-identical result.
+
+**Scope boundary:** unlike manifest/state/tasks/terminal (§11), `event@1` is
+**not yet** an artifact `loop doctor` reads from a scaffolded workspace, and
+no workspace-relative on-disk location (e.g. `.loop/events.db`) has been
+decided. The execution-runtime milestone that wires a live event log into
+`scaffold`/`emit`/`doctor` will make that call.
+
+**Event types:** `contract_opened | iteration_appended | receipt_appended |
+terminal_written` — one-to-one with `loop.emit`'s four writer operations
+(`open_contract`/`append_iteration`/`append_receipt`/`terminate`), so a
+future write-through migration targets an already-matching payload shape.
+
+**Two-layer enforcement, deliberately split:** the store validates event@1
+envelope/payload *shape* only (`loop/events.py::validate_event`, both
+validation modes, both type-checked in structural fallback); the reducer
+enforces *domain* semantics at replay time — FSM transition legality
+(`loop.fsm.is_legal_transition`), G1 completion
+(`loop.completion.criteria_satisfy_completion`), and terminal immutability
+(no event may follow a `terminal_written`) — reusing the exact functions
+`loop.contract`/`loop.emit` already enforce at file-write time, never
+re-implemented. A store back-end therefore never needs domain awareness to be
+conformant; the reducer is a second, independent enforcement point that a
+tampered or foreign-sourced event stream still cannot talk past.
+
+---
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/event@1",
+  "title": "Loop Engineer Event @1",
+  "description": "One immutable, append-only fact in a run's event log (ADR 0001). SQLiteEventStore (loop/events.py) persists these; loop.reducer projects an ordered sequence into a deterministic state/runlog/receipts view. Cross-field domain semantics (FSM legality, G1 completion, terminal immutability) are enforced by the reducer at replay time, not by the store at write time. Not yet a loop-doctor-validated workspace artifact — see reference/repo-os-contract.md #16.",
+  "type": "object",
+  "required": ["schema", "event_id", "run_id", "sequence", "type", "actor", "ts", "payload"],
+  "properties": {
+    "schema": { "const": "loop-engineer/event@1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "type": { "enum": ["contract_opened", "iteration_appended", "receipt_appended", "terminal_written"] },
+    "actor": { "type": "string", "minLength": 1 },
+    "causation_id": { "type": ["string", "null"] },
+    "correlation_id": { "type": ["string", "null"] },
+    "ts": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "artifact_hashes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

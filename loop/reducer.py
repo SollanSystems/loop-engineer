@@ -1,0 +1,97 @@
+"""Pure deterministic event@1 reducer; persistence is deliberately not involved."""
+
+from __future__ import annotations
+
+from typing import Any, Iterable, Mapping
+
+from . import fsm
+from .completion import CompletionPolicyError, criteria_satisfy_completion, normalize_completion_policy
+from .contract import TERMINAL_STATES
+from .events import _structural_validate_event
+
+
+class EventReplayError(ValueError):
+    """An event stream is malformed or violates a replay domain invariant."""
+
+
+def _empty_projection(run_id: str | None) -> dict[str, Any]:
+    return {"run_id": run_id, "state": None, "iteration_id": None, "active_task": None,
+            "terminal": None, "runlog_entries": [], "receipts": [], "event_count": 0,
+            "last_sequence": None}
+
+
+def _validate_terminal_payload_semantics(payload: Mapping[str, Any]) -> None:
+    state = payload.get("state")
+    if state not in TERMINAL_STATES:
+        raise EventReplayError(f"terminal_written payload has non-canonical state {state!r}")
+    if state != "Succeeded":
+        return
+    if payload.get("false_completion") is True:
+        raise EventReplayError("refusing Succeeded terminal_written with false_completion=True (G1)")
+    try:
+        policy = normalize_completion_policy(payload.get("completion_policy"))
+    except CompletionPolicyError as exc:
+        raise EventReplayError(f"invalid completion_policy: {exc}") from exc
+    criteria = payload.get("criteria_met")
+    if not isinstance(criteria, dict) or not criteria_satisfy_completion(criteria, policy):
+        raise EventReplayError("Succeeded terminal_written does not satisfy the completion policy (G1)")
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        raise EventReplayError("Succeeded terminal_written has empty evidence (G1)")
+
+
+def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(event, Mapping):
+        raise EventReplayError("event must be a mapping")
+    issues = _structural_validate_event(dict(event))
+    if issues:
+        raise EventReplayError(f"malformed event: {issues}")
+    run_id = event["run_id"]
+    if state["run_id"] is not None and state["run_id"] != run_id:
+        raise EventReplayError(f"mixed run_id in one replay: {state['run_id']!r} vs {run_id!r}")
+    expected_sequence = 0 if state["last_sequence"] is None else state["last_sequence"] + 1
+    if event["sequence"] != expected_sequence:
+        raise EventReplayError(f"non-monotonic sequence: expected {expected_sequence}, got {event['sequence']!r}")
+    if state["terminal"] is not None:
+        raise EventReplayError("event appended after terminal — terminal is immutable")
+    event_type = event["type"]
+    if event_type == "contract_opened" and state["last_sequence"] is not None:
+        raise EventReplayError("contract_opened must be the first event in a run")
+    if event_type != "contract_opened" and state["state"] is None:
+        raise EventReplayError(f"{event_type} event before contract_opened")
+    new_state = {**state, "run_id": run_id, "last_sequence": event["sequence"], "event_count": state["event_count"] + 1}
+    payload = event["payload"]
+    if event_type == "contract_opened":
+        new_state["state"] = "intake"
+        new_state["iteration_id"] = 0
+    elif event_type == "iteration_appended":
+        target = payload.get("state")
+        if target is not None:
+            if target not in fsm.ALL_STATES:
+                raise EventReplayError(f"illegal FSM transition {new_state['state']!r} -> {target!r}")
+            if not fsm.is_legal_transition(new_state["state"], target):
+                raise EventReplayError(f"illegal FSM transition {new_state['state']!r} -> {target!r}")
+            new_state["state"] = target
+        new_state["iteration_id"] = payload["iteration_id"]
+        if payload.get("task_id"):
+            new_state["active_task"] = payload["task_id"]
+        entry = dict(payload, event_id=event["event_id"], causation_id=event.get("causation_id"), correlation_id=event.get("correlation_id"), ts=event["ts"])
+        new_state["runlog_entries"] = new_state["runlog_entries"] + [entry]
+    elif event_type == "receipt_appended":
+        entry = dict(payload, event_id=event["event_id"], causation_id=event.get("causation_id"), correlation_id=event.get("correlation_id"), ts=event["ts"])
+        new_state["receipts"] = new_state["receipts"] + [entry]
+    elif event_type == "terminal_written":
+        if not fsm.is_legal_transition(new_state["state"], fsm.TERMINAL_MARKER):
+            raise EventReplayError(f"illegal FSM transition {new_state['state']!r} -> {fsm.TERMINAL_MARKER!r}")
+        _validate_terminal_payload_semantics(payload)
+        new_state["state"] = fsm.TERMINAL_MARKER
+        new_state["terminal"] = dict(payload, event_id=event["event_id"], ts=event["ts"])
+    return new_state
+
+
+def reduce_events(events: Iterable[Mapping[str, Any]], *, initial: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Fold events without mutating the supplied stream or initial projection."""
+    state = ({**initial, "runlog_entries": list(initial["runlog_entries"]), "receipts": list(initial["receipts"])} if initial is not None else _empty_projection(None))
+    for event in events:
+        state = _reduce_one(state, event)
+    return state
