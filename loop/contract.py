@@ -4,6 +4,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .completion import (
+    CompletionPolicyError,
+    criteria_satisfy_completion,
+    normalize_completion_policy,
+    unmet_required_criteria,
+)
 from .paths import LoopPaths, resolve_loop_paths
 
 TERMINAL_STATES = (
@@ -157,10 +163,38 @@ def _validate_state(data: dict[str, Any] | None, path: Path, issues: list[dict])
     for key in ("iteration_id", "state", "plan_version", "budget_remaining"):
         if key not in data:
             issues.append(ContractIssue("missing_state_field", f"state missing {key}", path))
+
+    if "iteration_id" in data:
+        iteration_id = data.get("iteration_id")
+        canonical_integer = (
+            isinstance(iteration_id, int)
+            and not isinstance(iteration_id, bool)
+            and iteration_id >= 0
+        )
+        legacy_decimal = (
+            isinstance(iteration_id, str)
+            and (
+                iteration_id == "0"
+                or (
+                    iteration_id.isascii()
+                    and iteration_id.isdigit()
+                    and not iteration_id.startswith("0")
+                )
+            )
+        )
+        if not (canonical_integer or legacy_decimal):
+            issues.append(
+                ContractIssue(
+                    "invalid_state",
+                    "iteration_id must be a non-negative integer "
+                    "(legacy canonical decimal strings remain read-compatible)",
+                    path,
+                )
+            )
+
     terminal = data.get("terminal_state")
     if terminal is not None and terminal not in TERMINAL_STATES:
         issues.append(ContractIssue("invalid_terminal_state", f"invalid terminal_state {terminal!r}", path))
-
 
 def _check_tasks_semantics(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
     """Cross-task rules JSON Schema cannot express: id uniqueness and the
@@ -202,33 +236,62 @@ def _validate_tasks(data: dict[str, Any] | None, path: Path, issues: list[dict])
     _check_tasks_semantics(data, path, issues)
 
 
-def _check_terminal_contradiction(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
-    """G1: a Succeeded terminal must not contradict its own evidence.
+def _check_terminal_contradiction(
+    data: dict[str, Any] | None,
+    path: Path,
+    issues: list[dict],
+) -> None:
+    """G1: a Succeeded terminal must prove every required criterion.
 
-    Runs in both validation modes because JSON Schema cannot express the
-    cross-field rule that a success claim requires false_completion=false, at
-    least one met criterion, AND a non-empty evidence list — mirroring the
-    write-time refusal in loop/emit.py (an evidence-free Succeeded is a claim
-    with nothing behind it).
+    This semantic rule runs in both validation modes because JSON Schema cannot
+    express the relationship between the completion policy, criteria map,
+    false-completion flag, and evidence list.
     """
-
     if not isinstance(data, dict) or data.get("state") != "Succeeded":
         return
+
+    try:
+        policy = normalize_completion_policy(data.get("completion_policy"))
+    except CompletionPolicyError as exc:
+        issues.append(
+            ContractIssue(
+                "invalid_completion_policy",
+                f"Succeeded terminal has invalid completion_policy: {exc}",
+                path,
+            )
+        )
+        return
+
     if data.get("false_completion") is True:
         issues.append(
-            ContractIssue("contradictory_terminal", "Succeeded terminal declares false_completion=true", path)
+            ContractIssue(
+                "contradictory_terminal",
+                "Succeeded terminal declares false_completion=true",
+                path,
+            )
         )
+
     criteria = data.get("criteria_met")
-    if not isinstance(criteria, dict) or not any(v is True for v in criteria.values()):
+    if not isinstance(criteria, dict) or not criteria_satisfy_completion(criteria, policy):
+        unmet = unmet_required_criteria(criteria) if isinstance(criteria, dict) else ()
+        detail = ", ".join(unmet) if unmet else "no criteria were declared"
         issues.append(
-            ContractIssue("contradictory_terminal", "Succeeded terminal has no met (true) entry in criteria_met", path)
+            ContractIssue(
+                "contradictory_terminal",
+                "Succeeded terminal criteria_met does not prove every required criterion: " + detail,
+                path,
+            )
         )
+
     evidence = data.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         issues.append(
-            ContractIssue("contradictory_terminal", "Succeeded terminal has empty evidence[] (G1)", path)
+            ContractIssue(
+                "contradictory_terminal",
+                "Succeeded terminal has empty evidence[] (G1)",
+                path,
+            )
         )
-
 
 def _validate_terminal(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
     _require_schema(data, "loop-engineer/terminal@1", path, issues)
@@ -236,14 +299,78 @@ def _validate_terminal(data: dict[str, Any] | None, path: Path, issues: list[dic
         return
     if data.get("state") not in TERMINAL_STATES:
         issues.append(ContractIssue("invalid_terminal_state", f"invalid state {data.get('state')!r}", path))
-    if not isinstance(data.get("criteria_met"), dict):
+
+    criteria = data.get("criteria_met")
+    if not isinstance(criteria, dict):
         issues.append(ContractIssue("invalid_terminal", "criteria_met must be an object", path))
-    if not isinstance(data.get("evidence"), list):
+    else:
+        if not all(isinstance(key, str) and key.strip() for key in criteria):
+            issues.append(
+                ContractIssue(
+                    "invalid_terminal",
+                    "criteria_met keys must be non-empty strings",
+                    path,
+                )
+            )
+        if not all(isinstance(value, bool) for value in criteria.values()):
+            issues.append(
+                ContractIssue(
+                    "invalid_terminal",
+                    "criteria_met values must be booleans",
+                    path,
+                )
+            )
+
+    try:
+        normalize_completion_policy(data.get("completion_policy"))
+    except CompletionPolicyError as exc:
+        issues.append(
+            ContractIssue(
+                "invalid_terminal",
+                f"completion_policy is invalid: {exc}",
+                path,
+            )
+        )
+
+    evidence = data.get("evidence")
+    if not isinstance(evidence, list):
         issues.append(ContractIssue("invalid_terminal", "evidence must be a list", path))
+    else:
+        all_strings = all(isinstance(item, str) for item in evidence)
+        if not all_strings or any(not item.strip() for item in evidence):
+            issues.append(
+                ContractIssue(
+                    "invalid_terminal",
+                    "evidence entries must be non-empty strings",
+                    path,
+                )
+            )
+        if all_strings and len(set(evidence)) != len(evidence):
+            issues.append(
+                ContractIssue(
+                    "invalid_terminal",
+                    "evidence entries must be unique",
+                    path,
+                )
+            )
+
+    iteration_id = data.get("iteration_id")
+    if iteration_id is not None and (
+        not isinstance(iteration_id, int)
+        or isinstance(iteration_id, bool)
+        or iteration_id < 0
+    ):
+        issues.append(
+            ContractIssue(
+                "invalid_terminal",
+                "iteration_id must be a non-negative integer",
+                path,
+            )
+        )
+
     if not isinstance(data.get("false_completion"), bool):
         issues.append(ContractIssue("invalid_terminal", "false_completion must be bool", path))
     _check_terminal_contradiction(data, path, issues)
-
 
 def _validate_manifest(data: dict[str, Any] | None, path: Path, issues: list[dict]) -> None:
     if data is None:

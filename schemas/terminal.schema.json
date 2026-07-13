@@ -2,18 +2,85 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/terminal@1",
   "title": "Loop Engineer Terminal State @1",
-  "description": "Reconciled with loop/contract.py and the shipped contracts. Loosened from the original: iteration_id, reason and lessons_ref moved from required to optional because a real terminal (roadmap/v1.0) records the equivalent under other keys — the load-bearing cross-field rule (a Succeeded terminal needs false_completion=false and a met criterion) is enforced in code, not the required list. reason keeps minLength:1 so, when present, it must be non-empty.",
+  "description": "A typed terminal result. Legacy terminal@1 records without completion_policy are interpreted as all_required. Cross-field success rules are enforced by loop.contract.",
   "type": "object",
-  "required": ["schema", "state", "criteria_met", "evidence", "false_completion"],
+  "required": [
+    "schema",
+    "state",
+    "criteria_met",
+    "evidence",
+    "false_completion"
+  ],
   "properties": {
-    "schema": { "const": "loop-engineer/terminal@1" },
-    "state": { "enum": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget", "FailedSafety", "FailedSpecGap", "AbortedByHuman"] },
-    "iteration_id": { "type": "integer", "minimum": 0 },
-    "criteria_met": { "type": "object", "additionalProperties": { "type": "boolean" } },
-    "evidence": { "type": "array", "items": { "type": "string" } },
-    "false_completion": { "type": "boolean" },
-    "reason": { "type": "string", "minLength": 1 },
-    "lessons_ref": { "type": ["string", "null"] }
+    "schema": {
+      "const": "loop-engineer/terminal@1"
+    },
+    "state": {
+      "enum": [
+        "Succeeded",
+        "FailedUnverifiable",
+        "FailedBlocked",
+        "FailedBudget",
+        "FailedSafety",
+        "FailedSpecGap",
+        "AbortedByHuman"
+      ]
+    },
+    "iteration_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "criteria_met": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "uniqueItems": true
+    },
+    "false_completion": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lessons_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "completion_policy": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "const": "all_required"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "mode": "all_required"
+      }
+    }
   },
   "additionalProperties": true
 }

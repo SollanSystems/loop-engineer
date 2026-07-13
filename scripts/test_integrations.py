@@ -2,7 +2,7 @@
 evidence to one of the 7 typed terminal states. Pins the fixed precedence
 (safety -> human -> blocked -> budget -> spec-gap -> gate verdict), the
 false-completion invariant, and the structural unreachability of Succeeded
-without a green gate + clean anticheat + a met criterion + evidence."""
+without a green gate + clean anticheat + every required criterion + evidence."""
 
 from __future__ import annotations
 
@@ -54,7 +54,57 @@ def test_succeeded_via_green_gate_clean_anticheat_met_criterion():
     assert body["state"] == "Succeeded"
     assert body["false_completion"] is False
     assert body["schema"] == "loop-engineer/terminal@1"
+    assert body["completion_policy"] == {"mode": "all_required"}
     assert body["evidence"] == ["a.txt"]
+
+
+def test_partial_criteria_cannot_succeed_even_with_green_gate():
+    body = to_terminal_state(
+        EngineOutcome(**_ENDED),
+        _gate(True, True),
+        _CLEAN_AC,
+        {"1": True, "2": False},
+    )
+    assert body["state"] == "FailedUnverifiable"
+    assert "2" in body["reason"]
+
+
+def test_unsupported_completion_policy_fails_as_spec_gap():
+    body = to_terminal_state(
+        EngineOutcome(**_ENDED),
+        _gate(True, True),
+        _CLEAN_AC,
+        {"1": True},
+        completion_policy={"mode": "any_required"},
+    )
+    assert body["state"] == "FailedSpecGap"
+    assert "unsupported completion policy" in body["reason"]
+
+
+def test_malformed_criteria_map_fails_as_spec_gap():
+    blank_key = to_terminal_state(
+        EngineOutcome(**_ENDED), _gate(True, True), _CLEAN_AC, {"": True},
+    )
+    assert blank_key["state"] == "FailedSpecGap"
+    assert "criteria identifiers" in blank_key["reason"]
+
+    bad_value = to_terminal_state(
+        EngineOutcome(**_ENDED), _gate(True, True), _CLEAN_AC, {"1": 1.0},
+    )
+    assert bad_value["state"] == "FailedSpecGap"
+    assert "true, false, or null" in bad_value["reason"]
+
+
+def test_blank_or_duplicate_artifacts_cannot_certify_success():
+    for artifacts in ([""], ["a.txt", "a.txt"]):
+        body = to_terminal_state(
+            EngineOutcome(reached_end=True, artifacts=artifacts),
+            _gate(True, True),
+            _CLEAN_AC,
+            {"1": True},
+        )
+        assert body["state"] == "FailedUnverifiable"
+        assert "invalid evidence artifacts" in body["reason"]
 
 
 def test_false_completion_invariant_visible_green_holdout_red():
@@ -155,7 +205,8 @@ def test_body_feeds_emit_terminate_round_trip(tmp_path):
     body = to_terminal_state(EngineOutcome(**_ENDED), _gate(True, True), _CLEAN_AC, {"1": True})
     path = emit.terminate(
         ws, state=body["state"], criteria_met=body["criteria_met"], evidence=body["evidence"],
-        false_completion=body["false_completion"], reason=body["reason"], iteration_id=1,
+        false_completion=body["false_completion"], completion_policy=body["completion_policy"],
+        reason=body["reason"], iteration_id=1,
     )
     assert path.is_file()
 
@@ -165,6 +216,12 @@ def test_module_imports_no_engine_and_no_scripts():
     imports = [l for l in source.splitlines() if re.match(r"\s*(import|from)\s", l)]
     for line in imports:
         assert "langgraph" not in line and "temporalio" not in line and "scripts" not in line, line
-    # pure stdlib: the only allowed import roots
+    # pure stdlib plus the shared, side-effect-free policy evaluator
+    allowed_prefixes = (
+        "from __future__ import",
+        "from dataclasses import",
+        "from typing import",
+        "from .completion import",
+    )
     for line in imports:
-        assert re.match(r"\s*(from\s+(__future__|dataclasses|typing)\s+import|import\s+(dataclasses|typing))", line), line
+        assert line.lstrip().startswith(allowed_prefixes), line

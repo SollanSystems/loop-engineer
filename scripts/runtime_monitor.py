@@ -164,12 +164,23 @@ def _missing_report(paths, missing: list[str]) -> dict:
     }
 
 
-def _terminal_disposition(state: dict) -> str | None:
+def _terminal_disposition(paths, state: dict) -> str | None:
     """The loop's terminal state, if it has reached one. A finished loop must
-    not be told to `continue` — the in-flight detectors don't apply to it."""
+    not be told to `continue` — the in-flight detectors don't apply to it.
+    An existing terminal_state.json is authoritative even when state.json was
+    never stamped (the writer's two files are not one transaction)."""
     terminal = state.get("terminal_state")
     if terminal:
         return terminal
+    terminal_path = paths.loop_dir / "terminal_state.json"
+    if terminal_path.is_file():
+        try:
+            record = json.loads(terminal_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return "terminal"
+        if isinstance(record, dict) and record.get("state"):
+            return str(record["state"])
+        return "terminal"
     if state.get("state") == "terminal":
         return "terminal"
     return None
@@ -260,7 +271,7 @@ def health_report(loop_dir) -> dict:
             "paths": {"state": str(paths.state), "runlog": str(paths.runlog)},
         }
 
-    terminal = _terminal_disposition(state)
+    terminal = _terminal_disposition(paths, state)
     if terminal is not None:
         return _terminal_report(paths, state, terminal)
 

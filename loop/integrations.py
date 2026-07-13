@@ -9,8 +9,8 @@ anticheat_scan.py scan(...)`` JSON), and this module assembles the
 The fixed precedence — safety -> human -> blocked -> budget -> spec-gap ->
 gate verdict — means a gamed (FailedSafety) or human-killed (AbortedByHuman)
 run can never launder itself into Succeeded. ``Succeeded`` is reachable ONLY
-via a green gate verdict + anticheat clean of HIGH/CRITICAL findings + at
-least one met criterion + non-empty evidence. ``false_completion`` is
+via a green gate verdict + anticheat clean of HIGH/CRITICAL findings + every
+required criterion met + non-empty evidence. ``false_completion`` is
 copied out of the gate result, never synthesized. A missing or
 structurally-empty gate/anticheat input fails closed to
 ``FailedUnverifiable`` — the same posture as ``holdout_gate`` on an empty
@@ -24,6 +24,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Sequence
+
+from .completion import (
+    CompletionPolicyError,
+    criteria_satisfy_completion,
+    normalize_completion_policy,
+    unmet_required_criteria,
+)
 
 TERMINAL_SCHEMA = "loop-engineer/terminal@1"
 
@@ -71,6 +78,8 @@ def to_terminal_state(
     gate_verdict: dict | None,
     anticheat: dict | None,
     criteria_met: dict[str, bool | None],
+    *,
+    completion_policy: object | None = None,
 ) -> dict:
     """Project an engine terminal + gate/anticheat evidence into a terminal@1 body.
 
@@ -83,12 +92,43 @@ def to_terminal_state(
     ac = anticheat if isinstance(anticheat, dict) else {}
     false_completion = gate.get("false_completion") is True
 
+    criteria_error: str | None = None
+    if not isinstance(criteria_met, dict):
+        criteria_error = "criteria_met must be an object"
+        canonical_criteria: dict[str, bool | None] = {}
+    else:
+        canonical_criteria = {}
+        for key, value in criteria_met.items():
+            if not isinstance(key, str) or not key.strip():
+                criteria_error = "criteria identifiers must be non-empty strings"
+                continue
+            if value is not True and value is not False and value is not None:
+                criteria_error = f"criterion {key!r} must be true, false, or null"
+                continue
+            canonical_criteria[key] = value
+
+    artifacts = tuple(str(item) for item in outcome.artifacts)
+    evidence_error: str | None = None
+    if any(not item.strip() for item in artifacts):
+        evidence_error = "evidence artifact paths must be non-empty strings"
+    elif len(set(artifacts)) != len(artifacts):
+        evidence_error = "evidence artifact paths must be unique"
+
+    try:
+        normalized_policy = normalize_completion_policy(completion_policy)
+        policy_error: str | None = None
+    except CompletionPolicyError as exc:
+        # Projection APIs fail closed rather than throwing a runtime result away.
+        normalized_policy = normalize_completion_policy()
+        policy_error = str(exc)
+
     def body(state: str, reason: str) -> dict:
         return {
             "schema": TERMINAL_SCHEMA,
             "state": state,
-            "criteria_met": {str(k): v is True for k, v in criteria_met.items()},
-            "evidence": list(outcome.artifacts),
+            "criteria_met": {key: value is True for key, value in canonical_criteria.items()},
+            "completion_policy": normalized_policy,
+            "evidence": list(artifacts),
             "false_completion": false_completion,
             "reason": reason,
         }
@@ -101,7 +141,11 @@ def to_terminal_state(
         return body("FailedBlocked", f"unrecoverable external block: {outcome.external_error}")
     if outcome.budget_exhausted:
         return body("FailedBudget", "engine budget cap hit (steps/tokens/wall-clock/cost)")
-    unmapped = sorted(str(k) for k, v in criteria_met.items() if v is None)
+    if policy_error is not None:
+        return body("FailedSpecGap", "invalid completion policy: " + policy_error)
+    if criteria_error is not None:
+        return body("FailedSpecGap", "invalid criteria map: " + criteria_error)
+    unmapped = sorted(key for key, value in canonical_criteria.items() if value is None)
     if unmapped:
         return body("FailedSpecGap", "criteria with no mapped check: " + ", ".join(unmapped))
     if not _valid_anticheat(ac):
@@ -116,10 +160,20 @@ def to_terminal_state(
         return body("FailedUnverifiable", f"gate verdict {gate['verdict']!r} — cannot certify Succeeded")
     if false_completion:
         return body("FailedUnverifiable", "gate flags false_completion — refusing Succeeded")
-    if not any(v is True for v in criteria_met.values()):
-        return body("FailedUnverifiable", "green gate but no met criterion — cannot certify")
-    if not outcome.artifacts:
+    if not criteria_satisfy_completion(canonical_criteria, normalized_policy):
+        unmet = unmet_required_criteria(canonical_criteria)
+        detail = ", ".join(unmet) if unmet else "no criteria were declared"
+        return body(
+            "FailedUnverifiable",
+            "green gate but not all required criteria are proven true: " + detail,
+        )
+    if evidence_error is not None:
+        return body("FailedUnverifiable", "invalid evidence artifacts: " + evidence_error)
+    if not artifacts:
         return body("FailedUnverifiable", "green gate but no evidence artifacts — cannot certify")
     if not outcome.reached_end:
         return body("FailedUnverifiable", "engine did not reach its own terminal signal")
-    return body("Succeeded", "holdout gate green, anticheat clean, criteria met with evidence")
+    return body(
+        "Succeeded",
+        "holdout gate green, anticheat clean, all required criteria met with evidence",
+    )

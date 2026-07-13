@@ -216,7 +216,7 @@ terminal outcome:
   .loop/
     manifest.yaml        # contract metadata
     state.json           # live FSM cursor
-    terminal_state.json  # final exit record; written once — emit refuses overwrite without force=True
+    terminal_state.json  # final exit record; immutable once written
     artifacts/           # evidence bundles and intermediate outputs
     approvals/           # approval requests and resolutions
     checkpoints/         # recoverable snapshots
@@ -301,7 +301,8 @@ otherwise, the stop is blocked with the exact doctor issues. No-op without
 **Any Python runtime** — `loop.emit` is a pure-stdlib writer for foreign
 orchestrators (LangGraph, or anything that can call four functions):
 `open_contract`, `append_iteration`, `append_receipt`, `terminate`. The writer
-refuses an evidence-free `Succeeded` at write time. Recipe:
+refuses `Succeeded` unless every declared criterion is true and evidence is
+present. Recipe:
 [docs/integrations/langgraph.md](docs/integrations/langgraph.md).
 
 **CI** — one workflow step validates the contract and publishes a scorecard:
