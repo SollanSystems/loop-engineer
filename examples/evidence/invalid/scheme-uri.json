@@ -1,0 +1,10 @@
+{
+  "schema": "loop-engineer/evidence@1",
+  "id": "scheme-uri",
+  "kind": "report",
+  "uri": "https://example.com/proof.txt",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "media_type": "text/plain",
+  "produced_by": {"run_id": "run-1", "task_id": null, "attempt": null, "executor": "test"},
+  "created_at": "2026-07-13T00:00:00Z"
+}
