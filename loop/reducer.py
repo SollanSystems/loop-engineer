@@ -16,28 +16,39 @@ class EventReplayError(ValueError):
 
 def _empty_projection(run_id: str | None) -> dict[str, Any]:
     return {"run_id": run_id, "state": None, "iteration_id": None, "active_task": None,
-            "terminal": None, "runlog_entries": [], "receipts": [], "event_count": 0,
+            "terminal": None, "runlog_entries": [], "receipts": [], "superseded_history": [], "event_count": 0,
             "last_sequence": None}
 
 
 def _validate_terminal_payload_semantics(payload: Mapping[str, Any]) -> None:
     state = payload.get("state")
     if state not in TERMINAL_STATES:
-        raise EventReplayError(f"terminal_written payload has non-canonical state {state!r}")
+        raise EventReplayError(f"terminal payload has non-canonical state {state!r}")
     if state != "Succeeded":
         return
     if payload.get("false_completion") is True:
-        raise EventReplayError("refusing Succeeded terminal_written with false_completion=True (G1)")
+        raise EventReplayError("refusing Succeeded terminal with false_completion=True (G1)")
     try:
         policy = normalize_completion_policy(payload.get("completion_policy"))
     except CompletionPolicyError as exc:
         raise EventReplayError(f"invalid completion_policy: {exc}") from exc
     criteria = payload.get("criteria_met")
     if not isinstance(criteria, dict) or not criteria_satisfy_completion(criteria, policy):
-        raise EventReplayError("Succeeded terminal_written does not satisfy the completion policy (G1)")
+        raise EventReplayError("Succeeded terminal does not satisfy the completion policy (G1)")
     evidence = payload.get("evidence")
     if not isinstance(evidence, list) or not evidence:
-        raise EventReplayError("Succeeded terminal_written has empty evidence (G1)")
+        raise EventReplayError("Succeeded terminal has empty evidence (G1)")
+
+
+def _validate_superseded_payload_semantics(payload: Mapping[str, Any]) -> None:
+    _validate_terminal_payload_semantics(payload)
+    if not isinstance(payload.get("justification"), str) or not payload["justification"].strip():
+        raise EventReplayError("terminal_superseded payload missing non-empty justification")
+    authority = payload.get("authority")
+    if (not isinstance(authority, dict)
+            or not isinstance(authority.get("by"), str) or not authority.get("by", "").strip()
+            or not isinstance(authority.get("at"), str) or not authority.get("at", "").strip()):
+        raise EventReplayError("terminal_superseded payload missing authority.by/authority.at")
 
 
 def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, Any]:
@@ -52,9 +63,12 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
     expected_sequence = 0 if state["last_sequence"] is None else state["last_sequence"] + 1
     if event["sequence"] != expected_sequence:
         raise EventReplayError(f"non-monotonic sequence: expected {expected_sequence}, got {event['sequence']!r}")
-    if state["terminal"] is not None:
-        raise EventReplayError("event appended after terminal — terminal is immutable")
     event_type = event["type"]
+    if state["terminal"] is not None:
+        if event_type != "terminal_superseded":
+            raise EventReplayError("event appended after terminal — terminal is immutable")
+    elif event_type == "terminal_superseded":
+        raise EventReplayError("terminal_superseded has nothing to supersede (no terminal record yet)")
     if event_type == "contract_opened" and state["last_sequence"] is not None:
         raise EventReplayError("contract_opened must be the first event in a run")
     if event_type != "contract_opened" and state["state"] is None:
@@ -86,12 +100,23 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
         _validate_terminal_payload_semantics(payload)
         new_state["state"] = fsm.TERMINAL_MARKER
         new_state["terminal"] = dict(payload, event_id=event["event_id"], ts=event["ts"])
+    elif event_type == "terminal_superseded":
+        current_terminal = state["terminal"]
+        if event.get("causation_id") != current_terminal.get("event_id"):
+            raise EventReplayError(
+                "terminal_superseded.causation_id must reference the event_id "
+                "of the terminal record it corrects"
+            )
+        _validate_superseded_payload_semantics(payload)
+        history_entry = {**current_terminal, "superseded_by": event["event_id"], "superseded_at": event["ts"]}
+        new_state["superseded_history"] = state["superseded_history"] + [history_entry]
+        new_state["terminal"] = dict(payload, event_id=event["event_id"], ts=event["ts"])
     return new_state
 
 
 def reduce_events(events: Iterable[Mapping[str, Any]], *, initial: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Fold events without mutating the supplied stream or initial projection."""
-    state = ({**initial, "runlog_entries": list(initial["runlog_entries"]), "receipts": list(initial["receipts"])} if initial is not None else _empty_projection(None))
+    state = ({**initial, "runlog_entries": list(initial["runlog_entries"]), "receipts": list(initial["receipts"]), "superseded_history": list(initial["superseded_history"])} if initial is not None else _empty_projection(None))
     for event in events:
         state = _reduce_one(state, event)
     return state
