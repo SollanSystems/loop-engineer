@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/evidence@1",
+  "title": "Loop Engineer Evidence @1",
+  "description": "A hashed evidence record with artifact provenance. It is standalone in v1; see reference/repo-os-contract.md #17.",
+  "type": "object",
+  "required": ["schema", "id", "kind", "uri", "sha256", "media_type", "produced_by", "created_at"],
+  "properties": {
+    "schema": {"const": "loop-engineer/evidence@1"},
+    "id": {"type": "string", "minLength": 1},
+    "kind": {"type": "string", "minLength": 1, "description": "Open vocabulary; examples include verify-bundle, log, diff, screenshot, and report."},
+    "uri": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.\\-]*://).+$", "description": "Workspace-relative POSIX path, never an absolute path or URI."},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "media_type": {"type": "string", "minLength": 1},
+    "produced_by": {
+      "type": "object",
+      "required": ["run_id", "task_id", "attempt", "executor"],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "task_id": {"type": ["string", "null"]},
+        "attempt": {"type": ["integer", "null"], "minimum": 1},
+        "executor": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "verified_by": {
+      "type": ["object", "null"],
+      "default": null,
+      "properties": {
+        "by": {"type": "string", "minLength": 1},
+        "at": {"type": "string", "minLength": 1, "description": "ISO-8601 timestamp."}
+      },
+      "required": ["by", "at"],
+      "additionalProperties": true
+    },
+    "created_at": {"type": "string", "minLength": 1, "description": "ISO-8601 UTC timestamp."},
+    "policy_result": {
+      "type": ["object", "null"],
+      "default": null,
+      "properties": {"ok": {"type": "boolean"}},
+      "required": ["ok"],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

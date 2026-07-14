@@ -616,6 +616,31 @@ tampered or foreign-sourced event stream still cannot talk past.
 
 ---
 
+## 17. `loop-engineer/evidence@1` — hashed evidence + artifact provenance
+
+`schemas/evidence.schema.json` defines a standalone, hashed record that names
+an evidence artifact by workspace-relative URI, SHA-256 digest, media type,
+producer, optional verifier, and optional policy result. `loop.evidence`
+validates that portable record in either JSON Schema or complete structural
+fallback mode; `verify_evidence()` additionally resolves the URI beneath a
+workspace, rejects traversal and symlink escapes, and verifies the file hash.
+`artifact_object_path()` supplies the v1 content-addressed object layout under
+`.loop/artifacts/objects/` without writing it.
+
+**Scope boundary:** like plan@1 and event@1 (§15/§16), evidence@1 is
+**standalone in v1** and is **not yet** an artifact `loop doctor` reads from a
+scaffolded workspace. Writer and doctor wiring are deferred to the
+execution-runtime milestone.
+
+**Artifact provenance:** `kind` remains an open vocabulary (for example,
+`verify-bundle`, `log`, `diff`, `screenshot`, or `report`), while `produced_by`
+identifies the run, task, attempt, and executor that produced it. Verification
+does not trust a path string: resolution and containment provide one mechanism
+for rejecting both `..` traversal and symlink escapes before a 64 KiB-chunked
+SHA-256 comparison is attempted.
+
+---
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents

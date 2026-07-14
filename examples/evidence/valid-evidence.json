@@ -1,0 +1,22 @@
+{
+  "schema": "loop-engineer/evidence@1",
+  "id": "evidence-verify-1",
+  "kind": "verify-bundle",
+  "uri": "proofs/verify.json",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "media_type": "application/json",
+  "produced_by": {
+    "run_id": "run-20260713",
+    "task_id": "verify",
+    "attempt": 1,
+    "executor": "loop-engineer"
+  },
+  "verified_by": {
+    "by": "reviewer",
+    "at": "2026-07-13T00:00:00Z"
+  },
+  "created_at": "2026-07-13T00:00:00Z",
+  "policy_result": {
+    "ok": true
+  }
+}
