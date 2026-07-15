@@ -18,9 +18,11 @@ keywords = ["agent", "loop", "agentic", "verification", "harness", "orchestratio
 #   schemas  — jsonschema runs real JSON-Schema validation against schemas/*.json;
 #              absent, loop/contract.py falls back to structural hand checks.
 # So `pip install -e .` pulls in zero third-party runtime dependencies.
+# The `dev` extra supplies contributor-only test tooling; it never affects runtime, doctor, or validate behavior.
 [project.optional-dependencies]
 yaml = ["pyyaml>=6"]
 schemas = ["jsonschema>=4"]
+dev = ["hypothesis>=6"]
 
 # Console entry points. Both install modes work: `loop.__main__:main` resolves
 # schemas/templates/tool-scripts bundle-first via loop/_resources.py (wheel
