@@ -183,8 +183,10 @@ def append_iteration(
     if not runlog.exists():
         runlog = paths.workspace / "RUNLOG.md"
         runlog.write_text(f"# RUNLOG.md — {paths.workspace.name}\n", encoding="utf-8")
-    with runlog.open("a", encoding="utf-8") as fh:
-        fh.write("\n".join(lines))
+    header = f"## Iteration {iteration_id} —"
+    if header not in runlog.read_text(encoding="utf-8"):
+        with runlog.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
 
     current["iteration_id"] = iteration_id
     if task_id:

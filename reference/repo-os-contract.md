@@ -596,6 +596,16 @@ same input sequence always produces a byte-identical result.
 on-disk location is `.loop/events.db`, with one run discovered per store by
 the runtime readers (multi-run support remains deferred).
 
+**Dispatch crash boundary:** `loop run` verifies first, then commits its
+`iteration_appended` (or `terminal_written`) event with a compare-and-swap
+sequence. That committed event is the source of truth; only afterwards are
+`RUNLOG.md` and `.loop/state.json` materialized from the exact recorded
+payload. A later `loop run` replays missing legacy materialization before
+selecting work, so a crash after the event commit never duplicates a dispatch.
+TASKS.json is read-only declarative input for dispatch: event-log
+`task_passed` facts supply dynamic completion and dispatch does not rewrite
+task status or evidence.
+
 **Event types:** `contract_opened | iteration_appended | receipt_appended |
 terminal_written` — one-to-one with `loop.emit`'s four writer operations
 (`open_contract`/`append_iteration`/`append_receipt`/`terminate`), so a
