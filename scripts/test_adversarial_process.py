@@ -179,25 +179,24 @@ def test_sqlite_raw_file_tamper_bypassing_sql_interface_is_not_detected(tmp_path
     assert SQLiteEventStore(path).read("run")[0]["payload"] == {"workspace": "X"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="issue #67: verify_evidence TOCTOU — containment is not rechecked before the hash read",
-)
 def test_symlink_swap_between_containment_check_and_hash_read_escapes_workspace(tmp_path, monkeypatch) -> None:
     inside = tmp_path / "proof.txt"
     outside = tmp_path.parent / f"{tmp_path.name}-outside-proof.txt"
     inside.write_bytes(b"inside")
     outside.write_bytes(b"outside")
     record = _evidence("proof.txt", b"outside")
-    real_is_file = Path.is_file
+    real_open = os.open
+    swapped = False
 
-    def swap_after_containment(path: Path) -> bool:
-        if path == inside:
+    def swap_after_containment(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == inside and not swapped:
             inside.unlink()
             os.symlink(outside, inside)
-        return real_is_file(path)
+            swapped = True
+        return real_open(path, flags, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "is_file", swap_after_containment)
+    monkeypatch.setattr(os, "open", swap_after_containment)
 
     try:
         report = verify_evidence(record, workspace_root=tmp_path)
@@ -205,3 +204,4 @@ def test_symlink_swap_between_containment_check_and_hash_read_escapes_workspace(
         outside.unlink(missing_ok=True)
 
     assert report["ok"] is False
+    assert "missing_evidence_path" in {issue["code"] for issue in report["issues"]}
