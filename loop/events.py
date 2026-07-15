@@ -14,13 +14,14 @@ from .contract import ContractIssue, _resolve_requested_mode, _schemas_dir
 from .emit import _ITERATION_OUTCOMES, _RECEIPT_OUTCOMES, _RECEIPT_ROLES
 
 EVENT_SCHEMA_ID = "loop-engineer/event@1"
-EVENT_TYPES = ("contract_opened", "iteration_appended", "receipt_appended", "terminal_written")
+EVENT_TYPES = ("contract_opened", "iteration_appended", "receipt_appended", "terminal_written", "terminal_superseded")
 
 _PAYLOAD_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "contract_opened": ("workspace",),
     "iteration_appended": ("iteration_id", "outcome"),
     "receipt_appended": ("iteration_id", "role", "model", "outcome"),
     "terminal_written": ("state", "criteria_met", "evidence", "false_completion"),
+    "terminal_superseded": ("state", "criteria_met", "evidence", "false_completion", "justification", "authority"),
 }
 
 _CREATE_EVENTS_TABLE = """
@@ -115,6 +116,24 @@ def _payload_issues(event_type: str, payload: Any) -> list[str]:
             issues.append("terminal_written.evidence must be an array")
         if "false_completion" in payload and not isinstance(payload["false_completion"], bool):
             issues.append("terminal_written.false_completion must be a boolean")
+    elif event_type == "terminal_superseded":
+        if "state" in payload and not isinstance(payload["state"], str):
+            issues.append("terminal_superseded.state must be a string")
+        if "criteria_met" in payload and not isinstance(payload["criteria_met"], dict):
+            issues.append("terminal_superseded.criteria_met must be an object")
+        if "evidence" in payload and not isinstance(payload["evidence"], list):
+            issues.append("terminal_superseded.evidence must be an array")
+        if "false_completion" in payload and not isinstance(payload["false_completion"], bool):
+            issues.append("terminal_superseded.false_completion must be a boolean")
+        if "justification" in payload and (not isinstance(payload["justification"], str)
+                                            or not payload["justification"].strip()):
+            issues.append("terminal_superseded.justification must be a non-empty string")
+        if "authority" in payload:
+            authority = payload["authority"]
+            if (not isinstance(authority, dict)
+                    or not isinstance(authority.get("by"), str) or not authority.get("by", "").strip()
+                    or not isinstance(authority.get("at"), str) or not authority.get("at", "").strip()):
+                issues.append("terminal_superseded.authority must be an object with non-empty by/at strings")
     return issues
 
 

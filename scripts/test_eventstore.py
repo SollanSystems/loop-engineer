@@ -117,3 +117,66 @@ def test_concurrent_appends_are_serialized(tmp_path) -> None:
     with ThreadPoolExecutor(max_workers=8) as pool:
         sequences = list(pool.map(append, range(8)))
     assert set(sequences) == set(range(1, 9))
+
+
+def terminal_superseded_event(**overrides: object) -> dict[str, object]:
+    result: dict[str, object] = {
+        "schema": EVENT_SCHEMA_ID, "event_id": "superseded-1", "run_id": "run-1", "sequence": 1,
+        "type": "terminal_superseded", "actor": "test", "causation_id": "terminal-1",
+        "correlation_id": None, "ts": "2026-01-01T00:00:01+00:00",
+        "payload": {"state": "FailedSafety", "criteria_met": {"done": True}, "evidence": ["proof"],
+                    "false_completion": False, "justification": "audit correction",
+                    "authority": {"by": "ops", "at": "2026-01-01T00:00:01+00:00"}},
+    }
+    result.update(overrides)
+    return result
+
+
+def test_event_types_include_terminal_superseded_and_match_schema_enum() -> None:
+    schema = __import__("json").load(open("schemas/event.schema.json", encoding="utf-8"))
+    from loop.events import EVENT_TYPES
+
+    assert "terminal_superseded" in EVENT_TYPES
+    assert "terminal_superseded" in schema["properties"]["type"]["enum"]
+    assert set(EVENT_TYPES) == set(schema["properties"]["type"]["enum"])
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_terminal_superseded_validates_in_basic_and_release_modes(mode: str) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(terminal_superseded_event(), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+@pytest.mark.parametrize("payload", [
+    {"criteria_met": {}, "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": 1, "criteria_met": {}, "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": [], "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": "proof", "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": 0, "justification": "j", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "justification": " ", "authority": {"by": "a", "at": "t"}},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "justification": "j"},
+    {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "", "at": "t"}},
+])
+def test_terminal_superseded_rejects_malformed_payload_fields(mode: str, payload: dict[str, object]) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(terminal_superseded_event(payload=payload), mode=mode)["ok"] is False
+    with pytest.raises(EventValidationError):
+        SQLiteEventStore(":memory:").append("run", "terminal_superseded", payload, actor="test")
+
+
+def test_store_appends_well_formed_terminal_superseded(tmp_path) -> None:
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("run", "contract_opened", {"workspace": "w"}, actor="test")
+    terminal = store.append("run", "terminal_written", {"state": "Succeeded", "criteria_met": {"done": True},
+                             "evidence": ["proof"], "false_completion": False}, actor="test")
+    correction = store.append("run", "terminal_superseded", terminal_superseded_event()["payload"], actor="test",
+                              causation_id=terminal["event_id"])
+    assert correction["type"] == "terminal_superseded"
+    assert correction["causation_id"] == terminal["event_id"]

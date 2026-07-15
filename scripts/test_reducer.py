@@ -67,3 +67,96 @@ def test_reducer_rejects_event_after_terminal() -> None:
     events.append({**events[-1], "event_id": "later", "sequence": 5, "type": "receipt_appended", "payload": {"iteration_id": 2, "role": "read", "model": "m", "outcome": "ok"}})
     with pytest.raises(EventReplayError, match="immutable"):
         reduce_events(events)
+
+
+def superseded_event(*, event_id: str = "e5", sequence: int = 5, causation_id: str | None = "e4",
+                     payload: dict[str, object] | None = None) -> dict[str, object]:
+    terminal = stream()[-1]
+    return {**terminal, "event_id": event_id, "sequence": sequence, "type": "terminal_superseded",
+            "ts": f"2026-01-01T00:00:{sequence:02d}+00:00", "causation_id": causation_id,
+            "payload": payload if payload is not None else {
+                "state": "FailedSafety", "criteria_met": {"done": True}, "evidence": ["proof"],
+                "false_completion": False, "justification": "audit correction",
+                "authority": {"by": "ops", "at": "2026-01-01T00:00:05+00:00"},
+            }}
+
+
+def test_reducer_admits_terminal_superseded_after_terminal() -> None:
+    result = reduce_events(stream() + [superseded_event()])
+    assert result["terminal"]["event_id"] == "e5"
+    assert [entry["event_id"] for entry in result["superseded_history"]] == ["e4"]
+
+
+@pytest.mark.parametrize("event_type, payload", [
+    ("contract_opened", {"workspace": "w"}),
+    ("iteration_appended", {"iteration_id": 3, "outcome": "task_passed"}),
+    ("receipt_appended", {"iteration_id": 2, "role": "read", "model": "m", "outcome": "ok"}),
+    ("terminal_written", {"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False}),
+])
+def test_reducer_rejects_every_other_event_type_after_terminal(event_type: str, payload: dict[str, object]) -> None:
+    terminal = stream()[-1]
+    events = stream() + [{**terminal, "event_id": "later", "sequence": 5, "type": event_type, "payload": payload}]
+    with pytest.raises(EventReplayError, match="event appended after terminal — terminal is immutable"):
+        reduce_events(events)
+
+
+def test_reducer_rejects_terminal_superseded_before_any_terminal() -> None:
+    event = superseded_event(event_id="e0", sequence=0, causation_id=None)
+    with pytest.raises(EventReplayError, match="nothing to supersede"):
+        reduce_events([event])
+
+
+@pytest.mark.parametrize("causation_id", ["wrong", None])
+def test_reducer_rejects_terminal_superseded_with_mismatched_causation_id(causation_id: str | None) -> None:
+    with pytest.raises(EventReplayError, match="causation_id"):
+        reduce_events(stream() + [superseded_event(causation_id=causation_id)])
+
+
+def test_reducer_rejects_terminal_superseded_citing_a_stale_superseded_record() -> None:
+    events = stream() + [superseded_event(), superseded_event(event_id="e6", sequence=6, causation_id="e4")]
+    with pytest.raises(EventReplayError, match="causation_id"):
+        reduce_events(events)
+
+
+def test_reducer_chains_multiple_terminal_supersessions_preserving_history_order() -> None:
+    result = reduce_events(stream() + [superseded_event(), superseded_event(event_id="e6", sequence=6, causation_id="e5")])
+    assert [entry["event_id"] for entry in result["superseded_history"]] == ["e4", "e5"]
+    assert [entry["superseded_by"] for entry in result["superseded_history"]] == ["e5", "e6"]
+    assert result["terminal"]["event_id"] == "e6"
+
+
+@pytest.mark.parametrize("payload, message", [
+    ({"state": "succeeded", "criteria_met": {"done": True}, "evidence": ["proof"], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}}, "non-canonical state"),
+    ({"state": "Succeeded", "criteria_met": {"done": True}, "evidence": ["proof"], "false_completion": True, "justification": "j", "authority": {"by": "a", "at": "t"}}, "false_completion"),
+    ({"state": "Succeeded", "criteria_met": {"done": False}, "evidence": ["proof"], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}}, "completion policy"),
+    ({"state": "Succeeded", "criteria_met": {"done": True}, "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "a", "at": "t"}}, "empty evidence"),
+])
+def test_reducer_terminal_superseded_enforces_g1_when_correcting_to_succeeded(payload: dict[str, object], message: str) -> None:
+    with pytest.raises(EventReplayError, match=message):
+        reduce_events(stream() + [superseded_event(payload=payload)])
+
+
+def test_reducer_terminal_superseded_allows_correcting_succeeded_to_a_failed_state() -> None:
+    events = stream() + [superseded_event(), superseded_event(event_id="e6", sequence=6, causation_id="e5", payload={
+        "state": "FailedBlocked", "criteria_met": {}, "evidence": [], "false_completion": False,
+        "justification": "blocker confirmed", "authority": {"by": "ops", "at": "t"},
+    })]
+    assert reduce_events(events)["terminal"]["state"] == "FailedBlocked"
+
+
+@pytest.mark.parametrize("payload, message", [
+    ({"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "authority": {"by": "a", "at": "t"}}, "justification"),
+    ({"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "justification": " " , "authority": {"by": "a", "at": "t"}}, "justification"),
+    ({"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "justification": "j"}, "authority"),
+    ({"state": "FailedSafety", "criteria_met": {}, "evidence": [], "false_completion": False, "justification": "j", "authority": {"by": "", "at": "t"}}, "authority"),
+])
+def test_reducer_rejects_terminal_superseded_missing_justification_or_authority(payload: dict[str, object], message: str) -> None:
+    with pytest.raises(EventReplayError, match=message):
+        reduce_events(stream() + [superseded_event(payload=payload)])
+
+
+def test_reducer_terminal_superseded_is_deterministic_and_resumable() -> None:
+    events = stream() + [superseded_event(), superseded_event(event_id="e6", sequence=6, causation_id="e5")]
+    whole = reduce_events(events)
+    assert json.dumps(whole, sort_keys=True) == json.dumps(reduce_events(events), sort_keys=True)
+    assert reduce_events(events[3:], initial=reduce_events(events[:3])) == whole

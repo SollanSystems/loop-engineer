@@ -641,6 +641,30 @@ SHA-256 comparison is attempted.
 
 ---
 
+## 18. `terminal_superseded` — administrative terminal corrections
+
+`terminal_superseded` is an append-only administrative event that corrects the
+currently effective terminal record while preserving the original decision and
+every later correction in the reducer projection's oldest-first
+`superseded_history`. Each correction carries the corrected terminal fields,
+non-empty `justification`, and `{by, at}` `authority`, and its `causation_id`
+must identify the terminal event it corrects; chained corrections therefore
+remain auditable without replacing any record.
+
+**Scope boundary:** this is a fifth event type with no corresponding
+`loop.emit` writer operation — deliberately: unlike the other four,
+`terminal_superseded` is administrative and event-log-only; §16's
+“one-to-one with `loop.emit`'s four writer operations” describes the other four
+types and predates this addition. It is not file-based `terminal@1` replacement
+or an `emit`/`doctor` workflow.
+
+**Domain enforcement:** the EventStore validates envelope and payload shape
+only; the reducer alone admits this type after a terminal, verifies its
+causation anchor, and reuses G1 completion checks when a correction sets
+`state` to `Succeeded`. All other event types remain forbidden after a terminal.
+
+---
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents
