@@ -118,6 +118,13 @@ def _extract_mode_flag(argv: list[str]) -> tuple[str | None, list[str]]:
     return mode, remaining
 
 
+def _extract_run_stub_flags(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Remove requested but not-yet-supported run-mode flags from argv."""
+    flags = {"--continuous", "--approve"}
+    present = [arg for arg in argv if arg in flags]
+    return present, [arg for arg in argv if arg not in flags]
+
+
 def _run_metrics(argv: list[str]) -> int:
     """`metrics [--baseline] <target>` — parses its own flag, then delegates to
     scripts/metrics.py (resolved bundle-first, repo-relative fallback)."""
@@ -166,6 +173,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown loop command: {command}", file=sys.stderr)
         print(_USAGE, file=sys.stderr)
         return 2
+
+    if command == "run":
+        stub_flags, argv = _extract_run_stub_flags(argv)
+        if stub_flags:
+            from .runner import RunModeNotImplementedError
+
+            print(f"run: {RunModeNotImplementedError(f'run mode {stub_flags[0]!r} is not implemented')}", file=sys.stderr)
+            return 2
 
     mode = None
     if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "run"}:

@@ -606,6 +606,14 @@ TASKS.json is read-only declarative input for dispatch: event-log
 `task_passed` facts supply dynamic completion and dispatch does not rewrite
 task status or evidence.
 
+**Verifier isolation:** A declared task verifier runs through
+`subprocess.run(shell=False, cwd=workspace, timeout=...)`, so it receives an
+argv rather than shell-interpreted input and cannot share the runner process.
+A timeout or nonzero exit becomes `VerifyOutcome(False, ...)`, never an
+exception. `VerifierExecutionError`, `VerifierNotImplementedError`, and
+`RunModeNotImplementedError` are the typed cases where dispatch could not be
+attempted.
+
 **Event types:** `contract_opened | iteration_appended | receipt_appended |
 terminal_written` — one-to-one with `loop.emit`'s four writer operations
 (`open_contract`/`append_iteration`/`append_receipt`/`terminate`), so a

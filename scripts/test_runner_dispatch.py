@@ -57,7 +57,7 @@ def test_dispatch_once_raises_not_ready_when_projection_state_is_not_execute_tas
     assert _hashes(w) == before
 
 def test_dispatch_once_default_verifier_raises_and_persists_no_event_or_legacy_write(tmp_path):
-    w, _ = _ws(tmp_path); before = _hashes(w)
+    w, _ = _ws(tmp_path, [{**_task("T-1"), "verify": ""}]); before = _hashes(w)
     with pytest.raises(VerifierNotImplementedError): dispatch_once(w)
     assert _hashes(w) == before
 
@@ -125,5 +125,5 @@ def test_run_nonexistent_target_gives_actionable_error_exit_2(tmp_path):
     r = _cli("run", str(tmp_path / "missing")); assert r.returncode == 2 and "does not exist" in r.stderr
 
 def test_run_cli_default_verifier_not_implemented_exits_2_no_traceback(tmp_path):
-    w, _ = _ws(tmp_path); r = _cli("run", str(w))
-    assert r.returncode == 2 and "verification is not implemented" in r.stderr and r.stdout == "" and "Traceback" not in r.stderr
+    w, _ = _ws(tmp_path, [{**_task("T-1"), "verify": ""}]); r = _cli("run", str(w))
+    assert r.returncode == 2 and "no verify command declared" in r.stderr and r.stdout == "" and "Traceback" not in r.stderr
