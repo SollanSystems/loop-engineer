@@ -11,13 +11,13 @@ from .runtime import RuntimeStoreError, replay_report, status_report
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay")
+_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay> <target>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|run> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
@@ -26,6 +26,7 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
        {_PROG} doctor|validate|verify [--mode basic|strict|release] <workspace-or-.loop>
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
+       {_PROG} run [--mode basic|strict|release] <workspace>
        {_PROG} plan-lint [--mode basic|strict|release] <plan-file>
 
 commands:
@@ -44,6 +45,7 @@ commands:
              mapping. --mode selects validation strength, same as doctor.
   status     Project the read-only event log and reconcile it with state.json.
   replay     Double-fold the read-only event log and check terminal synchronization.
+  run        Perform one event-sourced execute-task dispatch step.
 
 arguments:
   <target>     A workspace root or its .loop/ directory (all commands except plan-lint).
@@ -51,7 +53,7 @@ arguments:
 
 options:
   --mode {{basic,strict,release}}
-                (doctor/validate/verify/plan-lint/status/replay) basic forces structural
+                (doctor/validate/verify/plan-lint/status/replay/run) basic forces structural
                 checks; strict/release require jsonschema. Default: auto-detect.
   --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
                 run; exits non-zero and writes nothing otherwise.
@@ -166,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     mode = None
-    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay"}:
+    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "run"}:
         try:
             mode, argv = _extract_mode_flag(argv)
         except ValueError as exc:
@@ -227,6 +229,15 @@ def main(argv: list[str] | None = None) -> int:
             return _print_json(report)
         except (ValidationModeError, RuntimeStoreError) as exc:
             print(f"{command}: {exc}", file=sys.stderr)
+            return 2
+
+    if command == "run":
+        from .runner import RunnerError, dispatch_once
+
+        try:
+            return _print_json(dispatch_once(target, mode=mode))
+        except (RunnerError, RuntimeStoreError, ValidationModeError) as exc:
+            print(f"run: {exc}", file=sys.stderr)
             return 2
 
     # command == "inspect": keep the historical inspector script as the scoring
