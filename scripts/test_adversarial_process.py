@@ -181,7 +181,7 @@ def test_sqlite_raw_file_tamper_bypassing_sql_interface_is_not_detected(tmp_path
 
 @pytest.mark.xfail(
     strict=True,
-    reason="follow-up verify_evidence TOCTOU hardening: containment is not rechecked before the read",
+    reason="issue #67: verify_evidence TOCTOU — containment is not rechecked before the hash read",
 )
 def test_symlink_swap_between_containment_check_and_hash_read_escapes_workspace(tmp_path, monkeypatch) -> None:
     inside = tmp_path / "proof.txt"
