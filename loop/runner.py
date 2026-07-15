@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sqlite3
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -24,7 +26,15 @@ class NotReadyError(RunnerError):
 
 
 class VerifierNotImplementedError(RunnerError):
-    """S3a deliberately has no process-isolated verifier yet."""
+    """A selected task has no declared verification command."""
+
+
+class VerifierExecutionError(RunnerError):
+    """The declared verifier command could not be launched."""
+
+
+class RunModeNotImplementedError(RunnerError):
+    """A requested run mode is not implemented."""
 
 
 @dataclass(frozen=True)
@@ -34,6 +44,8 @@ class VerifyOutcome:
 
 
 Verifier = Callable[[dict[str, Any], Path], VerifyOutcome]
+
+_VERIFY_TIMEOUT_SECONDS = 300
 
 
 def done_task_ids(tasks: list[dict], projection: dict) -> set[str]:
@@ -59,9 +71,31 @@ def select_next_task(tasks: list[dict], projection: dict) -> dict | None:
 
 
 def _default_verifier(task: dict[str, Any], workspace: Path) -> VerifyOutcome:
-    raise VerifierNotImplementedError(
-        "verification is not implemented yet; supply a verifier through dispatch_once()"
-    )
+    return _subprocess_verifier(task, workspace)
+
+
+def _subprocess_verifier(task: dict[str, Any], workspace: Path) -> VerifyOutcome:
+    """Run the task's declared verifier in a separate, bounded process."""
+    cmd = task.get("verify")
+    if not isinstance(cmd, str) or not cmd.strip():
+        raise VerifierNotImplementedError(
+            f"no verify command declared for task {task.get('id')!r}; "
+            "add a non-empty TASKS.json `verify` field"
+        )
+    try:
+        argv = shlex.split(cmd, posix=True)
+    except ValueError as exc:
+        raise VerifierExecutionError(f"cannot parse verify command {cmd!r}: {exc}") from exc
+    try:
+        proc = subprocess.run(
+            argv, cwd=str(workspace), shell=False, timeout=_VERIFY_TIMEOUT_SECONDS,
+            capture_output=True, text=True, errors="replace",
+        )
+    except subprocess.TimeoutExpired:
+        return VerifyOutcome(False, summary=f"verify command timed out after {_VERIFY_TIMEOUT_SECONDS}s")
+    except OSError as exc:
+        raise VerifierExecutionError(f"cannot execute verify command {cmd!r}: {exc}") from exc
+    return VerifyOutcome(proc.returncode == 0, summary=(proc.stdout + proc.stderr)[-2000:])
 
 
 def _load_tasks(paths: Any) -> list[dict]:
@@ -165,6 +199,7 @@ def dispatch_once(
 ) -> dict[str, Any]:
     """Run at most one durable selection/verification/recording dispatch."""
     run_id, projection = _projection(target, mode)
+    # Safe only because each dispatch_once invocation appends at most one event.
     if projection.get("terminal") is not None:
         _reconcile_legacy_terminal(target, projection)
         return {"ok": True, "action": "noop_terminal", "run_id": run_id}
