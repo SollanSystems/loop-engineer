@@ -134,7 +134,7 @@ def test_crash_injection_after_subprocess_verify_completes_before_iteration_comm
     counter = tmp_path / "counter"
     command = _cmd(_script(tmp_path, "pass.py", f"from pathlib import Path\np=Path({str(counter)!r})\np.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n"))
     workspace, store = _ws(tmp_path, [_task(command)])
-    body = "import os,signal,sqlite3,sys\nreal=sqlite3.connect\nclass Kill(sqlite3.Connection):\n def execute(self,sql,*a,**kw):\n  if isinstance(sql,str) and sql.strip().upper()=='COMMIT': os.kill(os.getpid(),signal.SIGKILL)\n  return super().execute(sql,*a,**kw)\nsqlite3.connect=lambda *a,**kw: real(*a,factory=Kill,**kw)\nfrom loop.runner import dispatch_once\ndispatch_once(sys.argv[1])\n"
+    body = f"import sys\nsys.path.insert(0, {str(ROOT)!r})\n" + "import os,signal,sqlite3\nreal=sqlite3.connect\nclass Kill(sqlite3.Connection):\n def execute(self,sql,*a,**kw):\n  if isinstance(sql,str) and sql.strip().upper()=='COMMIT': os.kill(os.getpid(),signal.SIGKILL)\n  return super().execute(sql,*a,**kw)\nsqlite3.connect=lambda *a,**kw: real(*a,factory=Kill,**kw)\nfrom loop.runner import dispatch_once\ndispatch_once(sys.argv[1])\n"
     crash = _script(tmp_path, "crash.py", body)
     result = subprocess.run([sys.executable, "-B", str(crash), str(workspace)], cwd=ROOT, timeout=15)
     assert result.returncode == -signal.SIGKILL and len(store.read("run-1")) == 5
