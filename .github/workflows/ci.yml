@@ -24,7 +24,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install gate dependencies
-        run: python -m pip install --upgrade pip pyyaml pytest jsonschema
+        run: python -m pip install --upgrade pip pyyaml pytest jsonschema hypothesis
 
       - name: Frontmatter gate
         run: python -B scripts/validate_frontmatter.py

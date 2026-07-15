@@ -20,6 +20,8 @@ python3 -m loop inspect  examples/coverage-repair
 
 If you don't have the deps, prefix with `uv run --with pyyaml --with pytest`.
 
+`scripts/test_adversarial_kernel.py` also uses the dev-only `hypothesis` dependency: install it with `pip install -e ".[dev]"`, or use `uv run --with hypothesis --with pytest`. A plain install never pulls it in; without it, those property tests skip rather than fail.
+
 Most `self_eval.py` checks verify documentation-completeness — that the suite's
 canonical vocabulary (terminal states, repair-record fields, eval layers +
 metrics) is present in the skill prose — not that a running loop enforces it. The
