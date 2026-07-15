@@ -22,6 +22,8 @@ If you don't have the deps, prefix with `uv run --with pyyaml --with pytest`.
 
 `scripts/test_adversarial_kernel.py` also uses the dev-only `hypothesis` dependency: install it with `pip install -e ".[dev]"`, or use `uv run --with hypothesis --with pytest`. A plain install never pulls it in; without it, those property tests skip rather than fail.
 
+`scripts/test_adversarial_process.py` spawns short-lived child processes and sends real `SIGKILL` signals to simulate mid-transaction crashes; it is POSIX-only (CI uses `ubuntu-latest`), requires no new dependency, and adds a few seconds of subprocess wall time.
+
 Most `self_eval.py` checks verify documentation-completeness — that the suite's
 canonical vocabulary (terminal states, repair-record fields, eval layers +
 metrics) is present in the skill prose — not that a running loop enforces it. The
