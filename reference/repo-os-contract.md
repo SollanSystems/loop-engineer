@@ -592,10 +592,9 @@ ordered event stream into a deterministic state/runlog/receipts view — the
 same input sequence always produces a byte-identical result.
 
 **Scope boundary:** unlike manifest/state/tasks/terminal (§11), `event@1` is
-**not yet** an artifact `loop doctor` reads from a scaffolded workspace, and
-no workspace-relative on-disk location (e.g. `.loop/events.db`) has been
-decided. The execution-runtime milestone that wires a live event log into
-`scaffold`/`emit`/`doctor` will make that call.
+**not yet** an artifact `loop doctor` reads from a scaffolded workspace; its
+on-disk location is `.loop/events.db`, with one run discovered per store by
+the runtime readers (multi-run support remains deferred).
 
 **Event types:** `contract_opened | iteration_appended | receipt_appended |
 terminal_written` — one-to-one with `loop.emit`'s four writer operations
