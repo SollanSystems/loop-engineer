@@ -219,10 +219,10 @@ def test_verify_evidence_handles_artifact_io_failure_without_raising(tmp_path, m
     path = tmp_path / "proof.txt"
     path.write_text("evidence", encoding="utf-8")
 
-    def unavailable(self, *args, **kwargs):
+    def unavailable(*args, **kwargs):
         raise PermissionError("unavailable")
 
-    monkeypatch.setattr(Path, "open", unavailable)
+    monkeypatch.setattr(os, "open", unavailable)
     report = verify_evidence(evidence(uri="proof.txt"), workspace_root=tmp_path)
     assert "missing_evidence_path" in issue_codes(report)
 

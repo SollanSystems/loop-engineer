@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -151,18 +153,29 @@ def verify_evidence(evidence: Mapping[str, Any], *, workspace_root: str | Path) 
                 "issues": [ContractIssue("workspace_escape", f"evidence path escapes workspace: {uri}")]}
     checks["within_workspace"] = True
     try:
-        is_file = resolved.is_file()
+        fd = os.open(
+            resolved,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+        )
     except OSError:
         checks["path_exists"] = False
         return {"ok": False, "checks": checks,
                 "issues": [ContractIssue("missing_evidence_path", f"evidence path is unavailable: {uri}")]}
-    if not is_file:
+    try:
+        file_stat = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        checks["path_exists"] = False
+        return {"ok": False, "checks": checks,
+                "issues": [ContractIssue("missing_evidence_path", f"evidence path is unavailable: {uri}")]}
+    if not stat.S_ISREG(file_stat.st_mode):
+        os.close(fd)
         return {"ok": False, "checks": checks,
                 "issues": [ContractIssue("not_a_file", f"evidence path is not a file: {uri}")]}
 
     digest = hashlib.sha256()
     try:
-        with resolved.open("rb") as source:
+        with os.fdopen(fd, "rb") as source:
             while chunk := source.read(64 * 1024):
                 digest.update(chunk)
     except OSError:
