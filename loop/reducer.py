@@ -17,7 +17,7 @@ class EventReplayError(ValueError):
 def _empty_projection(run_id: str | None) -> dict[str, Any]:
     return {"run_id": run_id, "state": None, "iteration_id": None, "active_task": None,
             "terminal": None, "runlog_entries": [], "receipts": [], "superseded_history": [], "event_count": 0,
-            "last_sequence": None}
+            "last_sequence": None, "paused": False, "pause_reason": None, "pending_approval": None}
 
 
 def _validate_terminal_payload_semantics(payload: Mapping[str, Any]) -> None:
@@ -55,6 +55,20 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
     if not isinstance(event, Mapping):
         raise EventReplayError("event must be a mapping")
     issues = _structural_validate_event(dict(event))
+    payload = event.get("payload")
+    if (
+        issues == ["approval_resolved.resume_target must be a non-empty string when decision is 'approved'"]
+        and event.get("type") == "approval_resolved"
+        and isinstance(payload, Mapping)
+        and payload.get("decision") == "approved"
+        and payload.get("resume_target") == ""
+    ):
+        target = payload["resume_target"]
+        targets = fsm.legal_targets("approval-wait")
+        if target == fsm.TERMINAL_MARKER or target not in targets:
+            raise EventReplayError(
+                f"approval_resolved.resume_target {target!r} is not a legal non-terminal resume target from approval-wait"
+            )
     if issues:
         raise EventReplayError(f"malformed event: {issues}")
     run_id = event["run_id"]
@@ -111,12 +125,60 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
         history_entry = {**current_terminal, "superseded_by": event["event_id"], "superseded_at": event["ts"]}
         new_state["superseded_history"] = state["superseded_history"] + [history_entry]
         new_state["terminal"] = dict(payload, event_id=event["event_id"], ts=event["ts"])
+    elif event_type == "approval_requested":
+        if not fsm.is_legal_transition(new_state["state"], "approval-wait"):
+            raise EventReplayError(
+                f"illegal FSM transition {new_state['state']!r} -> 'approval-wait'"
+            )
+        new_state["state"] = "approval-wait"
+        new_state["iteration_id"] = payload["iteration_id"]
+        new_state["pending_approval"] = {"event_id": event["event_id"], "request": payload["request"]}
+    elif event_type == "approval_resolved":
+        if new_state["state"] != "approval-wait":
+            raise EventReplayError(
+                f"approval_resolved is only legal from approval-wait, current state is {new_state['state']!r}"
+            )
+        pending = new_state["pending_approval"]
+        if pending is None:
+            raise EventReplayError("approval_resolved has no pending approval_requested event to resolve")
+        if event.get("causation_id") != pending["event_id"]:
+            raise EventReplayError(
+                "approval_resolved.causation_id must reference the pending approval_requested event_id"
+        )
+        if payload["decision"] == "approved":
+            target = payload["resume_target"]
+            targets = fsm.legal_targets("approval-wait")
+            if target == fsm.TERMINAL_MARKER or target not in targets:
+                raise EventReplayError(
+                    f"approval_resolved.resume_target {target!r} is not a legal non-terminal resume target from approval-wait"
+                )
+            new_state["state"] = target
+        new_state["pending_approval"] = None
+        new_state["iteration_id"] = payload["iteration_id"]
+    elif event_type == "run_paused":
+        if new_state["paused"]:
+            raise EventReplayError("run_paused: run is already paused")
+        new_state["paused"] = True
+        new_state["pause_reason"] = payload["reason"]
+        new_state["iteration_id"] = payload["iteration_id"]
+    elif event_type == "run_resumed":
+        if not new_state["paused"]:
+            raise EventReplayError("run_resumed: run is not paused")
+        new_state["paused"] = False
+        new_state["pause_reason"] = None
+        new_state["iteration_id"] = payload["iteration_id"]
     return new_state
 
 
 def reduce_events(events: Iterable[Mapping[str, Any]], *, initial: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Fold events without mutating the supplied stream or initial projection."""
-    state = ({**initial, "runlog_entries": list(initial["runlog_entries"]), "receipts": list(initial["receipts"]), "superseded_history": list(initial["superseded_history"])} if initial is not None else _empty_projection(None))
+    if initial is None:
+        state = _empty_projection(None)
+    else:
+        merged = {**_empty_projection(None), **initial}
+        state = {**merged, "runlog_entries": list(merged["runlog_entries"]),
+                 "receipts": list(merged["receipts"]),
+                 "superseded_history": list(merged["superseded_history"])}
     for event in events:
         state = _reduce_one(state, event)
     return state

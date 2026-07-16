@@ -682,6 +682,29 @@ causation anchor, and reuses G1 completion checks when a correction sets
 
 ---
 
+## 19. Run-control events
+
+`approval_requested`, `approval_resolved`, `run_paused`, and `run_resumed` are
+event@1 run-control primitives. `approval_requested` records a non-empty
+request, moves the reducer projection to `approval-wait`, and records a pending
+approval anchor. `approval_resolved` cites that anchor through `causation_id`;
+an approved resolution supplies a legal non-terminal FSM resume target, while a
+denied resolution leaves the projected state at `approval-wait` and clears the
+pending request.
+
+`run_paused` and `run_resumed` are projection overlays: they set and clear the
+projection's `paused` flag and pause reason without changing the FSM state, so
+resume preserves the exact prior state. These types, like every non-
+`terminal_superseded` event, are forbidden after a terminal record.
+
+**Interop note:** the pre-existing lightweight
+`iteration_appended(outcome="approval_requested", state="approval-wait")`
+path remains valid. It has no structured request or pending-approval anchor,
+so it cannot be consumed by `approval_resolved`; CLI emission policy remains
+out of scope for event@1.
+
+---
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents

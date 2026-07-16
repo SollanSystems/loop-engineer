@@ -14,7 +14,8 @@ from .contract import ContractIssue, _resolve_requested_mode, _schemas_dir
 from .emit import _ITERATION_OUTCOMES, _RECEIPT_OUTCOMES, _RECEIPT_ROLES
 
 EVENT_SCHEMA_ID = "loop-engineer/event@1"
-EVENT_TYPES = ("contract_opened", "iteration_appended", "receipt_appended", "terminal_written", "terminal_superseded")
+EVENT_TYPES = ("contract_opened", "iteration_appended", "receipt_appended", "terminal_written", "terminal_superseded",
+               "approval_requested", "approval_resolved", "run_paused", "run_resumed")
 
 _PAYLOAD_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "contract_opened": ("workspace",),
@@ -22,6 +23,10 @@ _PAYLOAD_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "receipt_appended": ("iteration_id", "role", "model", "outcome"),
     "terminal_written": ("state", "criteria_met", "evidence", "false_completion"),
     "terminal_superseded": ("state", "criteria_met", "evidence", "false_completion", "justification", "authority"),
+    "approval_requested": ("iteration_id", "request"),
+    "approval_resolved": ("iteration_id", "decision"),
+    "run_paused": ("iteration_id", "reason"),
+    "run_resumed": ("iteration_id",),
 }
 
 _CREATE_EVENTS_TABLE = """
@@ -134,6 +139,39 @@ def _payload_issues(event_type: str, payload: Any) -> list[str]:
                     or not isinstance(authority.get("by"), str) or not authority.get("by", "").strip()
                     or not isinstance(authority.get("at"), str) or not authority.get("at", "").strip()):
                 issues.append("terminal_superseded.authority must be an object with non-empty by/at strings")
+    elif event_type == "approval_requested":
+        value = payload.get("iteration_id")
+        if "iteration_id" in payload and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            issues.append("approval_requested.iteration_id must be a non-negative integer")
+        if "request" in payload and (not isinstance(payload["request"], str) or not payload["request"]):
+            issues.append("approval_requested.request must be a non-empty string")
+    elif event_type == "approval_resolved":
+        value = payload.get("iteration_id")
+        if "iteration_id" in payload and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            issues.append("approval_resolved.iteration_id must be a non-negative integer")
+        decision = payload.get("decision")
+        if "decision" in payload and decision not in ("approved", "denied"):
+            issues.append("approval_resolved.decision must be 'approved' or 'denied'")
+        if decision == "approved":
+            target = payload.get("resume_target")
+            if not isinstance(target, str) or not target:
+                issues.append(
+                    "approval_resolved.resume_target must be a non-empty string when decision is 'approved'"
+                )
+        elif "resume_target" in payload and not isinstance(payload["resume_target"], str):
+            issues.append("approval_resolved.resume_target must be a string")
+    elif event_type == "run_paused":
+        value = payload.get("iteration_id")
+        if "iteration_id" in payload and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            issues.append("run_paused.iteration_id must be a non-negative integer")
+        if "reason" in payload and (not isinstance(payload["reason"], str) or not payload["reason"]):
+            issues.append("run_paused.reason must be a non-empty string")
+    elif event_type == "run_resumed":
+        value = payload.get("iteration_id")
+        if "iteration_id" in payload and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            issues.append("run_resumed.iteration_id must be a non-negative integer")
+        if "note" in payload and not isinstance(payload["note"], str):
+            issues.append("run_resumed.note must be a string")
     return issues
 
 

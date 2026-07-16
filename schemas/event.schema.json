@@ -10,7 +10,7 @@
     "event_id": { "type": "string", "minLength": 1 },
     "run_id": { "type": "string", "minLength": 1 },
     "sequence": { "type": "integer", "minimum": 0 },
-    "type": { "enum": ["contract_opened", "iteration_appended", "receipt_appended", "terminal_written", "terminal_superseded"] },
+    "type": { "enum": ["contract_opened", "iteration_appended", "receipt_appended", "terminal_written", "terminal_superseded", "approval_requested", "approval_resolved", "run_paused", "run_resumed"] },
     "actor": { "type": "string", "minLength": 1 },
     "causation_id": { "type": ["string", "null"] },
     "correlation_id": { "type": ["string", "null"] },
