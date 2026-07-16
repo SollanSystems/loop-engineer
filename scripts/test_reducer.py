@@ -242,6 +242,17 @@ def test_reducer_rejects_approval_resolved_with_unknown_resume_target(target: st
     assert reduce_events(prefix)["state"] == "approval-wait"
 
 
+def test_resume_target_illegal_message_is_identical_from_both_reducer_call_sites():
+    from loop.reducer import _check_approval_resume_target
+    target = "terminal"
+    with pytest.raises(EventReplayError) as direct:
+        _check_approval_resume_target(target)
+    with pytest.raises(EventReplayError) as replay:
+        reduce_events(approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1"),
+                                                  run_control_event("approval_resolved", 3, causation_id="request-1", payload={"iteration_id": 2, "decision": "approved", "resume_target": target})])
+    assert str(direct.value) == str(replay.value)
+
+
 def test_validation_rejects_explicit_null_resume_target_when_approved() -> None:
     report = validate_event(run_control_event(
         "approval_resolved", 2,

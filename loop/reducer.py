@@ -51,6 +51,13 @@ def _validate_superseded_payload_semantics(payload: Mapping[str, Any]) -> None:
         raise EventReplayError("terminal_superseded payload missing authority.by/authority.at")
 
 
+def _check_approval_resume_target(target: object) -> None:
+    if target == fsm.TERMINAL_MARKER or target not in fsm.legal_targets("approval-wait"):
+        raise EventReplayError(
+            f"approval_resolved.resume_target {target!r} is not a legal non-terminal resume target from approval-wait"
+        )
+
+
 def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(event, Mapping):
         raise EventReplayError("event must be a mapping")
@@ -64,11 +71,7 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
         and payload.get("resume_target") == ""
     ):
         target = payload["resume_target"]
-        targets = fsm.legal_targets("approval-wait")
-        if target == fsm.TERMINAL_MARKER or target not in targets:
-            raise EventReplayError(
-                f"approval_resolved.resume_target {target!r} is not a legal non-terminal resume target from approval-wait"
-            )
+        _check_approval_resume_target(target)
     if issues:
         raise EventReplayError(f"malformed event: {issues}")
     run_id = event["run_id"]
@@ -147,11 +150,7 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
         )
         if payload["decision"] == "approved":
             target = payload["resume_target"]
-            targets = fsm.legal_targets("approval-wait")
-            if target == fsm.TERMINAL_MARKER or target not in targets:
-                raise EventReplayError(
-                    f"approval_resolved.resume_target {target!r} is not a legal non-terminal resume target from approval-wait"
-                )
+            _check_approval_resume_target(target)
             new_state["state"] = target
         new_state["pending_approval"] = None
         new_state["iteration_id"] = payload["iteration_id"]
