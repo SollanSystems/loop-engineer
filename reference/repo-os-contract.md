@@ -705,6 +705,33 @@ out of scope for event@1.
 
 ---
 
+## 20. `loop simulate` — read-only dispatch prediction
+
+`loop simulate [--mode basic|strict|release] <workspace>` projects the event
+store and reports what one `loop run` step would do, without dispatching a
+task, invoking its verifier, repairing legacy files, or writing any workspace
+artifact. It uses the event store's immutable-first read path; when a crash
+left a WAL sidecar, `events.db-shm` is the sole permitted coordination-file
+difference and durable event content remains unchanged.
+
+The report includes normal projection health (`divergence`, `terminal_desync`,
+and `ok`), plus a `would` object. Its action vocabulary is deliberately
+predictive: `would_dispatch`, `would_write_terminal`, `would_block`,
+`would_refuse`, or `already_terminal`. `would_dispatch` exposes the declared
+verify command and parsed argv, but never executes it. `would_refuse` carries
+the matching runner refusal text; `would_block` has no invented refusal text.
+For terminal completion prediction, `predicted_terminal` is the payload a real
+dispatch would append.
+
+`would.legacy_sync_would_write` identifies whether a real dispatch would enter
+one of its legacy reconciliation writes. Its calculation follows the runner's
+terminal-first branch structure: terminal reconciliation is assessed only for
+terminal projections, iteration lag only for `execute-task`, and all other
+non-terminal states report false. A missing or unreadable required state file
+is reported as null rather than repaired.
+
+---
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents

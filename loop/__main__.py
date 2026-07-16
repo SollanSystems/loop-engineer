@@ -12,13 +12,13 @@ from .runcontrol import RunControlError
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run", "approve", "pause", "resume", "cancel")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run", "approve", "pause", "resume", "cancel")
+_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|run|approve|pause|resume|cancel> <target>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
@@ -27,6 +27,7 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
        {_PROG} doctor|validate|verify [--mode basic|strict|release] <workspace-or-.loop>
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
+       {_PROG} simulate [--mode basic|strict|release] <workspace>
        {_PROG} run [--mode basic|strict|release] <workspace>
        {_PROG} approve --decision approved|denied [--resume-target STATE] [--mode basic|strict|release] <workspace>
        {_PROG} pause --reason REASON [--mode basic|strict|release] <workspace>
@@ -50,6 +51,7 @@ commands:
              mapping. --mode selects validation strength, same as doctor.
   status     Project the read-only event log and reconcile it with state.json.
   replay     Double-fold the read-only event log and check terminal synchronization.
+  simulate   Strictly read-only dry-run: report what the next run step would do.
   run        Perform one event-sourced execute-task dispatch step.
   approve    Resolve a pending approval request.
   pause      Pause a non-terminal run.
@@ -62,7 +64,7 @@ arguments:
 
 options:
   --mode {{basic,strict,release}}
-                (doctor/validate/verify/plan-lint/status/replay/run) basic forces structural
+                (doctor/validate/verify/plan-lint/status/replay/simulate/run) basic forces structural
                 checks; strict/release require jsonschema. Default: auto-detect.
   --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
                 run; exits non-zero and writes nothing otherwise.
@@ -212,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     mode = None
-    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "run", "approve", "pause", "resume", "cancel"}:
+    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel"}:
         try:
             mode, argv = _extract_mode_flag(argv)
         except ValueError as exc:
@@ -302,11 +304,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{command}: {exc}", file=sys.stderr)
             return 2
 
-    if command in {"status", "replay"}:
+    if command in {"status", "replay", "simulate"}:
+        from .runner import RunnerError
         try:
-            report = status_report(target, mode=mode) if command == "status" else replay_report(target, mode=mode)
+            if command == "status":
+                report = status_report(target, mode=mode)
+            elif command == "replay":
+                report = replay_report(target, mode=mode)
+            else:
+                from .simulate import simulate_run
+
+                report = simulate_run(target, mode=mode)
             return _print_json(report)
-        except (ValidationModeError, RuntimeStoreError) as exc:
+        except (ValidationModeError, RuntimeStoreError, RunnerError) as exc:
             print(f"{command}: {exc}", file=sys.stderr)
             return 2
 
