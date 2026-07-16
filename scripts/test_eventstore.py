@@ -180,3 +180,117 @@ def test_store_appends_well_formed_terminal_superseded(tmp_path) -> None:
                               causation_id=terminal["event_id"])
     assert correction["type"] == "terminal_superseded"
     assert correction["causation_id"] == terminal["event_id"]
+
+
+def run_control_event(event_type: str, **overrides: object) -> dict[str, object]:
+    payloads = {
+        "approval_requested": {"iteration_id": 1, "request": "Approve the plan"},
+        "approval_resolved": {"iteration_id": 1, "decision": "approved", "resume_target": "execute-task"},
+        "run_paused": {"iteration_id": 1, "reason": "operator break"},
+        "run_resumed": {"iteration_id": 1, "note": "operator returned"},
+    }
+    result: dict[str, object] = {
+        "schema": EVENT_SCHEMA_ID, "event_id": "run-control-1", "run_id": "run-1", "sequence": 1,
+        "type": event_type, "actor": "test", "causation_id": None, "correlation_id": None,
+        "ts": "2026-01-01T00:00:01+00:00", "payload": payloads[event_type],
+    }
+    result.update(overrides)
+    return result
+
+
+def test_event_types_include_run_control_events_and_match_schema_enum() -> None:
+    schema = __import__("json").load(open("schemas/event.schema.json", encoding="utf-8"))
+    from loop.events import EVENT_TYPES
+
+    assert set(EVENT_TYPES) == set(schema["properties"]["type"]["enum"])
+    assert {"approval_requested", "approval_resolved", "run_paused", "run_resumed"} <= set(EVENT_TYPES)
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_approval_requested_validates_in_basic_and_release_modes(mode: str) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("approval_requested"), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_approval_resolved_approved_validates_in_basic_and_release_modes(mode: str) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("approval_resolved"), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_approval_resolved_denied_validates_in_basic_and_release_modes(mode: str) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("approval_resolved", payload={"iteration_id": 1, "decision": "denied"}), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_run_paused_validates_in_basic_and_release_modes(mode: str) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("run_paused"), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_run_resumed_validates_in_basic_and_release_modes(mode: str) -> None:
+    if mode == "release":
+        try:
+            __import__("jsonschema")
+        except ImportError:
+            assert validate_event(run_control_event("run_resumed"), mode="basic")["ok"] is True
+            return
+    assert validate_event(run_control_event("run_resumed"), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+@pytest.mark.parametrize("payload", [
+    {"request": "ok"}, {"iteration_id": -1, "request": "ok"},
+    {"iteration_id": 1, "request": ""}, {"iteration_id": 1, "request": None},
+])
+def test_approval_requested_rejects_malformed_payload_fields(mode: str, payload: dict[str, object]) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("approval_requested", payload=payload), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+@pytest.mark.parametrize("payload", [
+    {"decision": "approved", "resume_target": "plan"},
+    {"iteration_id": 1, "decision": "maybe"},
+    {"iteration_id": 1, "decision": "approved"},
+    {"iteration_id": 1, "decision": "approved", "resume_target": None},
+])
+def test_approval_resolved_rejects_malformed_payload_fields(mode: str, payload: dict[str, object]) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("approval_resolved", payload=payload), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+@pytest.mark.parametrize("payload", [
+    {"reason": "stop"}, {"iteration_id": True, "reason": "stop"}, {"iteration_id": 1, "reason": ""},
+])
+def test_run_paused_rejects_malformed_payload_fields(mode: str, payload: dict[str, object]) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("run_paused", payload=payload), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", ["basic", "release"])
+@pytest.mark.parametrize("payload", [
+    {"note": "ok"}, {"iteration_id": 1, "note": None},
+])
+def test_run_resumed_rejects_malformed_payload_fields(mode: str, payload: dict[str, object]) -> None:
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_event(run_control_event("run_resumed", payload=payload), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("event_type", ["approval_requested", "approval_resolved", "run_paused", "run_resumed"])
+def test_store_appends_well_formed_run_control_events(tmp_path, event_type: str) -> None:
+    store = SQLiteEventStore(tmp_path / "events.db")
+    appended = store.append("run", event_type, run_control_event(event_type)["payload"], actor="test")
+    assert appended["type"] == event_type

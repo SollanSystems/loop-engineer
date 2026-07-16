@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from loop.events import EVENT_SCHEMA_ID, SQLiteEventStore
+from loop.events import EVENT_SCHEMA_ID, SQLiteEventStore, validate_event
 from loop.reducer import EventReplayError, reduce_events
 
 
@@ -157,6 +157,150 @@ def test_reducer_rejects_terminal_superseded_missing_justification_or_authority(
 
 def test_reducer_terminal_superseded_is_deterministic_and_resumable() -> None:
     events = stream() + [superseded_event(), superseded_event(event_id="e6", sequence=6, causation_id="e5")]
+    whole = reduce_events(events)
+    assert json.dumps(whole, sort_keys=True) == json.dumps(reduce_events(events), sort_keys=True)
+    assert reduce_events(events[3:], initial=reduce_events(events[:3])) == whole
+
+
+def run_control_event(event_type: str, sequence: int, *, event_id: str | None = None,
+                      causation_id: str | None = None, payload: dict[str, object] | None = None) -> dict[str, object]:
+    payloads = {
+        "approval_requested": {"iteration_id": 2, "request": "Approve the plan"},
+        "approval_resolved": {"iteration_id": 2, "decision": "approved", "resume_target": "execute-task"},
+        "run_paused": {"iteration_id": 2, "reason": "operator break"},
+        "run_resumed": {"iteration_id": 2, "note": "operator returned"},
+    }
+    base = stream()[0]
+    return {**base, "event_id": event_id or f"rc-{sequence}", "sequence": sequence,
+            "type": event_type, "causation_id": causation_id,
+            "ts": f"2026-01-01T00:01:{sequence:02d}+00:00",
+            "payload": payload if payload is not None else payloads[event_type]}
+
+
+def approval_ready_stream() -> list[dict[str, object]]:
+    return stream()[:2]
+
+
+def test_reducer_projects_approval_requested_into_approval_wait_with_pending_request() -> None:
+    result = reduce_events(approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1")])
+    assert result["state"] == "approval-wait"
+    assert result["pending_approval"] == {"event_id": "request-1", "request": "Approve the plan"}
+
+
+def test_reducer_rejects_approval_requested_from_intake() -> None:
+    with pytest.raises(EventReplayError, match="illegal FSM transition"):
+        reduce_events(stream()[:1] + [run_control_event("approval_requested", 1)])
+
+
+def test_reducer_projects_approval_resolved_approved_to_resume_target() -> None:
+    events = approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1"),
+                                         run_control_event("approval_resolved", 3, causation_id="request-1")]
+    result = reduce_events(events)
+    assert result["state"] == "execute-task" and result["pending_approval"] is None
+
+
+def test_reducer_projects_approval_resolved_denied_clears_pending_without_changing_state() -> None:
+    events = approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1"),
+                                         run_control_event("approval_resolved", 3, causation_id="request-1", payload={"iteration_id": 2, "decision": "denied"})]
+    result = reduce_events(events)
+    assert result["state"] == "approval-wait" and result["pending_approval"] is None
+
+
+def test_reducer_rejects_approval_resolved_outside_approval_wait() -> None:
+    with pytest.raises(EventReplayError, match="only legal from approval-wait"):
+        reduce_events(approval_ready_stream() + [run_control_event("approval_resolved", 2)])
+
+
+@pytest.mark.parametrize("causation_id", ["wrong", None])
+def test_reducer_rejects_approval_resolved_with_mismatched_causation_id(causation_id: str | None) -> None:
+    events = approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1"),
+                                         run_control_event("approval_resolved", 3, causation_id=causation_id)]
+    with pytest.raises(EventReplayError, match="causation_id"):
+        reduce_events(events)
+
+
+@pytest.mark.parametrize("target", ["intake", "terminal"])
+def test_reducer_rejects_approval_resolved_with_non_resumable_target(target: str) -> None:
+    events = approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1"),
+                                         run_control_event("approval_resolved", 3, causation_id="request-1", payload={"iteration_id": 2, "decision": "approved", "resume_target": target})]
+    with pytest.raises(EventReplayError, match="legal non-terminal resume target"):
+        reduce_events(events)
+
+
+@pytest.mark.parametrize("target", ["banana-not-a-real-state", ""])
+def test_reducer_rejects_approval_resolved_with_unknown_resume_target(target: str) -> None:
+    prefix = approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1")]
+    event = run_control_event(
+        "approval_resolved", 3, causation_id="request-1",
+        payload={"iteration_id": 2, "decision": "approved", "resume_target": target},
+    )
+    with pytest.raises(EventReplayError) as error:
+        reduce_events(prefix + [event])
+    assert str(error.value) == (
+        f"approval_resolved.resume_target {target!r} is not a legal non-terminal resume target from approval-wait"
+    )
+    assert reduce_events(prefix)["state"] == "approval-wait"
+
+
+def test_validation_rejects_explicit_null_resume_target_when_approved() -> None:
+    report = validate_event(run_control_event(
+        "approval_resolved", 2,
+        payload={"iteration_id": 2, "decision": "approved", "resume_target": None},
+    ))
+    assert report["ok"] is False
+    assert any("resume_target" in issue["message"] for issue in report["issues"])
+
+
+def test_reducer_rejects_approval_resolved_after_legacy_iteration_appended_entered_approval_wait() -> None:
+    legacy = {**approval_ready_stream()[-1], "event_id": "legacy", "sequence": 2,
+              "type": "iteration_appended", "payload": {"iteration_id": 2, "outcome": "approval_requested", "state": "approval-wait"}}
+    with pytest.raises(EventReplayError, match="no pending approval_requested"):
+        reduce_events(approval_ready_stream() + [legacy, run_control_event("approval_resolved", 3, causation_id="legacy")])
+
+
+@pytest.mark.parametrize("event_type, payload", [
+    ("approval_requested", {"iteration_id": 2}),
+    ("approval_resolved", {"iteration_id": 2, "decision": "approved"}),
+    ("run_paused", {"iteration_id": 2}),
+    ("run_resumed", {"iteration_id": 2, "note": None}),
+])
+def test_reducer_rejects_run_control_events_with_malformed_payloads(event_type: str, payload: dict[str, object]) -> None:
+    with pytest.raises(EventReplayError, match="malformed event"):
+        reduce_events(approval_ready_stream() + [run_control_event(event_type, 2, payload=payload)])
+
+
+def test_reducer_projects_run_paused_and_run_resumed_round_trip_preserving_state() -> None:
+    events = approval_ready_stream() + [run_control_event("run_paused", 2), run_control_event("run_resumed", 3)]
+    result = reduce_events(events)
+    assert result["state"] == "plan" and result["paused"] is False and result["pause_reason"] is None
+
+
+def test_reducer_rejects_double_pause() -> None:
+    with pytest.raises(EventReplayError, match="already paused"):
+        reduce_events(approval_ready_stream() + [run_control_event("run_paused", 2), run_control_event("run_paused", 3)])
+
+
+def test_reducer_rejects_resume_without_pause() -> None:
+    with pytest.raises(EventReplayError, match="not paused"):
+        reduce_events(approval_ready_stream() + [run_control_event("run_resumed", 2)])
+
+
+@pytest.mark.parametrize("event_type, payload", [
+    ("approval_requested", {"iteration_id": 2, "request": "approve"}),
+    ("approval_resolved", {"iteration_id": 2, "decision": "denied"}),
+    ("run_paused", {"iteration_id": 2, "reason": "stop"}),
+    ("run_resumed", {"iteration_id": 2}),
+])
+def test_reducer_rejects_run_control_events_after_terminal(event_type: str, payload: dict[str, object]) -> None:
+    terminal = stream()[-1]
+    with pytest.raises(EventReplayError, match="event appended after terminal — terminal is immutable"):
+        reduce_events(stream() + [run_control_event(event_type, 5, payload=payload)])
+
+
+def test_reducer_is_deterministic_and_resumable_across_run_control_events() -> None:
+    events = approval_ready_stream() + [run_control_event("approval_requested", 2, event_id="request-1"),
+                                         run_control_event("run_paused", 3), run_control_event("run_resumed", 4),
+                                         run_control_event("approval_resolved", 5, causation_id="request-1")]
     whole = reduce_events(events)
     assert json.dumps(whole, sort_keys=True) == json.dumps(reduce_events(events), sort_keys=True)
     assert reduce_events(events[3:], initial=reduce_events(events[:3])) == whole
