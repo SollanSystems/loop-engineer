@@ -8,16 +8,17 @@ from pathlib import Path
 from .contract import VALIDATION_MODES, ValidationModeError, doctor_report
 from .plan import validate_plan
 from .runtime import RuntimeStoreError, replay_report, status_report
+from .runcontrol import RunControlError
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run", "approve", "pause", "resume", "cancel")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run")
+_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "run", "approve", "pause", "resume", "cancel")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|run> <target>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|run|approve|pause|resume|cancel> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
@@ -27,6 +28,10 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
        {_PROG} run [--mode basic|strict|release] <workspace>
+       {_PROG} approve --decision approved|denied [--resume-target STATE] [--mode basic|strict|release] <workspace>
+       {_PROG} pause --reason REASON [--mode basic|strict|release] <workspace>
+       {_PROG} resume [--note NOTE] [--mode basic|strict|release] <workspace>
+       {_PROG} cancel [--reason REASON] [--mode basic|strict|release] <workspace>
        {_PROG} plan-lint [--mode basic|strict|release] <plan-file>
 
 commands:
@@ -46,6 +51,10 @@ commands:
   status     Project the read-only event log and reconcile it with state.json.
   replay     Double-fold the read-only event log and check terminal synchronization.
   run        Perform one event-sourced execute-task dispatch step.
+  approve    Resolve a pending approval request.
+  pause      Pause a non-terminal run.
+  resume     Resume a paused run.
+  cancel     Terminate a non-terminal run as AbortedByHuman.
 
 arguments:
   <target>     A workspace root or its .loop/ directory (all commands except plan-lint).
@@ -118,6 +127,26 @@ def _extract_mode_flag(argv: list[str]) -> tuple[str | None, list[str]]:
     return mode, remaining
 
 
+def _extract_value_flag(argv: list[str], flag: str) -> tuple[str | None, list[str]]:
+    value: str | None = None
+    remaining: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == flag:
+            if index + 1 >= len(argv):
+                raise ValueError(f"{flag} requires a value")
+            value = argv[index + 1]
+            index += 2
+        elif arg.startswith(flag + "="):
+            value = arg.split("=", 1)[1]
+            index += 1
+        else:
+            remaining.append(arg)
+            index += 1
+    return value, remaining
+
+
 def _extract_run_stub_flags(argv: list[str]) -> tuple[list[str], list[str]]:
     """Remove requested but not-yet-supported run-mode flags from argv."""
     flags = {"--continuous", "--approve"}
@@ -183,11 +212,46 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     mode = None
-    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "run"}:
+    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "run", "approve", "pause", "resume", "cancel"}:
         try:
             mode, argv = _extract_mode_flag(argv)
         except ValueError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+
+    decision = resume_target = reason = note = None
+    if command in {"approve", "pause", "resume", "cancel"}:
+        try:
+            decision, argv = _extract_value_flag(argv, "--decision")
+            resume_target, argv = _extract_value_flag(argv, "--resume-target")
+            reason, argv = _extract_value_flag(argv, "--reason")
+            note, argv = _extract_value_flag(argv, "--note")
+        except ValueError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if command == "approve" and decision is None:
+            print("approve: --decision is required", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if command == "approve" and decision not in {"approved", "denied"}:
+            print("approve: invalid --decision value; expected approved or denied", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if command == "pause" and reason is None:
+            print("pause: --reason is required", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        allowed = {
+            "approve": {"decision", "resume_target"}, "pause": {"reason"},
+            "resume": {"note"}, "cancel": {"reason"},
+        }[command]
+        supplied = {name for name, value in {
+            "decision": decision, "resume_target": resume_target, "reason": reason, "note": note,
+        }.items() if value is not None}
+        if not supplied <= allowed or any(arg.startswith("-") for arg in argv) or len(argv) != 1:
+            print(f"{command}: unknown option or invalid target arguments", file=sys.stderr)
             print(_USAGE, file=sys.stderr)
             return 2
 
@@ -253,6 +317,22 @@ def main(argv: list[str] | None = None) -> int:
             return _print_json(dispatch_once(target, mode=mode))
         except (RunnerError, RuntimeStoreError, ValidationModeError) as exc:
             print(f"run: {exc}", file=sys.stderr)
+            return 2
+
+    if command in {"approve", "pause", "resume", "cancel"}:
+        from .runcontrol import approve_run, cancel_run, pause_run, resume_run
+        try:
+            if command == "approve":
+                report = approve_run(target, decision=decision, resume_target=resume_target, mode=mode)
+            elif command == "pause":
+                report = pause_run(target, reason=reason, mode=mode)
+            elif command == "resume":
+                report = resume_run(target, note=note, mode=mode)
+            else:
+                report = cancel_run(target, reason=reason, mode=mode)
+            return _print_json(report)
+        except (RunControlError, RuntimeStoreError) as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
             return 2
 
     # command == "inspect": keep the historical inspector script as the scoring

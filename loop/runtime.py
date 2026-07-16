@@ -99,10 +99,13 @@ def _state_divergence(paths: Any, projection: dict[str, Any]) -> list[dict[str, 
         "iteration_id": projection["iteration_id"],
         "active_task": projection["active_task"],
         "terminal_state": projection["terminal"].get("state") if projection["terminal"] else None,
+        "paused": projection["paused"],
+        "pause_reason": projection["pause_reason"],
+        "pending_approval": projection["pending_approval"],
     }
     issues: list[dict[str, Any]] = []
     for field, value in expected.items():
-        if state.get(field) != value:
+        if state.get(field, False if field == "paused" else None) != value:
             issues.append(ContractIssue("state_field_mismatch", f"state.json {field!r} differs from event projection"))
     return issues
 

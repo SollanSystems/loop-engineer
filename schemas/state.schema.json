@@ -67,6 +67,12 @@
         "null"
       ]
     },
+    "paused": {
+      "type": "boolean"
+    },
+    "pause_reason": {
+      "type": ["string", "null"]
+    },
     "budget_remaining": {
       "type": "object"
     },

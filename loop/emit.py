@@ -383,3 +383,17 @@ def sync_state_to_terminal(target: str | Path) -> Path:
         current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         _write_state(paths, current)
     return paths.state
+
+
+def sync_state_to_projection(target: str | Path, projection: dict[str, Any]) -> Path:
+    """Stamp non-terminal projected fields into state.json after an event append."""
+    paths = _require_contract(target)
+    current = _read_state(paths)
+    current["state"] = projection["state"]
+    current["paused"] = projection["paused"]
+    current["pause_reason"] = projection["pause_reason"]
+    current["pending_approval"] = projection["pending_approval"]
+    current["iteration_id"] = projection["iteration_id"]
+    current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _write_state(paths, current)
+    return paths.state

@@ -44,6 +44,21 @@ def _write_state(workspace: Path, **values: object) -> None:
     (workspace / ".loop" / "state.json").write_text(json.dumps(values), encoding="utf-8")
 
 
+def test_status_report_detects_paused_state_json_divergence(tmp_path):
+    workspace, store = _workspace(tmp_path)
+    _open(store)
+    store.append("run-1", "run_paused", {"iteration_id": 0, "reason": "hold"}, actor="test")
+    assert status_report(workspace)["divergence"][0]["code"] == "state_field_mismatch"
+
+
+def test_status_report_detects_pending_approval_state_json_divergence(tmp_path):
+    workspace, store = _workspace(tmp_path)
+    _open(store)
+    store.append("run-1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed", "state": "plan"}, actor="test")
+    store.append("run-1", "approval_requested", {"iteration_id": 1, "request": "approve"}, actor="test")
+    assert status_report(workspace)["divergence"][0]["code"] == "state_field_mismatch"
+
+
 def test_status_report_missing_store_is_distinct_from_empty_store(tmp_path):
     workspace, _ = _workspace(tmp_path)
     with pytest.raises(RuntimeStoreError) as missing:
