@@ -12,13 +12,13 @@ from .runcontrol import RunControlError
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "architect")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
 _READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel> <target>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel|architect> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
@@ -57,6 +57,9 @@ commands:
   pause      Pause a non-terminal run.
   resume     Resume a paused run.
   cancel     Terminate a non-terminal run as AbortedByHuman.
+  architect  Not implemented by this CLI: architecture classification and ADR
+             authorship require agentic judgment, not deterministic code. See
+             the loop-architect skill.
 
 arguments:
   <target>     A workspace root or its .loop/ directory (all commands except plan-lint).
@@ -204,6 +207,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown loop command: {command}", file=sys.stderr)
         print(_USAGE, file=sys.stderr)
         return 2
+
+    if command == "architect":
+        from .architect import ArchitectNotImplementedError, architect_run
+
+        try:
+            architect_run()
+        except ArchitectNotImplementedError as exc:
+            print(f"architect: {exc}", file=sys.stderr)
+            return 2
+        raise AssertionError(
+            "architect_run() returned without raising ArchitectNotImplementedError; "
+            "every architect code path must fail loud, never silently succeed"
+        )
 
     if command == "run":
         stub_flags, argv = _extract_run_stub_flags(argv)
