@@ -591,10 +591,11 @@ refuse mutation or removal of a committed row, regardless of caller.
 ordered event stream into a deterministic state/runlog/receipts view — the
 same input sequence always produces a byte-identical result.
 
-**Scope boundary:** unlike manifest/state/tasks/terminal (§11), `event@1` is
-**not yet** an artifact `loop doctor` reads from a scaffolded workspace; its
-on-disk location is `.loop/events.db`, with one run discovered per store by
-the runtime readers (multi-run support remains deferred).
+**Scope boundary:** `loop doctor` reads `event@1` when `.loop/events.db`
+exists (§22) by composing the exact `status`/`replay` read-only verbs, not by
+duplicating their logic; an absent store is conformant and adds no issues
+(§12.1's terminal-file-iff rule has an analogous "absent is fine" shape). One
+run is discovered per store; multi-run support remains deferred.
 
 **Dispatch crash boundary:** `loop run` verifies first, then commits its
 `iteration_appended` (or `terminal_written`) event with a compare-and-swap
@@ -759,3 +760,21 @@ Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents
 Plan-Then-Execute (2605.14290), Plan Compliance (2604.12147), and Code as Agent Harness
 (2605.18747).
+
+---
+
+## 22. `loop doctor` — event-store consistency gate
+
+When `.loop/events.db` exists, `loop doctor` composes the exact read-only
+`status`/`replay` verbs (§16, §20) — never duplicating their fold/divergence
+logic — and folds their findings into its own `issues`/`ok`. An absent store is
+conformant: doctor reports `"event_store": {"present": false}` and every other
+key is byte-identical to a store-less report. A present, readable store adds
+`"event_store": {"present": true, "readable": true, "run_id", "event_count",
+"state_json_agrees", "deterministic", "legal_sequence"}`; any of
+`state_field_mismatch`, `desynced_terminal_window`, `terminal_state_mismatch`,
+or `illegal_event_sequence` fails doctor (`ok: false`) with the identical issue
+code the `status`/`replay` verbs already use. A store that cannot be read at
+all — `corrupt_store`, `empty_store`, or `ambiguous_run_id` — also fails doctor
+rather than being silently skipped; `"event_store"` reports
+`{"present": true, "readable": false, "error_code": <code>}` in that case.

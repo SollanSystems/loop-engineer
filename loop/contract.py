@@ -750,4 +750,10 @@ def validate_contract(target: str | Path, *, mode: str | None = None) -> dict[st
 
 
 def doctor_report(target: str | Path, *, mode: str | None = None) -> dict[str, Any]:
-    return validate_contract(target, mode=mode)
+    report = validate_contract(target, mode=mode)
+    from .runtime import event_consistency_issues
+
+    event_store, event_issues = event_consistency_issues(target, mode=mode)
+    issues = report["issues"] + list(event_issues) if event_issues else report["issues"]
+    return {**report, "event_store": event_store, "issues": issues,
+            "ok": report["ok"] and not event_issues}
