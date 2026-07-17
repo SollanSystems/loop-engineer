@@ -195,3 +195,29 @@ def replay_report(target: str | Path, *, mode: str | None = None) -> dict[str, A
         "deterministic": deterministic, "legal_sequence": legal_sequence,
         "terminal_desync": terminal_desync, "findings": findings,
     }
+
+
+def event_consistency_issues(
+    target: str | Path, *, mode: str | None = None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Return event-store health and the existing status/replay findings."""
+    path = _store_path(target)
+    if not path.exists():
+        return {"present": False}, []
+    try:
+        status = status_report(target, mode=mode)
+        replay = replay_report(target, mode=mode)
+    except RuntimeStoreError as exc:
+        return {"present": True, "readable": False, "error_code": exc.code}, [
+            ContractIssue(exc.code, str(exc))
+        ]
+    issues = list(status["divergence"]) + list(replay["findings"])
+    return {
+        "present": True,
+        "readable": True,
+        "run_id": status["run_id"],
+        "event_count": status["event_count"],
+        "state_json_agrees": status["state_json_agrees"],
+        "deterministic": replay["deterministic"],
+        "legal_sequence": replay["legal_sequence"],
+    }, issues
