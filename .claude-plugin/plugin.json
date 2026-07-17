@@ -1,11 +1,25 @@
 {
   "name": "loop-engineer",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Design, launch, verify, repair, and improve agent loops. A Claude-Code-native architect+operator for long-running, verifiable, self-improving agentic-coding systems.",
-  "author": { "name": "Sollan Systems", "url": "https://github.com/SollanSystems" },
+  "author": {
+    "name": "Sollan Systems",
+    "url": "https://github.com/SollanSystems"
+  },
   "homepage": "https://github.com/SollanSystems/loop-engineer",
   "repository": "https://github.com/SollanSystems/loop-engineer",
-  "keywords": ["agent", "loop", "agentic", "verification", "harness", "orchestration", "self-improvement", "claude-code", "eval", "repair"],
+  "keywords": [
+    "agent",
+    "loop",
+    "agentic",
+    "verification",
+    "harness",
+    "orchestration",
+    "self-improvement",
+    "claude-code",
+    "eval",
+    "repair"
+  ],
   "license": "MIT",
   "hooks": {
     "Stop": [

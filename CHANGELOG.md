@@ -14,6 +14,68 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## 0.9.0 — 2026-07-17
+
+**The event-sourced kernel.** The contract gains a durable runtime substrate:
+`loop-engineer/event@1` events in an append-only SQLite store
+(`.loop/events.db` — WAL, `synchronous=FULL`, no-update/no-delete triggers,
+`expected_sequence` compare-and-swap) folded by a deterministic reducer that
+enforces FSM legality, the all-required completion gate, and terminal
+immutability through the same `loop.fsm`/`loop.completion` modules the
+writers use (#62). Around it: a canonical intermediate-state FSM with
+unknown-state validation and writer timestamps (#59); `loop-engineer/plan@1`
+— a Loop Plan IR with a `plan-lint` verb and a typed capability vocabulary
+(#61); `loop-engineer/evidence@1` — hashed evidence objects with provenance,
+re-verifiable byte-for-byte (#63); administrative `terminal_superseded`
+events — the only event a terminated run admits, so a wrong terminal is
+corrected on the record instead of edited in place (#64); a run-control event
+vocabulary for approval, pause, and resume (#73); and explicit validation
+modes `--mode basic|strict|release` across the CLI (#60).
+
+**Runtime verbs.** `loop run` — event-sourced single-step dispatch with
+crash-safe resume (#71); read-only `loop status` and `loop replay` (#70);
+`loop simulate` — strictly read-only dry-run dispatch prediction (#75);
+`approve` / `pause` / `resume` / `cancel` (#74); a subprocess-isolated
+verifier runner — shlex argv, no shell, wall-clock cap, bounded output tail,
+typed failure classes — plus typed fail-loud stubs for the not-yet-shipped
+run modes (#72); `loop architect` as a typed fail-loud deferral (#76). And
+`loop doctor` now composes an event-store consistency gate over
+`status`/`replay` whenever `.loop/events.db` exists — one hard gate across
+the file layer and the event log (#77).
+
+**Completion-semantics hardening (Phase 0).** `Succeeded` now requires
+**all** required criteria satisfied plus evidence — the prior any-true
+reading was a correctness bug, fixed in one shared `loop/completion.py`
+wired into the writer API, the integrations projection, and the contract
+validator's G1 check. `terminal_state.json` is create-once (atomic;
+`force` always raises); iteration ids are canonical ints (legacy decimal
+strings stay read-compatible); `terminal@1` gains an additive
+`completion_policy` (#48).
+
+**Adversarial hardening.** A property-based kernel suite over FSM legality,
+G1 completion, supersession, and replay determinism (#65), and a
+process/security suite — real crash injection at code-controlled barriers,
+verifier tampering, workspace-escape TOCTOU (#66). The `verify_evidence()`
+symlink-swap TOCTOU that suite discovered (#67) is closed by fd-pinned
+open-then-verify (#69), retiring the strict xfail marker.
+
+**Scoreboard, funnel, housekeeping.** The ST5 harness scoreboard — 9 public
+harnesses read through a foreign-layout registry with 8 vendored fixtures
+(#41); contributor-funnel fixes — trigger-phrase disambiguation (#42),
+documentation-completeness labels on the self-eval (#43),
+`approval_requested`/`replanned` recognized as honest-red metrics tokens
+(#44), metrics-clean RUNLOG seeding (#45); Dependabot version updates and
+least-privilege workflow permissions (#46, #47).
+
+**Known limitation.** Read verbs over the event store leave SQLite
+`-wal`/`-shm` sidecars next to `.loop/events.db` (read-only connections
+recreate them and cannot checkpoint on close). Store content is never
+mutated, but tree-byte-identity checks over a store-backed workspace will
+notice them.
+
+Test baseline: 933 passed / 16 skipped with the `yaml`+`schemas` extras;
+864 / 85 in structural-fallback mode (PyYAML only).
+
 ## 0.8.0 — 2026-07-09
 
 **ST3 — integration adapters.** `loop/integrations.py`: an engine-neutral,
