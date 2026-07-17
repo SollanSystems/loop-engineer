@@ -5,7 +5,7 @@
 [![CI](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SollanSystems/loop-engineer/actions/workflows/ci.yml)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/badge/release-0.8.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
+[![Release](https://img.shields.io/badge/release-0.9.0-blue)](https://github.com/SollanSystems/loop-engineer/tags)
 
 Long-running agents commit **false completion**. After context compaction they
 forget what "done" meant, optimize to the visible test, patch in circles, and
@@ -20,7 +20,11 @@ ships, on disk and runnable today:
 - a **held-out gate** and an **anti-cheat scan** built to catch a loop gaming its
   own verifier;
 - a runnable example whose `false_completion: false` is backed by a committed,
-  real gate verdict — `.loop/artifacts/holdout-verdict.json`, not a hand-set flag.
+  real gate verdict — `.loop/artifacts/holdout-verdict.json`, not a hand-set flag;
+- an **event-sourced runtime** — `run`, `status`, `replay`, `simulate`, and
+  approve/pause/resume/cancel over an append-only SQLite event log
+  (`.loop/events.db`), folded by a deterministic reducer that enforces the same
+  completion gate as the writers, with crash-safe single-step resume.
 
 ![The inspector scores a self-asserted DIY loop 0/weak, then the gate-backed example 90/strong — both runs live](docs/demo.gif)
 
@@ -280,6 +284,12 @@ The portable core lives in `loop/` and validates schema-bearing artifacts in
 - `loop-engineer/state@1`
 - `loop-engineer/tasks@1`
 - `loop-engineer/terminal@1`
+- `loop-engineer/receipt@1`
+- `loop-engineer/repair@1`
+- `loop-engineer/rollout@1`
+- `loop-engineer/plan@1`
+- `loop-engineer/event@1`
+- `loop-engineer/evidence@1`
 
 ### Claude Code plugin
 
@@ -318,7 +328,7 @@ present. Recipe:
 **CI** — one workflow step validates the contract and publishes a scorecard:
 
 ```yaml
-- uses: SollanSystems/loop-engineer@v0.8.0
+- uses: SollanSystems/loop-engineer@v0.9.0
   with:
     path: "."
 ```
@@ -411,8 +421,8 @@ doctor` and the contract's own `verify-*` scripts).
 
 ## Status
 
-- Version: `0.8.0`
-- Release tag: `v0.8.0` (PyPI publish trigger; plugin tags through 0.6.0 used `loop-engineer--v<version>`)
+- Version: `0.9.0`
+- Release tag: `v0.9.0` (PyPI publish trigger; plugin tags through 0.6.0 used `loop-engineer--v<version>`)
 - License: MIT
 - Primary interface: Claude Code plugin
 - Portable core: Python CLI + JSON schemas
