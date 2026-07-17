@@ -732,6 +732,28 @@ is reported as null rather than repaired.
 
 ---
 
+## 21. `loop architect` — typed fail-loud deferral
+
+`loop architect` is a permanent typed refusal, not a scaffold. Architecture
+classification and ADR authorship — choosing the loop's shape, its
+Claude-Code realization, its loop patterns, its risk profile, its
+terminal-state plan — is agentic judgment the loop-architect skill performs,
+and this deterministic CLI does not call an LLM to reproduce it. A
+placeholder ADR file with `REPLACE` fields for the decision itself
+(architecture, realization, risk profile) would carry no real information
+while looking like a completed judgment artifact to whatever consumes it
+next — that is a silent stub in disguise, not a scaffold, so this verb does
+not write one.
+
+Every invocation of `loop architect`, with any argv shape (a target, no
+target, a nonexistent target, any `--mode` value, any other flag), exits `2`
+before parsing a target or a validation mode and prints a single typed message
+to stderr pointing at the loop-architect skill and at `loop scaffold` as the
+deterministic next step once a real architecture decision record exists. It
+performs zero filesystem or event-store I/O: no `sqlite3.connect`, no
+`subprocess.run`, no read of `.loop/state.json` or `TASKS.json`. There is no
+`0` or `1` exit path — every path is the same typed `2` refusal.
+
 Sources: "Designing a Loop Engineer Skill for Frontier Agent Workflows" (2026), synthesizing
 Anthropic guidance on long-running agent harnesses (anthropic.com, 2025), OpenAI Agents/Codex guidance, Google
 Conductor, and arXiv PreFlect (2602.07187), SWE-Marathon (2606.07682), Web Agents
