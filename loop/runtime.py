@@ -28,7 +28,7 @@ def _store_path(target: str | Path) -> Path:
 
 def _readonly_query(path: Path) -> str:
     """Avoid creating sidecars on clean stores while preserving crash-left WAL reads."""
-    return "mode=ro" if path.with_name(path.name + "-wal").exists() else "mode=ro&immutable=1"
+    return "mode=ro" if (path.parent / (path.name + "-wal")).exists() else "mode=ro&immutable=1"
 
 
 def _read_events_readonly(path: Path, run_id: str) -> list[dict[str, Any]]:
