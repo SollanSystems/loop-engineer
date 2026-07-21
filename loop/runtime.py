@@ -26,10 +26,15 @@ def _store_path(target: str | Path) -> Path:
     return resolve_loop_paths(target).loop_dir / "events.db"
 
 
+def _readonly_query(path: Path) -> str:
+    """Avoid creating sidecars on clean stores while preserving crash-left WAL reads."""
+    return "mode=ro" if (path.parent / (path.name + "-wal")).exists() else "mode=ro&immutable=1"
+
+
 def _read_events_readonly(path: Path, run_id: str) -> list[dict[str, Any]]:
     """Read the EventStore row shape without invoking its write-capable connector."""
     try:
-        conn = sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"{path.absolute().as_uri()}?{_readonly_query(path)}", uri=True)
         try:
             rows = conn.execute(
                 "SELECT run_id, sequence, event_id, type, actor, causation_id, "
@@ -59,7 +64,7 @@ def _discover_run_id(path: Path) -> str:
     if not path.exists():
         raise RuntimeStoreError("missing_store", f"event store does not exist: {path}")
     try:
-        conn = sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"{path.absolute().as_uri()}?{_readonly_query(path)}", uri=True)
         try:
             rows = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
         finally:

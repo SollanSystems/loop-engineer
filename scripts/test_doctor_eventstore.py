@@ -164,3 +164,14 @@ def test_ambiguous_run_id_fails_doctor(tmp_path):
     assert report["ok"] is False
     assert report["event_store"]["error_code"] == "ambiguous_run_id"
     assert "ambiguous_run_id" in _codes(report)
+
+
+def test_doctor_event_store_reads_do_not_leave_wal_or_shm_sidecars(tmp_path):
+    target = _fresh_contract(tmp_path)
+    _sync_active_task(target)
+    _open(_store(target))
+    sidecars = (target / ".loop" / "events.db-wal", target / ".loop" / "events.db-shm")
+    assert all(not path.exists() for path in sidecars)
+    report = doctor_report(target)
+    assert report["event_store"]["present"] is True
+    assert all(not path.exists() for path in sidecars)
