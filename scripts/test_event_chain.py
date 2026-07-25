@@ -438,7 +438,7 @@ def test_validation_rejects_a_hash_with_a_trailing_newline_in_both_modes(mode, f
 
 
 from loop.chain import verify_chain
-from loop.reducer import ChainBreakError, reduce_events
+from loop.reducer import ChainBreakError, EventReplayError, reduce_events
 
 
 def test_reducer_folds_chained_stream_and_exposes_head(tmp_path):
@@ -478,6 +478,58 @@ def test_reducer_resume_from_initial_chain_head(tmp_path):
     forged["event_hash"] = compute_event_hash(forged)
     with pytest.raises(ChainBreakError):
         reduce_events([forged], initial=snapshot)
+
+
+def _prechain_snapshot(projection):
+    """A v0.9.0-shaped projection: the chain keys did not exist yet."""
+    return {key: value for key, value in projection.items()
+            if key not in ("chain_head", "unchained_prefix")}
+
+
+def test_reducer_refuses_a_prechain_snapshot_at_a_chained_seam(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    events = store.read("r1")
+    snapshot = _prechain_snapshot(reduce_events(events[:1]))
+    with pytest.raises(EventReplayError) as excinfo:
+        reduce_events(events[1:], initial=snapshot)
+    assert "initial snapshot predates the chain" in str(excinfo.value)
+    assert not isinstance(excinfo.value, ChainBreakError)   # an honest resume is not a tamper alarm
+
+
+def test_reducer_accepts_a_prechain_snapshot_at_a_genesis_seam(tmp_path):
+    # A two-event chained tail pins the refusal to the FIRST event only: event 2
+    # legitimately links to the head event 1 just established, so a seam guard
+    # that stays armed past the first event would false-refuse it.
+    ws = _workspace_with_legacy_store(tmp_path)
+    migrate_store(ws)
+    store = SQLiteEventStore(ws / ".loop" / "events.db")
+    store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    store.append("r1", "iteration_appended", {"iteration_id": 2, "outcome": "task_passed"}, actor="operator")
+    events = store.read("r1")
+    resumed = reduce_events(events[1:], initial=_prechain_snapshot(reduce_events(events[:1])))
+    assert resumed["chain_head"] == reduce_events(events)["chain_head"]
+
+
+def test_reducer_accepts_a_prechain_snapshot_over_an_unchained_tail(tmp_path):
+    make_legacy_store(tmp_path / "events.db")
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    events = store.read("r1")
+    resumed = reduce_events(events[1:], initial=_prechain_snapshot(reduce_events(events[:1])))
+    assert resumed["chain_head"] is None and resumed["event_count"] == 2
+
+
+def test_reducer_chain_aware_snapshot_passes_a_correct_seam_and_breaks_on_a_wrong_head(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    events = store.read("r1")
+    snapshot = reduce_events(events[:1])
+    assert reduce_events(events[1:], initial=snapshot)["chain_head"] == reduce_events(events)["chain_head"]
+    with pytest.raises(ChainBreakError):
+        reduce_events(events[1:], initial=dict(snapshot, chain_head={"sequence": 0, "event_hash": "a" * 64}))
 
 
 @pytest.mark.parametrize("generation", ["fresh", "legacy", "migrated"])

@@ -185,6 +185,18 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
     return new_state
 
 
+def _check_prechain_seam(event: Mapping[str, Any]) -> None:
+    """A snapshot predating v0.10.0 carries no head, so a chained non-genesis tail
+    cannot link to it — an honest resume, not the forgery ChainBreakError names."""
+    if (not isinstance(event, Mapping)
+            or event.get("event_hash") is None or event.get("prev_event_hash") is None):
+        return
+    raise EventReplayError(
+        "initial snapshot predates the chain: re-fold from sequence 0 "
+        "or include chain_head in the snapshot"
+    )
+
+
 def reduce_events(events: Iterable[Mapping[str, Any]], *, initial: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Fold events without mutating the supplied stream or initial projection."""
     if initial is None:
@@ -194,6 +206,10 @@ def reduce_events(events: Iterable[Mapping[str, Any]], *, initial: Mapping[str, 
         state = {**merged, "runlog_entries": list(merged["runlog_entries"]),
                  "receipts": list(merged["receipts"]),
                  "superseded_history": list(merged["superseded_history"])}
+    seam_unchecked = initial is not None and "chain_head" not in initial
     for event in events:
+        if seam_unchecked:
+            seam_unchecked = False
+            _check_prechain_seam(event)
         state = _reduce_one(state, event)
     return state
