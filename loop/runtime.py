@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from tempfile import TemporaryDirectory
+from typing import Any, Callable, Iterator, TypeVar
 
 from .completion import CompletionPolicyError, criteria_satisfy_completion
 from .contract import ContractIssue
@@ -37,15 +39,14 @@ def _store_path(target: str | Path) -> Path:
     return resolve_loop_paths(target).loop_dir / "events.db"
 
 
-def _read_only_connect(path: Path) -> sqlite3.Connection:
-    """Read-only connection; immutable when no WAL sidecar exists so reads leave no files.
+def _open_read_only(path: Path, *, immutable: bool) -> sqlite3.Connection:
+    """Open mode=ro, preferring immutable=1 when requested.
 
-    immutable=1 assumes no concurrent writer. A live append can surface as
-    SQLITE_CORRUPT, so a failed immutable open is retried once as plain mode=ro
-    before the caller may conclude corruption: real corruption fails both.
-    """
+    immutable=1 assumes the file cannot change, so a live append can surface as
+    SQLITE_CORRUPT; a failed immutable open falls back to plain mode=ro before the
+    caller may conclude corruption: real corruption fails both."""
     uri = path.absolute().as_uri()
-    if not path.with_name(path.name + "-wal").exists():
+    if immutable:
         try:
             return sqlite3.connect(f"{uri}?mode=ro&immutable=1", uri=True)
         except sqlite3.DatabaseError:
@@ -53,17 +54,55 @@ def _read_only_connect(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"{uri}?mode=ro", uri=True)
 
 
+def _copy_wal_store(path: Path, directory: Path) -> Path | None:
+    """Copy the store then its WAL into `directory`; None when a checkpoint removed the WAL.
+
+    Order is load-bearing: the copied WAL must be at least as new as the database it
+    replays over. The -shm is deliberately never copied — it is a rebuildable index of
+    the WAL, and a crash-left one may be stale garbage.
+    """
+    copy = directory / path.name
+    shutil.copyfile(path, copy)
+    try:
+        shutil.copyfile(path.with_name(path.name + "-wal"), copy.with_name(copy.name + "-wal"))
+    except FileNotFoundError:
+        return None
+    return copy
+
+
+@contextmanager
+def _read_only_connect(path: Path, *, immutable: bool = True) -> Iterator[sqlite3.Connection]:
+    """Read-only connection that leaves the store's own directory byte-identical.
+
+    A crash-left WAL is read through a temp-directory copy of the database and its WAL,
+    because every in-place open makes SQLite create the -shm there to map the WAL.
+    Reading the original with immutable=1 instead would silently skip the WAL frames,
+    and checkpointing on open is a write. A torn WAL tail in the copy is safe: WAL frame
+    checksums truncate it. If the WAL vanished mid-copy the writer checkpointed it, so
+    the original is now a complete no-WAL store and is read directly.
+    """
+    with ExitStack() as stack:
+        source = None
+        if path.with_name(path.name + "-wal").exists():
+            source = _copy_wal_store(path, Path(stack.enter_context(TemporaryDirectory())))
+        if source is None:
+            conn = _open_read_only(path, immutable=immutable)
+        else:
+            conn = _open_read_only(source, immutable=False)
+        yield stack.enter_context(closing(conn))
+
+
 def _read_store(path: Path, read: Callable[[sqlite3.Connection], _T]) -> _T:
     """Run one read; a lost immutable=1 race retries plainly before counting as corruption."""
     try:
-        with closing(_read_only_connect(path)) as conn:
+        with _read_only_connect(path) as conn:
             return read(conn)
-    except sqlite3.DatabaseError:
+    except (OSError, sqlite3.DatabaseError):
         pass
     try:
-        with closing(sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)) as conn:
+        with _read_only_connect(path, immutable=False) as conn:
             return read(conn)
-    except sqlite3.DatabaseError as exc:
+    except (OSError, sqlite3.DatabaseError) as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
 
 
