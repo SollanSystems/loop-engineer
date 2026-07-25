@@ -1,4 +1,4 @@
-"""Proofs that simulate observes a workspace without mutating it."""
+"""Proofs that the read verbs observe a workspace without mutating it."""
 from __future__ import annotations
 
 import hashlib
@@ -8,8 +8,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from chain_fixtures import make_legacy_store
+
 from loop import emit, runner
+from loop.contract import doctor_report
 from loop.events import SQLiteEventStore
+from loop.runtime import replay_report, status_report
 from loop.simulate import simulate_run
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,10 +24,15 @@ def _task(status="pending"):
     return {"id": "T-1", "title": "T-1", "status": status, "criterion_ref": "T-1", "verify": "true", "depends_on": [], "attempts": 0, "evidence": None}
 
 
-def _ws(tmp_path, task=None):
+def _ws(tmp_path, task=None, *, legacy=False):
     w = tmp_path / "workspace"; emit.open_contract(w)
     (w / "TASKS.json").write_text(json.dumps({"schema": "loop-engineer/tasks@1", "tasks": [task or _task()]}), encoding="utf-8")
-    store = SQLiteEventStore(w / ".loop" / "events.db"); store.append(RUN_ID, "contract_opened", {"workspace": "workspace"}, actor="test")
+    # legacy=True seeds the v0.9.0 unchained generation; its contract_opened stands in for the chained append.
+    if legacy:
+        make_legacy_store(w / ".loop" / "events.db", run_id=RUN_ID)
+    store = SQLiteEventStore(w / ".loop" / "events.db")
+    if not legacy:
+        store.append(RUN_ID, "contract_opened", {"workspace": "workspace"}, actor="test")
     for n, state in enumerate(("plan", "critique-plan", "queue-tasks", "execute-task"), 1):
         store.append(RUN_ID, "iteration_appended", {"iteration_id": n, "outcome": "replanned", "state": state}, actor="test")
         emit.append_iteration(w, iteration_id=n, outcome="replanned", state=state)
@@ -47,6 +56,22 @@ def test_simulate_on_pristine_store_creates_zero_new_files_and_full_workspace_tr
     w, store = _ws(tmp_path); (w / "subdir").mkdir(); (w / "subdir" / "sentinel.txt").write_text("same", encoding="utf-8")
     before = _tree_hashes(w); report = simulate_run(w); after = _tree_hashes(w)
     assert report["would"]["action"] == "would_dispatch" and _without_shm(before) == _without_shm(after) and len(store.read(RUN_ID)) == 5
+
+
+def test_simulate_on_legacy_unchained_store_creates_zero_new_files_and_full_workspace_tree_byte_hash_unchanged(tmp_path):
+    w, store = _ws(tmp_path, legacy=True); (w / "subdir").mkdir(); (w / "subdir" / "sentinel.txt").write_text("same", encoding="utf-8")
+    before = _tree_hashes(w); report = simulate_run(w); after = _tree_hashes(w)
+    assert status_report(w)["chain_head"] is None
+    # Clean checkpointed store: assert the whole tree, so an shm-only regression cannot slip through.
+    assert report["would"]["action"] == "would_dispatch" and before == after and len(store.read(RUN_ID)) == 5
+
+
+def test_doctor_status_and_replay_on_clean_chained_store_leave_the_full_workspace_tree_byte_identical(tmp_path):
+    w, _ = _ws(tmp_path)
+    assert not (w / ".loop" / "events.db-wal").exists() and not (w / ".loop" / "events.db-shm").exists()
+    before = _tree_hashes(w); reports = (doctor_report(w), status_report(w), replay_report(w)); after = _tree_hashes(w)
+    assert all(report["ok"] for report in reports) and reports[1]["chain_head"] is not None
+    assert before == after
 
 
 def test_simulate_on_crash_left_wal_sidecar_leaves_events_db_and_wal_bytes_unchanged_shm_exempted(tmp_path):
