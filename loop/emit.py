@@ -568,7 +568,15 @@ def write_verify_evidence(
         built.object_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_create_text(built.object_path, built.bundle_text)
     except FileExistsError:
-        existing = hashlib.sha256(built.object_path.read_bytes()).hexdigest()
+        # The sibling `except OSError` cannot catch what is raised INSIDE this handler,
+        # so the collision read is wrapped here: an IsADirectoryError or PermissionError
+        # at the object path must leave write_verify_evidence as a typed EmitError.
+        try:
+            existing = hashlib.sha256(built.object_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise EmitError(
+                f"object store entry for {built.sha256} exists but cannot be read at "
+                f"{built.object_path}: {exc}") from exc
         if existing != built.sha256:
             raise EmitError(
                 f"object store holds different bytes for {built.sha256}: refusing to overwrite "

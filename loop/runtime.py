@@ -302,6 +302,10 @@ def event_consistency_issues(
         status = status_report(target, mode=mode)
         replay = replay_report(target, mode=mode)
         declares_chain_without_columns = _store_declares_chain_without_columns(path)
+        # Inside the guard with its two siblings: this is a THIRD independent read, and a
+        # store that becomes unreadable between reads must surface as a typed finding
+        # rather than an untyped traceback out of doctor_report (R007).
+        bound_issues = _bound_evidence_issues(target, mode)
     except RuntimeStoreError as exc:
         unreadable_issues = [ContractIssue(exc.code, str(exc))]
         if expect_chain_head is not None:
@@ -309,7 +313,7 @@ def event_consistency_issues(
                 "an anchored chain head was supplied but the event store cannot be read"))
         return {"present": True, "readable": False, "error_code": exc.code}, unreadable_issues
     issues = list(status["divergence"]) + list(replay["findings"])
-    issues.extend(_bound_evidence_issues(target, mode))
+    issues.extend(bound_issues)
     if declares_chain_without_columns:
         issues.append(ContractIssue(
             "chain_columns_missing",
