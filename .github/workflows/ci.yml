@@ -223,3 +223,21 @@ jobs:
         run: |
           python -m pip install --quiet pre-commit pytest pyyaml
           python -B -m pytest -q -p no:cacheprovider scripts/test_precommit_hook.py
+
+  recipe-ruflo:
+    name: recipe (ruflo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install recipe dependencies
+        # No npm, no Node, no credentials: ruflo has no Python package, and a live
+        # swarm needs the `claude` binary plus model spend. The example replays the
+        # committed examples/ruflo-gate/fixture/ recording instead — the gate,
+        # projection, emit, doctor and metrics path all still execute for real.
+        # The opt-in live schema-drift alarm (LOOP_RUFLO_LIVE=1) stays skipped here.
+        run: python -m pip install --upgrade pip pyyaml pytest jsonschema
+      - name: ruflo recipe end-to-end
+        run: python -B -m pytest -q -p no:cacheprovider scripts/test_ruflo_recipe.py

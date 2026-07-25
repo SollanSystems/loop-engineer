@@ -1,0 +1,48 @@
+{
+  "schema": "ruflo-memory-export/v1",
+  "exportedAt": "2026-07-25T09:32:10Z",
+  "namespace": null,
+  "count": 4,
+  "entries": [
+    {
+      "key": "spec-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"acceptanceCriteria\":[\"AC-1: Given the two seed files, when the import runs, then 41 unique contacts remain from 57 input rows\",\"AC-2: Given a completed import, when the same files import again, then zero new rows are written\",\"AC-3: Given a dropped duplicate, when it is skipped, then its source line appears in dedupe.log\"],\"constraints\":[\"case-insensitive match on email and phone only\",\"retention order is first-seen wins\"]}",
+      "createdAt": "2026-07-25T09:16:38Z",
+      "updatedAt": "2026-07-25T09:16:38Z",
+      "accessCount": 6,
+      "hasEmbedding": true,
+      "size": 592
+    },
+    {
+      "key": "current-phase-csv-dedupe",
+      "namespace": "sparc-state",
+      "value": "{\"feature\":\"csv-dedupe\",\"currentPhase\":\"completion\",\"phaseNumber\":5,\"status\":\"complete\"}",
+      "createdAt": "2026-07-25T09:16:38Z",
+      "updatedAt": "2026-07-25T09:31:44Z",
+      "accessCount": 9,
+      "hasEmbedding": false,
+      "size": 128
+    },
+    {
+      "key": "gates-csv-dedupe",
+      "namespace": "sparc-gates",
+      "value": "{\"feature\":\"csv-dedupe\",\"gates\":[{\"phase\":1,\"name\":\"specification\",\"result\":\"pass\"},{\"phase\":2,\"name\":\"pseudocode\",\"result\":\"pass\"},{\"phase\":3,\"name\":\"architecture\",\"result\":\"pass\"},{\"phase\":4,\"name\":\"refinement\",\"result\":\"pass\",\"coverage\":92},{\"phase\":5,\"name\":\"completion\",\"result\":\"pass\",\"truthScore\":0.97}]}",
+      "createdAt": "2026-07-25T09:17:02Z",
+      "updatedAt": "2026-07-25T09:31:44Z",
+      "accessCount": 6,
+      "hasEmbedding": false,
+      "size": 480
+    },
+    {
+      "key": "complete-csv-dedupe",
+      "namespace": "sparc-phases",
+      "value": "{\"status\":\"complete\",\"traceabilityMatrix\":[{\"ac\":\"AC-1\",\"test\":\"test_dedupe_yields_41_unique\",\"status\":\"Pass\"},{\"ac\":\"AC-2\",\"test\":\"test_second_run_is_idempotent\",\"status\":\"Pass\"},{\"ac\":\"AC-3\",\"test\":\"test_dropped_rows_are_logged\",\"status\":\"Pass\"}],\"regressionResult\":\"pass\"}",
+      "createdAt": "2026-07-25T09:31:40Z",
+      "updatedAt": "2026-07-25T09:31:40Z",
+      "accessCount": 2,
+      "hasEmbedding": true,
+      "size": 416
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "task-004-review",
+  "swarmId": "swarm-2026-07-25-csv-dedupe",
+  "description": "review the retained-row ordering and re-run the import for idempotence",
+  "assignedAgent": "agent-reviewer-04",
+  "status": "completed",
+  "createdAt": "2026-07-25T09:24:19Z",
+  "completedAt": "2026-07-25T09:31:37Z"
+}

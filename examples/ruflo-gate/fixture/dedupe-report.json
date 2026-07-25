@@ -1,0 +1,10 @@
+{
+  "feature": "csv-dedupe",
+  "input_rows": 57,
+  "unique_rows": 41,
+  "dropped_rows": 16,
+  "second_run_inserted": 0,
+  "log_file": "dedupe.log",
+  "generated_by": "agent-coder-02",
+  "generated_at": "2026-07-25T09:24:08Z"
+}

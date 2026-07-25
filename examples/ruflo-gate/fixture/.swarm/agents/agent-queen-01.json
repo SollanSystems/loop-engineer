@@ -1,0 +1,12 @@
+{
+  "id": "agent-queen-01",
+  "swarmId": "swarm-2026-07-25-csv-dedupe",
+  "role": "queen-coordinator",
+  "status": "completed",
+  "spawnedAt": "2026-07-25T09:14:11Z",
+  "tasksCompleted": 1,
+  "touchedPaths": [
+    ".swarm/memory-export.json",
+    ".hive-mind/sessions/hive-mind-prompt-swarm-2026-07-25.txt"
+  ]
+}

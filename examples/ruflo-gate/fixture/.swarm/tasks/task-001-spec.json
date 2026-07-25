@@ -1,0 +1,9 @@
+{
+  "id": "task-001-spec",
+  "swarmId": "swarm-2026-07-25-csv-dedupe",
+  "description": "record the dedupe acceptance criteria as the SPARC specification phase",
+  "assignedAgent": "agent-queen-01",
+  "status": "completed",
+  "createdAt": "2026-07-25T09:14:20Z",
+  "completedAt": "2026-07-25T09:16:41Z"
+}

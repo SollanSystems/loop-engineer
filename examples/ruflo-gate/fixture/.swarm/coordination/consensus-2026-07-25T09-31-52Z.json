@@ -1,0 +1,17 @@
+{
+  "swarmId": "swarm-2026-07-25-csv-dedupe",
+  "round": 3,
+  "kind": "consensus",
+  "algorithm": "byzantine",
+  "recordedAt": "2026-07-25T09:31:52Z",
+  "messagesSent": 42,
+  "conflictsResolved": 1,
+  "participants": [
+    "agent-queen-01",
+    "agent-coder-02",
+    "agent-coder-03",
+    "agent-reviewer-04"
+  ],
+  "outcome": "objective-met",
+  "_note": "The swarm's own consensus row. A supervisor reads it as a trail, never as a verdict."
+}

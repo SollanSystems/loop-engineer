@@ -1,0 +1,20 @@
+{
+  "version": "3.32.9",
+  "initialized": "2026-07-25T09:14:02Z",
+  "domains": {
+    "completed": 1,
+    "total": 1,
+    "status": "COMPLETE"
+  },
+  "swarm": {
+    "activeAgents": 0,
+    "maxAgents": 8,
+    "topology": "hierarchical-mesh"
+  },
+  "learning": {
+    "status": "READY",
+    "patternsLearned": 2,
+    "sessionsCompleted": 1
+  },
+  "_note": "Snapshot after the swarm drained back to idle. Progress, not proof."
+}

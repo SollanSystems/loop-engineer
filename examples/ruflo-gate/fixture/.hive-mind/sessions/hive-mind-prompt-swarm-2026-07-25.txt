@@ -1,0 +1,13 @@
+Queen coordinator briefing — swarm-2026-07-25-csv-dedupe
+
+Objective: collapse duplicate contacts during the CSV import so that rows sharing
+a normalized (email, phone) key are written once, the first-seen row is retained,
+and every dropped row is recorded with its source line number.
+
+Coordination notes for the worker agents:
+  - Spawn one coder per acceptance criterion; the reviewer re-runs the import.
+  - Record each SPARC phase artifact into the sparc-phases memory namespace.
+  - Verify all subtasks are complete before reporting the objective as met.
+
+This prompt file is the record of what the swarm was asked to do. It is an input,
+not evidence of the outcome — the outcome is decided by the supervising gate.
