@@ -488,6 +488,20 @@ def test_wal_checkpointed_between_the_probe_and_the_copy_reads_the_original_stor
     assert not (ws / ".loop" / "events.db-shm").exists()
 
 
+def test_a_failing_store_copy_surfaces_as_a_typed_error_not_a_raw_oserror(tmp_path, monkeypatch):
+    """A copy failure (ENOSPC, EACCES, vanished store) stays inside the RuntimeStoreError family."""
+    ws = _chained_workspace(tmp_path)
+    _crash_left_wal(ws)
+    _sync_iteration(ws, 1)
+
+    def no_space(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shutil, "copyfile", no_space)
+    with pytest.raises(RuntimeStoreError, match="cannot read event store"):
+        status_report(ws)
+
+
 def test_dispatch_read_on_a_crash_left_wal_store_leaves_the_loop_dir_byte_identical(tmp_path):
     """The runner folds through the same read path, and an unready state writes nothing."""
     ws = _chained_workspace(tmp_path)

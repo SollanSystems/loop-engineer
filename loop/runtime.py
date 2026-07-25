@@ -40,7 +40,9 @@ def _store_path(target: str | Path) -> Path:
 
 
 def _open_read_only(path: Path, *, immutable: bool) -> sqlite3.Connection:
-    """immutable=1 assumes the file cannot change, so a live append can surface as
+    """Open mode=ro, preferring immutable=1 when requested.
+
+    immutable=1 assumes the file cannot change, so a live append can surface as
     SQLITE_CORRUPT; a failed immutable open falls back to plain mode=ro before the
     caller may conclude corruption: real corruption fails both."""
     uri = path.absolute().as_uri()
@@ -95,12 +97,12 @@ def _read_store(path: Path, read: Callable[[sqlite3.Connection], _T]) -> _T:
     try:
         with _read_only_connect(path) as conn:
             return read(conn)
-    except sqlite3.DatabaseError:
+    except (OSError, sqlite3.DatabaseError):
         pass
     try:
         with _read_only_connect(path, immutable=False) as conn:
             return read(conn)
-    except sqlite3.DatabaseError as exc:
+    except (OSError, sqlite3.DatabaseError) as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
 
 
