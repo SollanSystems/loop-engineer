@@ -73,6 +73,10 @@ class EventRowDecodeError(ValueError):
     """A stored payload/artifact_hashes column is not valid JSON."""
 
 
+class EventStoreOperationalError(RuntimeError):
+    """The events table exists but cannot service this operation (schema drift, lock)."""
+
+
 @runtime_checkable
 class EventStore(Protocol):
     def append(self, run_id: str, event_type: str, payload: Mapping[str, Any], *, actor: str,
@@ -352,6 +356,12 @@ class SQLiteEventStore:
                 conn.execute("ROLLBACK")
                 raise DuplicateEventError(record["event_id"]) from exc
             conn.execute("COMMIT")
+        except sqlite3.OperationalError as exc:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise EventStoreOperationalError(f"event store cannot accept appends: {exc}") from exc
         finally:
             conn.close()
         return record

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import emit
-from .events import EVENT_SCHEMA_ID, SQLiteEventStore, validate_event
+from .events import EVENT_SCHEMA_ID, EventStoreOperationalError, SQLiteEventStore, validate_event
 from .paths import resolve_loop_paths
 from .reducer import reduce_events
 from .runtime import RuntimeStoreError
@@ -96,6 +96,14 @@ def _subprocess_verifier(task: dict[str, Any], workspace: Path) -> VerifyOutcome
     except OSError as exc:
         raise VerifierExecutionError(f"cannot execute verify command {cmd!r}: {exc}") from exc
     return VerifyOutcome(proc.returncode == 0, summary=(proc.stdout + proc.stderr)[-2000:])
+
+
+def _store_append(store: SQLiteEventStore, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Keep an unusable store (schema drift, lock) inside the typed runtime family."""
+    try:
+        return store.append(*args, **kwargs)
+    except EventStoreOperationalError as exc:
+        raise RuntimeStoreError("event_store_unusable", str(exc)) from exc
 
 
 def _load_tasks(paths: Any) -> list[dict]:
@@ -220,8 +228,8 @@ def dispatch_once(
                 "completion_policy": {"mode": "all_required"}, "iteration_id": iteration_id,
             }
             store = SQLiteEventStore(paths.loop_dir / "events.db")
-            store.append(run_id, "terminal_written", payload, actor="loop.run",
-                         expected_sequence=projection["last_sequence"] + 1)
+            _store_append(store, run_id, "terminal_written", payload, actor="loop.run",
+                          expected_sequence=projection["last_sequence"] + 1)
             _reconcile_legacy_terminal(target, {**projection, "terminal": payload})
             return {"ok": True, "action": "terminal_written", "iteration_id": iteration_id, "run_id": run_id}
         return {"ok": False, "action": "blocked", "run_id": run_id}
@@ -237,8 +245,8 @@ def dispatch_once(
         "summary": outcome.summary,
     }
     store = SQLiteEventStore(paths.loop_dir / "events.db")
-    store.append(run_id, "iteration_appended", payload, actor="loop.run",
-                 expected_sequence=projection["last_sequence"] + 1)
+    _store_append(store, run_id, "iteration_appended", payload, actor="loop.run",
+                  expected_sequence=projection["last_sequence"] + 1)
     emit.append_iteration(target, iteration_id=iteration_id, outcome=payload["outcome"],
                           task_id=payload["task_id"], notes=payload["summary"])
     return {"ok": True, "action": "dispatched", "task_id": task["id"],

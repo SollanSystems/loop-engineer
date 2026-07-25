@@ -184,3 +184,117 @@ def test_read_event_rows_raises_typed_error_on_corrupt_payload_json(tmp_path):
             read_event_rows(conn, "r1")
     finally:
         conn.close()
+
+
+from loop.chain import compute_event_hash as _hash
+from loop.events import EventStoreOperationalError
+
+
+def test_read_projects_store_computed_hash_on_fresh_store(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    record = store.append("r2", "contract_opened", {"workspace": "ws"}, actor="operator")
+    assert store.read("r2")[0]["event_hash"] == record["event_hash"]
+
+
+def test_append_chains_on_fresh_store(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    e0 = store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    e1 = store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"},
+                      actor="operator")
+    assert e0["prev_event_hash"] is None and e0["event_hash"] == _hash(e0)
+    assert e1["prev_event_hash"] == e0["event_hash"] and e1["event_hash"] == _hash(e1)
+
+
+def test_append_ignores_caller_supplied_chain_fields(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    smuggled = store.append("r1", "iteration_appended",
+                            {"iteration_id": 1, "outcome": "task_passed", "event_hash": "f" * 64},
+                            actor="operator")
+    assert smuggled["event_hash"] != "f" * 64 and smuggled["event_hash"] == _hash(smuggled)
+
+
+def test_append_on_legacy_store_stays_unchained_and_working(tmp_path):
+    path = make_legacy_store(tmp_path / "events.db")
+    record = SQLiteEventStore(path).append(
+        "r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    assert record["prev_event_hash"] is None and record["event_hash"] is None
+    assert SQLiteEventStore(path).read("r1")[1]["event_hash"] is None
+
+
+def test_legacy_style_ten_column_insert_is_refused_by_a_fresh_store(tmp_path):
+    """Design change D1: a pre-0.10.0 writer cannot silently unchain a v2 store."""
+    path = tmp_path / "events.db"
+    SQLiteEventStore(path).append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    conn = sqlite3.connect(str(path))
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO events (run_id, sequence, event_id, type, actor, causation_id, "
+                "correlation_id, ts, payload, artifact_hashes) VALUES "
+                "('r1',1,'old-writer','iteration_appended','worker',NULL,NULL,"
+                "'2026-07-24T00:00:00+00:00','{\"iteration_id\":1,\"outcome\":\"task_passed\"}','[]')")
+    finally:
+        conn.close()
+
+
+def test_append_wraps_schema_drift_as_typed_error(tmp_path):
+    path = tmp_path / "events.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE events (run_id TEXT, sequence INTEGER)")   # wrong shape entirely
+    conn.commit(); conn.close()
+    with pytest.raises(EventStoreOperationalError):
+        SQLiteEventStore(path).append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+
+
+import subprocess
+import sys
+from pathlib import Path
+
+from loop.runtime import RuntimeStoreError
+
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _drifted_store(path):
+    """An events table that reads and writes nothing the kernel expects."""
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE events (run_id TEXT, sequence INTEGER)")
+        conn.execute("INSERT INTO events VALUES ('r1', 0)")
+        conn.commit()
+    finally:
+        conn.close()
+    return Path(path)
+
+
+def test_runcontrol_append_translates_operational_error_to_typed_store_error(tmp_path):
+    from loop import runcontrol
+
+    workspace = tmp_path / "workspace"
+    (workspace / ".loop").mkdir(parents=True)
+    _drifted_store(workspace / ".loop" / "events.db")
+    with pytest.raises(RuntimeStoreError, match="event_store_unusable"):
+        runcontrol._append_event(workspace, "r1", {"last_sequence": 0}, "contract_opened",
+                                 {"workspace": "ws"})
+
+
+def test_runner_append_translates_operational_error_to_typed_store_error(tmp_path):
+    from loop.runner import _store_append
+
+    path = _drifted_store(tmp_path / "events.db")
+    with pytest.raises(RuntimeStoreError, match="event_store_unusable"):
+        _store_append(SQLiteEventStore(path), "r1", "contract_opened", {"workspace": "ws"},
+                      actor="loop.run")
+
+
+@pytest.mark.parametrize("command,extra", [("run", []), ("pause", ["--reason", "drift probe"])])
+def test_cli_refuses_a_schema_drifted_store_without_a_traceback(tmp_path, command, extra):
+    workspace = tmp_path / "workspace"
+    (workspace / ".loop").mkdir(parents=True)
+    _drifted_store(workspace / ".loop" / "events.db")
+    proc = subprocess.run([sys.executable, "-B", "-m", "loop", command, *extra, str(workspace)],
+                          cwd=_ROOT, text=True, capture_output=True)
+    assert proc.returncode == 2
+    assert "Traceback" not in proc.stderr
+    assert proc.stderr.strip().startswith(f"{command}: ")
