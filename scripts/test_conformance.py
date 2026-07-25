@@ -436,3 +436,106 @@ def test_documented_policy_digest_vector_matches_the_implementation():
     assert verification_policy_digest(_POLICY_VECTOR_TASK) == _POLICY_VECTOR_DIGEST
     doc = (Path(__file__).resolve().parent.parent / "reference" / "repo-os-contract.md").read_text(encoding="utf-8")
     assert _POLICY_VECTOR_DIGEST in doc and _POLICY_VECTOR_CANONICAL in doc
+
+
+# --------------------------------------------------------------------------- #
+# Evidence-wiring doc pins — the shipped surfaces and the normative doc cannot
+# drift apart. Every assertion below was proven to FAIL against the tree as it
+# stood before the documentation commit; a pin that passes both before and
+# after documents nothing.
+# --------------------------------------------------------------------------- #
+
+from loop import emit  # noqa: E402
+from loop.verifier import injected_verifier_identity  # noqa: E402
+
+_CONTRACT_DOC = ROOT / "reference" / "repo-os-contract.md"
+
+# The retired sentence was written three different ways on the three surfaces
+# ("does NOT yet hash-verify", "does not yet hash-verify", "does not
+# hash-verify"), so the ban is case-insensitive and the "yet" is optional. A
+# case-sensitive substring ban passes against the uppercase one and proves
+# nothing about it.
+_RETIRED_HASH_VERIFY_CLAIM = re.compile(r"does\s+not\s+(?:yet\s+)?hash-verify", re.IGNORECASE)
+
+
+def _binding_fixture(tmp_path: Path) -> Path:
+    """A minimal in-flight contract that ``build_verify_evidence`` can render
+    against — it needs only a readable ``.loop/state.json``."""
+    return _scaffold_inflight(tmp_path / "binding")
+
+
+def _bound_evidence_section() -> str:
+    """§17's ``### Bound evidence`` subsection, heading to next heading."""
+    text = _CONTRACT_DOC.read_text(encoding="utf-8")
+    assert "### Bound evidence" in text, "§17 does not document the bound evidence set"
+    start = text.index("### Bound evidence")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end == -1 else text[start:end]
+
+
+def test_documented_artifact_binding_vector_matches_the_writer(tmp_path):
+    """The three bound paths and their order are normative, not incidental."""
+    workspace = _binding_fixture(tmp_path)
+    built = emit.build_verify_evidence(workspace, run_id="run-1", iteration_id=1,
+                                       task=_POLICY_VECTOR_TASK, passed=True,
+                                       code_identity=injected_verifier_identity())
+    # Order is the WRITER'S CONVENTION, not a correctness property — the doctor
+    # walk builds a path->digest map and `event_hash` recomputes over the stored
+    # list exactly as written, so any order verifies. It is pinned to the SHIPPED
+    # order (bundle -> record -> object) purely so it cannot drift silently away
+    # from the ordered list §17 publishes.
+    assert [entry["path"] for entry in built.artifact_hashes] == [
+        ".loop/artifacts/verify-iter1.json",
+        ".loop/evidence/evidence-iter1.json",
+        f".loop/artifacts/objects/{built.sha256[:2]}/{built.sha256}",
+    ]
+    # And the doc's numbered list must enumerate the same three in the same order.
+    section = _bound_evidence_section()
+    markers = (".loop/artifacts/verify-iter", ".loop/evidence/evidence-iter",
+               ".loop/artifacts/objects/")
+    for marker in markers:
+        assert marker in section, f"§17 bound-evidence set omits {marker}"
+    positions = [section.index(marker) for marker in markers]
+    assert positions == sorted(positions), (
+        f"§17 lists the bound set out of writer order: {positions}")
+
+
+def test_every_new_doctor_code_is_documented_in_section_22():
+    doc = _CONTRACT_DOC.read_text(encoding="utf-8")
+    for code in ("evidence_chain_mismatch", "missing_bound_evidence",
+                 "policy_digest_mismatch", "unverified_evidence_terminal"):
+        assert f"`{code}`" in doc, f"§22 does not document {code}"
+
+
+def test_no_shipped_surface_still_claims_evidence_is_unverified():
+    for path in (ROOT / "loop" / "evidence.py", ROOT / "schemas" / "evidence.schema.json",
+                 _CONTRACT_DOC):
+        text = path.read_text(encoding="utf-8")
+        assert not _RETIRED_HASH_VERIFY_CLAIM.search(text), (
+            f"{path.name} still disclaims hash verification")
+        # Whitespace-normalised: the retired tier bullet wrapped between the "**"
+        # and `policy_digest`, so a raw substring ban never matched it either.
+        normalised = " ".join(text.split())
+        assert "not checked by any shipped surface:** `policy_digest`" not in normalised, (
+            f"{path.name} still files policy_digest under the unchecked tier")
+    # decision 14: the strict mode's two residuals must be named where the mode is
+    # documented, not only in this plan. A capability paragraph without its limits is
+    # the overclaim this slice exists to prevent.
+    contract = " ".join(_CONTRACT_DOC.read_text(encoding="utf-8").split())
+    assert "no event store" in contract and "--expect-chain-head" in contract
+    # §17 closes with the trust-domain sentence rather than the plan's
+    # "detectable against an anchor" wording (that phrasing ships in the README).
+    # Pinned against the sentence the contract actually carries — absent before
+    # this release, so the assertion discriminates.
+    assert "trust domain can anchor" in contract
+    # Deliberately NOT asserting the absence of "tamper-proof": §17 names it as the
+    # forbidden claim, so a substring ban would fire on the honesty sentence itself.
+
+
+def test_section_16_event_type_list_matches_the_code():
+    from loop.events import EVENT_TYPES
+    doc = _CONTRACT_DOC.read_text(encoding="utf-8")
+    # §16 renders the nine members inside one wrapped backtick span, so a bare
+    # name is as good as a backticked one here.
+    assert all(f"`{name}`" in doc or name in doc for name in EVENT_TYPES)
+    assert "one-to-one with `loop.emit`'s four writer operations" not in doc
