@@ -357,3 +357,74 @@ def test_chain_fields_validate_in_both_modes(mode):
     report = validate_event(dict(good, event_hash="not-hex"), mode=mode)
     assert not report["ok"]
     assert validate_event(dict(good, prev_event_hash=17), mode=mode)["ok"] is False
+
+
+from loop.chain import verify_chain
+from loop.reducer import ChainBreakError, reduce_events
+
+
+def test_reducer_folds_chained_stream_and_exposes_head(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    last = store.append("r1", "iteration_appended",
+                        {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    projection = reduce_events(store.read("r1"))
+    assert projection["chain_head"] == {"sequence": 1, "event_hash": last["event_hash"]}
+    assert projection["unchained_prefix"] == 0
+
+
+def test_reducer_raises_chain_break_on_tampered_payload(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    events = store.read("r1")
+    events[0]["payload"] = {"workspace": "tampered"}
+    with pytest.raises(ChainBreakError):
+        reduce_events(events)
+
+
+def test_reducer_accepts_legacy_unchained_stream(tmp_path):
+    make_legacy_store(tmp_path / "events.db")
+    projection = reduce_events(SQLiteEventStore(tmp_path / "events.db").read("r1"))
+    assert projection["chain_head"] is None and projection["unchained_prefix"] == 1
+
+
+def test_reducer_resume_from_initial_chain_head(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    events = store.read("r1")
+    snapshot = reduce_events(events[:1])
+    resumed = reduce_events(events[1:], initial=snapshot)
+    assert resumed["chain_head"] == reduce_events(events)["chain_head"]
+    forged = dict(events[1], prev_event_hash="a" * 64)
+    forged["event_hash"] = compute_event_hash(forged)
+    with pytest.raises(ChainBreakError):
+        reduce_events([forged], initial=snapshot)
+
+
+@pytest.mark.parametrize("generation", ["fresh", "legacy", "migrated"])
+def test_verify_chain_agrees_with_reducer(tmp_path, generation):
+    """Two verifiers, one truth — guards against lockstep drift (design decision 8)."""
+    path = tmp_path / "events.db"
+    if generation == "fresh":
+        store = SQLiteEventStore(path)
+    else:
+        make_legacy_store(path)
+        if generation == "migrated":
+            (tmp_path / ".loop").mkdir(exist_ok=True)
+            # migrate_store takes a workspace; migrate this file in place via the same DDL
+            conn = sqlite3.connect(str(path))
+            conn.execute("ALTER TABLE events ADD COLUMN prev_event_hash TEXT")
+            conn.execute("ALTER TABLE events ADD COLUMN event_hash TEXT")
+            conn.execute("PRAGMA user_version = 2")
+            conn.commit(); conn.close()
+        store = SQLiteEventStore(path)
+    if generation == "fresh":
+        store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"},
+                 actor="operator")
+    events = store.read("r1")
+    projection = reduce_events(events)
+    report = verify_chain(events)
+    assert report["head"] == projection["chain_head"]
+    assert report["unchained_prefix"] == projection["unchained_prefix"]
