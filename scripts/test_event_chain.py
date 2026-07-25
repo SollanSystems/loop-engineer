@@ -187,7 +187,7 @@ def test_read_event_rows_raises_typed_error_on_corrupt_payload_json(tmp_path):
 
 
 from loop.chain import compute_event_hash as _hash
-from loop.events import EventStoreOperationalError
+from loop.events import DuplicateEventError, EventStoreOperationalError
 
 
 def test_read_projects_store_computed_hash_on_fresh_store(tmp_path):
@@ -245,6 +245,45 @@ def test_append_wraps_schema_drift_as_typed_error(tmp_path):
     conn.commit(); conn.close()
     with pytest.raises(EventStoreOperationalError):
         SQLiteEventStore(path).append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+
+
+def test_append_maps_a_reused_event_id_to_duplicate(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator", event_id="same")
+    with pytest.raises(DuplicateEventError):
+        store.append("r2", "contract_opened", {"workspace": "ws"}, actor="operator", event_id="same")
+
+
+def test_append_wraps_a_non_duplicate_integrity_failure_as_typed_error(tmp_path, monkeypatch):
+    """A NOT NULL refusal is not a retryable duplicate — retrying it would loop forever."""
+    real_connect = sqlite3.connect
+
+    class RefuseInsert(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if isinstance(sql, str) and sql.lstrip().upper().startswith("INSERT INTO EVENTS"):
+                raise sqlite3.IntegrityError("NOT NULL constraint failed: events.event_hash")
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect",
+                        lambda *args, **kwargs: real_connect(*args, factory=RefuseInsert, **kwargs))
+    with pytest.raises(EventStoreOperationalError, match="NOT NULL constraint failed"):
+        SQLiteEventStore(tmp_path / "events.db").append(
+            "r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+
+
+_STORE_VERBS = {
+    "append": lambda store: store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator"),
+    "read": lambda store: store.read("r1"),
+    "latest_sequence": lambda store: store.latest_sequence("r1"),
+}
+
+
+@pytest.mark.parametrize("verb", sorted(_STORE_VERBS))
+def test_unopenable_store_raises_typed_error_from_every_verb(tmp_path, verb):
+    path = tmp_path / "events.db"
+    path.mkdir()
+    with pytest.raises(EventStoreOperationalError):
+        _STORE_VERBS[verb](SQLiteEventStore(path))
 
 
 from pathlib import Path
@@ -364,6 +403,15 @@ def test_chain_fields_validate_in_both_modes(mode):
     report = validate_event(dict(good, event_hash="not-hex"), mode=mode)
     assert not report["ok"]
     assert validate_event(dict(good, prev_event_hash=17), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("field", ["prev_event_hash", "event_hash", "artifact_hashes"])
+def test_basic_validation_rejects_a_hash_with_a_trailing_newline(field):
+    clean = _chained(0, None, artifact_hashes=[{"path": "p", "sha256": "a" * 64}])
+    assert validate_event(clean, mode="basic")["ok"] is True
+    dirty = ([{"path": "p", "sha256": "a" * 64 + "\n"}] if field == "artifact_hashes"
+             else "a" * 64 + "\n")
+    assert validate_event(dict(clean, **{field: dirty}), mode="basic")["ok"] is False
 
 
 from loop.chain import verify_chain
