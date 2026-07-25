@@ -57,7 +57,16 @@ for exactly the machinery our signals miss.
 Harnesses whose run state lives fundamentally off-repo (OpenHands and
 SWE-agent trajectories, platform-hosted runs) are out of scope: there is no
 on-disk run record for a repo-native inspector to read — which is its own
-answer to the question this scoreboard asks.
+answer to the question this scoreboard asks.†
+
+> † **Correction (2026-07-25).** For OpenHands this is now only half true. The
+> V1 SDK (`openhands-sdk` 1.37.1) persists `base_state.json` + an `events/`
+> trajectory whenever `persistence_dir=` is set — enough for an external
+> certifier to read a run's terminal signal, its iteration cap, and its full
+> event log. It is still not a *repo-native* contract (the record lives outside
+> the repo by default and carries no spec, plan, or ledger), so the row stays
+> out of the scoreboard; but the gap is addressable from outside, which is what
+> [`examples/openhands-certify/`](../../examples/openhands-certify/) does.
 
 ## The scoreboard
 
@@ -283,8 +292,10 @@ FCR/RP — is a missing **layer**, one every harness on this board could emit
 at its finish line. The port is small: four `loop.emit` calls
 (`open_contract`, `append_iteration`, `append_receipt`, `terminate`), worked
 end-to-end for a real engine in
-[`docs/integrations/langgraph.md`](../integrations/langgraph.md) and
-[`docs/integrations/temporal.md`](../integrations/temporal.md).
+[`docs/integrations/langgraph.md`](../integrations/langgraph.md),
+[`docs/integrations/temporal.md`](../integrations/temporal.md), and — for a
+harness with no seam to hook at all —
+[`docs/integrations/openhands.md`](../integrations/openhands.md).
 
 ## Contribute a row
 

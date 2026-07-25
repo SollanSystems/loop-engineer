@@ -189,6 +189,20 @@ jobs:
             echo "::error::the always-run anchor step recorded '$GATE_HEAD', not the observed head"
             exit 1
           fi
+  recipe-openhands:
+    name: recipe (openhands)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          # openhands-sdk requires >=3.12; the certifier itself is stdlib-only, so
+          # its behavioural e2e already runs on the whole gates matrix.
+          python-version: "3.12"
+      - name: Install recipe dependencies
+        run: python -m pip install --upgrade pip pyyaml pytest jsonschema openhands-sdk==1.37.1 openhands-tools==1.37.1
+      - name: OpenHands schema-drift alarm
+        run: python -B -m pytest -q -p no:cacheprovider scripts/test_openhands_sdk_drift.py scripts/test_openhands_recipe.py
 
   action-dogfood:
     name: action (dogfood on flagship example)

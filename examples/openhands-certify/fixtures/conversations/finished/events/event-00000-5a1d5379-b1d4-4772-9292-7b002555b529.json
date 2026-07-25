@@ -1,0 +1,14 @@
+{
+  "id": "5a1d5379-b1d4-4772-9292-7b002555b529",
+  "timestamp": "2026-07-25T12:10:13.226484",
+  "source": "user",
+  "parent_id": null,
+  "llm_message": {
+    "role": "user",
+    "content": [{"cache_prompt": false, "type": "text", "text": "write artifact.txt"}],
+    "thinking_blocks": []
+  },
+  "activated_skills": [],
+  "extended_content": [],
+  "kind": "MessageEvent"
+}

@@ -262,6 +262,15 @@ truth.
 
 ### 5.3 OpenHands run → FCR gate  *(alternate)*
 
+> **Superseded 2026-07-25 by the shipped recipe.** OpenHands restructured into
+> "V1": the runtime moved to `OpenHands/software-agent-sdk`, and none of the
+> `openhands.run()` / `result.iterations` / `AgentStuckError` surface sketched
+> below exists. The shape below (post-run hook, trajectory as anticheat input,
+> stuck/max-iteration → `FailedBudget`) survived the rewrite intact; the API did
+> not. Author against [`docs/integrations/openhands.md`](../../integrations/openhands.md)
+> and [`examples/openhands-certify/`](../../../examples/openhands-certify/), not
+> against this snippet.
+
 **Composes:** the EXECUTE tier (autonomous coding runtime). OpenHands writes, runs,
 and tests code in a sandbox — incidental verification, but "done" is still the
 agent stopping. Loop Engineer wraps the run's exit in the false-completion gate.

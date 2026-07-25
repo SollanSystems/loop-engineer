@@ -1,0 +1,54 @@
+{
+  "id": "00000000-0000-4000-8000-000000000004",
+  "agent": {
+    "llm": {
+      "model": "gpt-4o-mini",
+      "api_key": "**********",
+      "auth_type": "api_key",
+      "usage_id": "recipe",
+      "kind": "LLM"
+    },
+    "tools": [],
+    "mcp_config": {},
+    "include_default_tools": [
+      "FinishTool",
+      "ThinkTool"
+    ],
+    "kind": "Agent"
+  },
+  "workspace": {
+    "working_dir": "workspace",
+    "kind": "LocalWorkspace"
+  },
+  "persistence_dir": "conversations/00000000000040008000000000000004",
+  "max_iterations": 500,
+  "stuck_detection": true,
+  "execution_status": "error",
+  "confirmation_policy": {
+    "kind": "NeverConfirm"
+  },
+  "stats": {
+    "usage_to_metrics": {
+      "recipe": {
+        "model_name": "gpt-4o-mini",
+        "accumulated_cost": 0.0141,
+        "accumulated_token_usage": {
+          "model": "gpt-4o-mini",
+          "prompt_tokens": 8123,
+          "completion_tokens": 412,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 0,
+          "context_window": 128000,
+          "per_turn_token": 0,
+          "response_id": ""
+        }
+      }
+    }
+  },
+  "secret_registry": {
+    "secret_sources": {}
+  },
+  "tags": {},
+  "agent_state": {}
+}
