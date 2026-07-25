@@ -15,7 +15,11 @@ class EventReplayError(ValueError):
 
 
 class ChainBreakError(EventReplayError):
-    """The event stream's hash chain is broken, forged, or has an illegal gap."""
+    """The event stream's hash link is broken or forged.
+
+    Not a gap detector: a mid-stream deletion surfaces as a sequence error, and a
+    truncated tail is caught only by an anchored head.
+    """
 
 
 def _empty_projection(run_id: str | None) -> dict[str, Any]:

@@ -393,9 +393,11 @@ def test_cli_rejects_flag_on_other_commands_and_creates_nothing(tmp_path):
     assert main(["status", "--expect-chain-head", "a" * 64, str(ws)]) == 2
 
 
-def test_cli_rejects_malformed_anchor_value(tmp_path):
+def test_cli_rejects_malformed_anchor_value(tmp_path, capsys):
     ws = _chained_workspace(tmp_path)
     assert main(["doctor", "--expect-chain-head", "nothex", str(ws)]) == 2
+    # the flag must be REJECTED, not swallowed as a positional target
+    assert "must be a 64-character lowercase hex sha256" in capsys.readouterr().err
 
 
 def test_read_verbs_leave_no_wal_sidecars_on_clean_store(tmp_path):

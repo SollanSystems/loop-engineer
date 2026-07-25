@@ -634,9 +634,9 @@ enforces *domain* semantics at replay time — FSM transition legality
 re-implemented. A store back-end therefore never needs domain awareness to be
 conformant; the reducer is a second, independent enforcement point that a
 tampered or foreign-sourced event stream still cannot talk past **without
-constructing a stream that is itself FSM-legal, G1-satisfying and hash-chain-
-consistent; a determined in-workspace rewriter can construct one — see
-Integrity boundary.**
+constructing a stream that is itself FSM-legal, G1-satisfying and
+hash-chain-consistent; a determined in-workspace rewriter can construct one —
+see Integrity boundary.**
 
 ### Hash chain (v0.10.0+)
 
@@ -764,8 +764,15 @@ trailing events leaves a shorter but internally valid chain.
   `FailedBlocked` run laundered into `Succeeded` — as pinned by
   `scripts/test_adversarial_chain.py::test_full_rewrite_with_recompute_passes_without_anchor_pinned`.
   (In the probe that produced that fixture the report was also globally `ok`
-  with zero issues; the committed pin is the event-store-scoped assertion, so
-  that any *new* event-store-layer detection flips the pin loudly.)
+  with zero issues. What the committed pin actually asserts is narrower and
+  event-store-scoped: that `event_chain_broken` is absent, that the three
+  projection-disagreement codes `state_field_mismatch`,
+  `desynced_terminal_window` and `terminal_state_mismatch` stay absent, and
+  that the three event-store cleanliness flags `state_json_agrees`,
+  `deterministic` and `legal_sequence` stay `true`. A future standalone
+  event-store cross-check — a new issue code appended directly to `issues`, as
+  `chain_columns_missing` is — would not move any of those, so it must be added
+  to this pin's assertions when it is introduced.)
 - **A chain-column downgrade.** Dropping `event_hash`/`prev_event_hash`, or
   rebuilding the store without them, silently downgrades a chained history to
   an unchained one. An unchained or legacy doctor report is *not* proof of
@@ -941,20 +948,32 @@ logic — and folds their findings into its own `issues`/`ok`. An absent store
 doctor reports `"event_store": {"present": false}` and every other key is
 byte-identical to a store-less report; sidecar residue
 (`missing_event_store`) or a supplied anchor (`chain_anchor_mismatch`) fails
-doctor. A present, readable store adds
+doctor. When an absent store *does* raise one of those, the block gains the
+residue flag — `{"present": false, "sidecar_residue": true}` for a deleted
+store whose `-wal`/`-shm` files remain, and `sidecar_residue: false` when the
+only finding is the anchor. A present, readable store adds
 `"event_store": {"present": true, "readable": true, "run_id", "event_count",
 "state_json_agrees", "deterministic", "legal_sequence", "chain"}`; any of
 `state_field_mismatch`, `desynced_terminal_window`, `terminal_state_mismatch`,
-or `illegal_event_sequence` fails doctor (`ok: false`) with the identical issue
+`illegal_event_sequence`, `event_chain_broken`, `chain_columns_missing`, or
+`chain_anchor_mismatch` fails doctor (`ok: false`) with the identical issue
 code the `status`/`replay` verbs already use. A store that cannot be read at
-all — `corrupt_store`, `empty_store`, or `ambiguous_run_id` — also fails doctor
-rather than being silently skipped; `"event_store"` reports
+all — `corrupt_store`, `empty_store`, `invalid_event`, or `ambiguous_run_id` —
+also fails doctor rather than being silently skipped; `"event_store"` reports
 `{"present": true, "readable": false, "error_code": <code>}` in that case.
+Note the ordering consequence: event@1 validation runs before the fold, so a
+tamper that *also* breaks the envelope or payload shape (a payload edit that
+drops a required field, say) surfaces as `invalid_event` on an unreadable
+store, never as `event_chain_broken`.
 
 **The `chain` block.** A present, readable store nests
 `"chain": {"head": {"sequence", "event_hash"} | null, "unchained_prefix": <int>}`
 under `event_store`. `head` is `null` for a store with no chained events at
-all (a legacy or fully downgraded store). `unchained_prefix` counts the
+all (a legacy or fully downgraded store) **and also for a store whose chain is
+broken**, because the fold stops at the break and never establishes a head. The
+block alone therefore does not distinguish "never chained" from "chain broken";
+the `event_chain_broken` issue is what separates them, and a `null` head with
+no such issue is the honest never-chained case. `unchained_prefix` counts the
 leading events that carry no `event_hash`; it is **never elided** — a migrated
 store legitimately reports a non-zero prefix, and silently hiding it would let
 a legacy tail read as chained provenance. A prefix is not an issue by itself;

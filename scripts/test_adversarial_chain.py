@@ -270,13 +270,44 @@ def test_legacy_store_tamper_is_undetectable_pinned(tmp_path):
         conn.execute("UPDATE events SET payload = replace(payload, 'gate red', 'gate green') "
                      "WHERE sequence = 1")
         conn.commit()
+        tampered = conn.execute("SELECT payload FROM events WHERE sequence = 1").fetchone()[0]
     finally:
         conn.close()
     restore_triggers(store_path)
+    # staging self-guard: a non-detection claim is worthless if the tamper never landed
+    assert "gate green" in tampered
 
     report = doctor_report(target)
     assert "event_chain_broken" not in _codes(report)             # PINNED LIMITATION
     assert _chain_block(report) == {"head": None, "unchained_prefix": 2}
+
+
+def test_unhashable_record_breaks_chain(tmp_path):
+    """A row whose payload json.loads accepts but canonical_json refuses (bare NaN).
+
+    Pins link_issue's "unhashable record" branch end-to-end: the recompute raises
+    before it can compare, and doctor must report a broken chain rather than
+    propagate a ChainHashError. The required payload fields are kept intact on
+    purpose — a payload that also violates event@1 is refused by validate_event
+    before the fold and surfaces as invalid_event instead (§22).
+    """
+    ws = _chained_workspace(tmp_path)
+    store_path = _store_path(ws)
+    drop_triggers(store_path)
+    conn = sqlite3.connect(str(store_path))
+    try:
+        conn.execute("UPDATE events SET payload = ? WHERE sequence = 1",
+                     ('{"iteration_id": 1, "outcome": "task_failed", "x": NaN}',))
+        conn.commit()
+    finally:
+        conn.close()
+    restore_triggers(store_path)
+
+    report = doctor_report(ws)                    # must not raise ChainHashError
+    assert "event_chain_broken" in _codes(report)
+    assert any("unhashable record" in issue["message"] for issue in report["issues"]
+               if issue["code"] == "event_chain_broken")
+    assert _chain_block(report)["head"] is None
 
 
 def test_never_chained_store_with_anchor_fails(tmp_path):

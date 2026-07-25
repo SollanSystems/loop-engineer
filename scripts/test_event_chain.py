@@ -1,7 +1,7 @@
 """scripts/test_event_chain.py — chain canonicalization, store chaining, migration."""
 import pytest
 
-from loop.chain import ChainHashError, canonical_json, compute_event_hash
+from loop.chain import _PREIMAGE_FIELDS, ChainHashError, canonical_json, compute_event_hash
 
 
 def _record(**overrides):
@@ -247,8 +247,6 @@ def test_append_wraps_schema_drift_as_typed_error(tmp_path):
         SQLiteEventStore(path).append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
 
 
-import subprocess
-import sys
 from pathlib import Path
 
 from loop.runtime import RuntimeStoreError
@@ -310,20 +308,7 @@ def test_runner_read_path_retries_plain_mode_ro_before_declaring_corruption(tmp_
     assert "immutable=1" in seen[0] and "immutable=1" not in seen[1]
 
 
-@pytest.mark.parametrize("command,extra", [("run", []), ("pause", ["--reason", "drift probe"])])
-def test_cli_refuses_a_schema_drifted_store_without_a_traceback(tmp_path, command, extra):
-    workspace = tmp_path / "workspace"
-    (workspace / ".loop").mkdir(parents=True)
-    _drifted_store(workspace / ".loop" / "events.db")
-    proc = subprocess.run([sys.executable, "-B", "-m", "loop", command, *extra, str(workspace)],
-                          cwd=_ROOT, text=True, capture_output=True)
-    assert proc.returncode == 2
-    assert "Traceback" not in proc.stderr
-    assert proc.stderr.strip().startswith(f"{command}: ")
-
-
 from loop.migrate import migrate_store
-from loop.runtime import RuntimeStoreError
 
 
 def _workspace_with_legacy_store(tmp_path):
@@ -491,10 +476,12 @@ _CONFORMANCE_VECTORS = (
 
 def test_documented_conformance_vectors():
     """The three vectors published in the contract are exactly what chain.py computes,
-    and the published digests are still literally in the document."""
+    and the published digests AND canonical preimages are still literally in the document."""
     contract = (_ROOT / "reference" / "repo-os-contract.md").read_text(encoding="utf-8")
     for name, record, digest in _CONFORMANCE_VECTORS:
         assert compute_event_hash(record) == digest, f"vector {name} drifted from chain.py"
         assert digest in contract, f"vector {name} digest is not documented in the contract"
+        preimage = canonical_json({field: record.get(field) for field in _PREIMAGE_FIELDS})
+        assert preimage in contract, f"vector {name} preimage is not documented in the contract"
     chained = [dict(record, event_hash=digest) for _, record, digest in _CONFORMANCE_VECTORS]
     assert verify_chain(chained, expected_head=_DIGEST_UNICODE)["ok"] is True
