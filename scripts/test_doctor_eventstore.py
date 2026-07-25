@@ -1,7 +1,12 @@
 """Doctor integration tests for the read-only EventStore consistency gate."""
 
 import json
+import shutil
 import sqlite3
+import subprocess
+import sys
+from contextlib import closing
+from pathlib import Path
 
 import pytest
 from chain_fixtures import drop_triggers, make_legacy_store
@@ -10,8 +15,8 @@ from loop.__main__ import main
 from loop.contract import doctor_report, validate_contract
 from loop.events import SQLiteEventStore
 from loop.migrate import migrate_store
-from loop.runner import dispatch_once
-from loop.runtime import RuntimeStoreError, replay_report, status_report
+from loop.runner import NotReadyError, dispatch_once
+from loop.runtime import RuntimeStoreError, event_consistency_issues, replay_report, status_report
 from loop.scaffold import scaffold
 
 
@@ -407,6 +412,91 @@ def test_read_verbs_leave_no_wal_sidecars_on_clean_store(tmp_path):
     doctor_report(ws)
     assert not (ws / ".loop" / "events.db-wal").exists()
     assert not (ws / ".loop" / "events.db-shm").exists()
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_CRASH_WRITER = '''import os, sys
+sys.path.insert(0, sys.argv[1])
+import sqlite3
+from loop.events import SQLiteEventStore
+
+keeper = sqlite3.connect(sys.argv[2])
+keeper.execute("PRAGMA journal_mode=WAL")
+SQLiteEventStore(sys.argv[2]).append(
+    "run-1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="test")
+os._exit(0)
+'''
+
+
+def _crash_left_wal(target):
+    """Seed the canonical crash state: committed WAL frames, nothing checkpointed, no -shm.
+
+    The child holds a second connection open so the appending connection is never the
+    last one — SQLite therefore skips its close-time checkpoint — then dies without
+    closing either.
+    """
+    script = target.parent / "crash_writer.py"
+    script.write_text(_CRASH_WRITER, encoding="utf-8")
+    subprocess.run([sys.executable, "-B", str(script), str(_REPO_ROOT), str(_store_path(target))],
+                   check=True, timeout=30)
+    (target / ".loop" / "events.db-shm").unlink(missing_ok=True)
+    assert (target / ".loop" / "events.db-wal").stat().st_size > 0
+    with closing(sqlite3.connect(f"{_store_path(target).as_uri()}?mode=ro&immutable=1", uri=True)) as conn:
+        # the second event lives only in the WAL, so a read that ignores it reads stale
+        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+
+
+def _loop_dir_snapshot(target):
+    """The .loop file set plus the bytes of the two files a read verb must never touch."""
+    loop_dir = target / ".loop"
+    return (sorted(path.name for path in loop_dir.iterdir()),
+            _store_path(target).read_bytes(),
+            (loop_dir / "events.db-wal").read_bytes())
+
+
+@pytest.mark.parametrize(
+    "read_verb",
+    [status_report, replay_report, lambda target: event_consistency_issues(target)[0]],
+    ids=["status_report", "replay_report", "event_consistency_issues"],
+)
+def test_read_verbs_on_a_crash_left_wal_store_leave_the_loop_dir_byte_identical(tmp_path, read_verb):
+    ws = _chained_workspace(tmp_path)
+    _crash_left_wal(ws)
+    _sync_iteration(ws, 1)
+    before = _loop_dir_snapshot(ws)
+    assert read_verb(ws)["event_count"] == 2
+    assert _loop_dir_snapshot(ws) == before
+
+
+def test_wal_checkpointed_between_the_probe_and_the_copy_reads_the_original_store(tmp_path, monkeypatch):
+    """A writer that checkpoints mid-copy leaves a complete no-WAL store to read directly."""
+    ws = _chained_workspace(tmp_path)
+    _crash_left_wal(ws)
+    _sync_iteration(ws, 1)
+    real_copyfile = shutil.copyfile
+
+    def checkpoint_after_copy(src, dst):
+        result = real_copyfile(src, dst)
+        with closing(sqlite3.connect(str(_store_path(ws)))) as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return result
+
+    monkeypatch.setattr(shutil, "copyfile", checkpoint_after_copy)
+    assert status_report(ws)["event_count"] == 2
+    assert not (ws / ".loop" / "events.db-wal").exists()
+    assert not (ws / ".loop" / "events.db-shm").exists()
+
+
+def test_dispatch_read_on_a_crash_left_wal_store_leaves_the_loop_dir_byte_identical(tmp_path):
+    """The runner folds through the same read path, and an unready state writes nothing."""
+    ws = _chained_workspace(tmp_path)
+    _crash_left_wal(ws)
+    _sync_iteration(ws, 1)
+    before = _loop_dir_snapshot(ws)
+    with pytest.raises(NotReadyError, match="intake"):
+        dispatch_once(ws)
+    assert _loop_dir_snapshot(ws) == before
 
 
 def test_doctor_event_store_reads_do_not_leave_wal_or_shm_sidecars(tmp_path):
