@@ -19,7 +19,17 @@ def _bundle(source=None, *, green=True, task="T1", iteration_id=1):
     return body
 
 
-def _ws(tmp_path, bundles):
+def _repair(*, before, after, iteration_id="iter-001"):
+    return {"schema": "loop-engineer/repair@1", "iteration_id": iteration_id, "attempt": 1,
+            "failure_mode": "deterministic-fail", "hypothesis": "h", "repair_action": "a",
+            "verification_before": {"verify_full": "FAIL", "metric": "score",
+                                    "failing": ["x"], "score": before},
+            "verification_after": {"verify_full": "PASS", "metric": "score",
+                                   "failing": [], "score": after},
+            "remaining_delta": "none", "productive": True}
+
+
+def _ws(tmp_path, bundles, repairs=()):
     target = tmp_path / "workspace"
     (target / ".loop" / "artifacts").mkdir(parents=True, exist_ok=True)
     (target / "RUNLOG.md").write_text(
@@ -30,6 +40,10 @@ def _ws(tmp_path, bundles):
          "terminal_state": None}), encoding="utf-8")
     for name, body in bundles:
         (target / ".loop" / "artifacts" / name).write_text(json.dumps(body), encoding="utf-8")
+    if repairs:
+        (target / ".loop" / "repair").mkdir(parents=True, exist_ok=True)
+        for name, body in repairs:
+            (target / ".loop" / "repair" / name).write_text(json.dumps(body), encoding="utf-8")
     return target
 
 
@@ -62,9 +76,22 @@ def test_excluded_bundles_are_named_under_provenance(tmp_path):
 
 
 def test_injected_bundles_do_not_anchor_a_repair(tmp_path):
-    target = _ws(tmp_path, [("verify-iter1.json", _bundle("injected_callable", green=False)),
-                            ("verify-iter2.json", _bundle("injected_callable"))])
-    assert compute_metrics(target)["repair_productivity"] is None
+    """An entirely self-reported red-to-green pair must not corroborate a repair.
+
+    The repair record is load-bearing: without one on disk, ``repair_productivity``
+    is ``None`` for the unrelated reason that nothing was validated, and the test
+    passes against unchanged code. With one, the pair anchors before this change
+    and cannot after it.
+
+    It deliberately does not claim more than it proves. An unanchored record still
+    counts toward plain-mode ``repair_productivity``; only ``--baseline`` refuses.
+    """
+    target = _ws(tmp_path,
+                 [("verify-iter1.json", _bundle("injected_callable", green=False)),
+                  ("verify-iter2.json", _bundle("injected_callable"))],
+                 repairs=[("iter-001.json", _repair(before=0.0, after=1.0))])
+    assert compute_metrics(target)["provenance"]["unanchored_records"] == [
+        ".loop/repair/iter-001.json"]
 
 
 def test_the_shipped_examples_keep_their_published_metrics():
