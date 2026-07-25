@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from . import fsm
+from .chain import ChainHashError
 from .completion import (
     CompletionPolicyError,
     criteria_satisfy_completion,
@@ -635,6 +636,7 @@ def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) 
 
 
 _RUNNER_BUNDLE_RE = re.compile(r"verify-iter([0-9]+)\.json")
+_EVIDENCE_RECORD_RE = re.compile(r"evidence-iter([0-9]+)\.json")
 
 
 def _self_verified(record: Mapping[str, Any]) -> bool:
@@ -681,33 +683,96 @@ def _orphan_bundle_issues(paths: LoopPaths, issues: list[dict]) -> None:
                 bundle_path))
 
 
+def _policy_digest_issues(
+    paths: LoopPaths,
+    records: list[tuple[int | None, Path, dict]],
+    issues: list[dict],
+) -> None:
+    """Compare the LATEST record per task against the live TASKS.json goalpost.
+
+    Only the latest record backs the task's current claim; older records describe
+    goalposts that were current when they were written, and comparing them would
+    make every honest re-verification a permanent failure (repo-os-contract.md §17).
+    A record naming a task that is no longer in TASKS.json is not compared at all —
+    a renamed or removed task is a replan, not a forgery.
+    """
+    from .verifier import verification_policy_digest
+
+    tasks = _read_json(paths.tasks, [])   # already reported by the contract read
+    declared = tasks.get("tasks") if isinstance(tasks, dict) else None
+    entries = {t["id"]: t for t in (declared if isinstance(declared, list) else [])
+               if isinstance(t, dict) and isinstance(t.get("id"), str)}
+    latest: dict[str, tuple[int, Path, dict]] = {}
+    for iteration_id, record_path, data in records:
+        if not isinstance(iteration_id, int):
+            # A record outside the runner's evidence-iter<N>.json name carries no
+            # position in the run's order, so it can never be shown to be latest.
+            continue
+        produced_by = data.get("produced_by")
+        task_id = produced_by.get("task_id") if isinstance(produced_by, dict) else None
+        if not isinstance(task_id, str) or task_id not in entries:
+            continue
+        if task_id not in latest or (iteration_id, record_path.name) > (
+                latest[task_id][0], latest[task_id][1].name):
+            latest[task_id] = (iteration_id, record_path, data)
+    for task_id, (_iteration_id, record_path, data) in sorted(latest.items()):
+        verified_by = data.get("verified_by")
+        recorded = verified_by.get("policy_digest") if isinstance(verified_by, dict) else None
+        if not isinstance(recorded, str):
+            continue
+        try:
+            live = verification_policy_digest(entries[task_id])
+        except ChainHashError:
+            continue          # a non-canonicalizable task entry is TASKS.json's own defect
+        if live != recorded:
+            issues.append(ContractIssue(
+                "policy_digest_mismatch",
+                f"{record_path.name}: the goalpost recorded for task {task_id!r} "
+                f"({recorded}) is not the live TASKS.json goalpost ({live}) — "
+                f"the declared verify/criterion_ref/depends_on/id changed after this "
+                f"verification; re-verify to record the current goalpost",
+                record_path))
+
+
 def _validate_evidence_records(paths: LoopPaths, mode: str, issues: list[dict]) -> bool:
-    """Validate declared evidence@1 records and surface declared self-verification.
+    """Validate declared evidence@1 records, hash-verify what they reference, and
+    surface declared self-verification.
 
     Declared location: `.loop/evidence/*.json` (repo-os-contract.md §17). An absent
     directory is a no-op, so a contract with no evidence produces a byte-identical
     report — the same rule §22 pins for an absent event store.
     """
-    from .evidence import evidence_issues  # local: loop.evidence imports this module
+    from .evidence import evidence_issues, verify_evidence  # local: loop.evidence imports this module
 
     _orphan_bundle_issues(paths, issues)
     evidence_dir = paths.loop_dir / EVIDENCE_DIR_NAME
     if not evidence_dir.is_dir():
         return False
     checked = False
+    verifiable: list[tuple[int | None, Path, dict]] = []
     for record_path in sorted(evidence_dir.glob("*.json")):
         data = _read_json(record_path, issues)
         if data is None:
             continue
         checked = True
-        for issue in evidence_issues(data, resolved_mode=mode):
+        record_issues = evidence_issues(data, resolved_mode=mode)
+        for issue in record_issues:
             issues.append(ContractIssue(issue["code"], f"{record_path.name}: {issue['message']}", record_path))
+        if not record_issues:
+            # Guarded: verify_evidence() re-runs validate_evidence internally, so an
+            # unconditional call would report a malformed record twice.
+            result = verify_evidence(data, workspace_root=paths.workspace)
+            for issue in result["issues"]:
+                issues.append(ContractIssue(issue["code"], f"{record_path.name}: {issue['message']}", record_path))
+            match = _EVIDENCE_RECORD_RE.fullmatch(record_path.name)
+            verifiable.append((int(match.group(1)) if match else None, record_path, data))
         if _self_verified(data):
             issues.append(ContractIssue(
                 "self_verified_evidence",
                 f"{record_path.name}: produced_by.executor == verified_by.by "
                 f"({data['produced_by']['executor']!r}) — the producer declares it verified its own work",
                 record_path))
+    _policy_digest_issues(paths, verifiable, issues)
     return checked
 
 
