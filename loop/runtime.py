@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -309,6 +310,7 @@ def event_consistency_issues(
                 "an anchored chain head was supplied but the event store cannot be read"))
         return {"present": True, "readable": False, "error_code": exc.code}, unreadable_issues
     issues = list(status["divergence"]) + list(replay["findings"])
+    issues.extend(_bound_evidence_issues(target, mode))
     if declares_chain_without_columns:
         issues.append(ContractIssue(
             "chain_columns_missing",
@@ -330,3 +332,50 @@ def event_consistency_issues(
         "legal_sequence": replay["legal_sequence"],
         "chain": {"head": status["chain_head"], "unchained_prefix": status["unchained_prefix"]},
     }, issues
+
+
+def _bound_evidence_issues(target: str | Path, mode: str | None) -> list[dict[str, Any]]:
+    """Re-hash every artifact an event bound into the chain.
+
+    Driven by what each event DECLARES: a legacy event carries an empty
+    artifact_hashes list and is silent by construction, because the append-only
+    triggers make a retroactive binding impossible (repo-os-contract.md #22).
+    """
+    _, _run_id, events, _validation = _events(target, mode)
+    workspace = resolve_loop_paths(target).workspace
+    issues: list[dict[str, Any]] = []
+    for event in events:
+        for entry in event.get("artifact_hashes") or []:
+            path = workspace / entry["path"]
+            try:
+                blob = path.read_bytes()
+            except OSError:
+                issues.append(ContractIssue(
+                    "missing_bound_evidence",
+                    f"event {event['event_id']} (sequence {event['sequence']}) bound "
+                    f"{entry['path']} into the chain but it is absent or unreadable"))
+                continue
+            actual = hashlib.sha256(blob).hexdigest()
+            if actual != entry["sha256"]:
+                issues.append(ContractIssue(
+                    "evidence_chain_mismatch",
+                    f"{entry['path']} does not match the digest bound at sequence "
+                    f"{event['sequence']}: expected {entry['sha256']}, found {actual} — "
+                    f"the original bytes may remain at "
+                    f".loop/artifacts/objects/{entry['sha256'][:2]}/{entry['sha256']}"))
+    return issues
+
+
+def bound_artifact_digests(target: str | Path, mode: str | None = None) -> dict[str, str] | None:
+    """{workspace-relative POSIX path: sha256} for every artifact any event bound.
+
+    None means there is no event store, and the caller MUST degrade explicitly and say
+    so (decision 14) rather than treat absence as satisfaction. An empty dict means a
+    store exists and bound nothing. An unreadable store raises RuntimeStoreError — an
+    errored check fails, it never skips (R007).
+    """
+    if not (resolve_loop_paths(target).loop_dir / "events.db").is_file():
+        return None
+    _, _run_id, events, _validation = _events(target, mode)
+    return {entry["path"]: entry["sha256"]
+            for event in events for entry in event.get("artifact_hashes") or []}
