@@ -356,6 +356,8 @@ def test_sidecar_residue_without_db_fails_doctor(tmp_path):
     assert report["event_store"] == {"present": False, "sidecar_residue": True}
 
 
+@pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 35),
+                    reason="ALTER TABLE ... DROP COLUMN requires SQLite >= 3.35")
 def test_chain_columns_dropped_but_version_2_fails_doctor(tmp_path):
     """Design change D2: the lazy downgrade attack."""
     ws = _chained_workspace(tmp_path)
