@@ -16,6 +16,7 @@ from .events import (EventRowDecodeError, EventStoreOperationalError, SQLiteEven
 from .paths import resolve_loop_paths
 from .reducer import ChainBreakError, reduce_events
 from .runtime import RuntimeStoreError, _read_store
+from .verifier import executed_verifier_identity, injected_verifier_identity
 
 
 class RunnerError(RuntimeError):
@@ -200,6 +201,7 @@ def _reconcile_legacy_terminal(target: str | Path, projection: dict[str, Any]) -
 
 def dispatch_once(
     target: str | Path, *, verifier: Verifier | None = None, mode: str | None = None,
+    executor: str | None = None, verifier_identity: str | None = None,
 ) -> dict[str, Any]:
     """Run at most one durable selection/verification/recording dispatch."""
     run_id, projection = _projection(target, mode)
@@ -230,6 +232,16 @@ def dispatch_once(
             return {"ok": True, "action": "terminal_written", "iteration_id": iteration_id, "run_id": run_id}
         return {"ok": False, "action": "blocked", "run_id": run_id}
 
+    # Identity of what is ABOUT TO RUN. Built here, not in the writer: only this
+    # frame knows whether the declared command or an injected callable will execute,
+    # and hashing before execution keeps a self-modifying verify script honest.
+    code_identity = (
+        injected_verifier_identity() if verifier is not None
+        else executed_verifier_identity(task.get("verify"), paths.workspace)
+    )
+    attempt = 1 + sum(
+        1 for entry in projection["runlog_entries"] if entry.get("task_id") == task["id"]
+    )
     outcome = (verifier or _default_verifier)(task, paths.workspace)
     if not isinstance(outcome, VerifyOutcome):
         raise RunnerError("verifier must return VerifyOutcome")
@@ -243,7 +255,22 @@ def dispatch_once(
     store = SQLiteEventStore(paths.loop_dir / "events.db")
     _store_append(store, run_id, "iteration_appended", payload, actor="loop.run",
                   expected_sequence=projection["last_sequence"] + 1)
+    # Evidence is written AFTER the durable append: writing it first would leave a
+    # bundle behind a SIGKILL at the pre-commit COMMIT and break the zero-write
+    # crash pin (test_crash_injection_before_iteration_event_commit_...).
+    try:
+        written = emit.write_verify_evidence(
+            target, run_id=run_id, iteration_id=iteration_id, task=task,
+            passed=outcome.passed, summary=outcome.summary, code_identity=code_identity,
+            executor=executor, verifier_identity=verifier_identity, attempt=attempt,
+        )
+    except (OSError, emit.EmitError) as exc:
+        raise RunnerError(
+            f"iteration {iteration_id} is committed to the event log but its verify "
+            f"bundle could not be written: {exc}"
+        ) from exc
     emit.append_iteration(target, iteration_id=iteration_id, outcome=payload["outcome"],
                           task_id=payload["task_id"], notes=payload["summary"])
     return {"ok": True, "action": "dispatched", "task_id": task["id"],
-            "outcome": payload["outcome"], "iteration_id": iteration_id, "run_id": run_id}
+            "outcome": payload["outcome"], "iteration_id": iteration_id, "run_id": run_id,
+            "evidence": str(written["evidence"])}
