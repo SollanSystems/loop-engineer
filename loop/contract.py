@@ -791,19 +791,66 @@ def _validate_evidence_records(paths: LoopPaths, mode: str, issues: list[dict]) 
     return checked
 
 
+def _verdict_failure(record: Mapping[str, Any], paths: LoopPaths) -> str | None:
+    """Why the record's artifact does not attest a PASS, or ``None`` when it does.
+
+    Hash-verification proves the pointer resolves to the bytes the record committed
+    to; it says nothing about what those bytes SAY.  A record backing ``Succeeded``
+    must point at a green verdict, judged by the repo's one green-marker rule
+    (``loop.evidence.verify_bundle_is_green``) — the same rule ``scripts/metrics.py``
+    scores FCR with, so a bundle that reads RED to metrics can never read GREEN here.
+
+    A record whose ``kind`` is anything other than ``verify-bundle`` carries no
+    verdict this layer can read (evidence@1's ``kind`` is an open vocabulary — a log,
+    a diff, a screenshot).  Such a record is REFUSED rather than waved through: the
+    strict mode's claim is that completion is backed by a verification that passed,
+    and an artifact with no verdict cannot make that claim.  Unreadable or
+    unparseable is likewise a refusal, never a skip (R007).
+    """
+    from .evidence import VERIFY_BUNDLE_KIND, verify_bundle_is_green
+
+    kind = record.get("kind")
+    if kind != VERIFY_BUNDLE_KIND:
+        return (f"is a {kind!r} record, not a {VERIFY_BUNDLE_KIND}: it carries no verdict, "
+                f"so it cannot show that anything passed")
+    uri = record["uri"]
+    try:
+        blob = (paths.workspace / uri).read_bytes()
+    except (OSError, ValueError) as exc:
+        return f"cites a verify bundle that cannot be read ({exc})"
+    # Re-anchored to the digest the record declares, so the bytes judged here are the
+    # bytes hash-verification just accepted rather than whatever landed since.
+    if hashlib.sha256(blob).hexdigest() != record["sha256"]:
+        return (f"cites a verify bundle whose bytes changed between hash verification "
+                f"and the verdict read: {uri}")
+    try:
+        bundle = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"cites a verify bundle that is not UTF-8 JSON ({exc})"
+    if not isinstance(bundle, dict):
+        return "cites a verify bundle that is not a JSON object"
+    if not verify_bundle_is_green(bundle):
+        return (f"cites a verify bundle whose verdict is not a pass "
+                f"(outcome={bundle.get('outcome')!r}, passed={bundle.get('passed')!r}) — "
+                f"evidence of failure cannot back Succeeded")
+    return None
+
+
 def _strict_evidence_failure(entry: object, paths: LoopPaths,
                              bound: Mapping[str, str] | None) -> str | None:
     """The ONE definition of the verified-evidence bar (plan decision 14).
 
     Returns ``None`` when the cited entry can back ``Succeeded``, otherwise a detail
-    string naming which of the three sub-checks failed:
+    string naming which of the four sub-checks failed:
 
     1. self-consistency — the entry is a readable evidence@1 record whose ``uri``
        resolves inside the workspace and hashes to the digest it declares;
-    2. chain-boundness — some event bound this record's path AT its current bytes.
+    2. verdict — the artifact it points at is a verify bundle that says PASS.  An
+       authentic record of a FAILING verification is still not proof of success;
+    3. chain-boundness — some event bound this record's path AT its current bytes.
        ``bound is None`` means there is no event store at all, and the sub-check is
        skipped: the store-less writer-API path is a DOCUMENTED degradation, not a pass;
-    3. goalpost agreement — when the record names a task still in TASKS.json, its
+    4. goalpost agreement — when the record names a task still in TASKS.json, its
        recorded ``policy_digest`` equals the live one.  A goalpost that cannot even be
        computed is a FAILURE, not a skip: unestablished is not agreement (R007).
 
@@ -837,6 +884,10 @@ def _strict_evidence_failure(entry: object, paths: LoopPaths,
     verified = verify_evidence(record, workspace_root=paths.workspace)
     if not verified["ok"]:
         return f"is not verified evidence: {[issue['message'] for issue in verified['issues']]}"
+
+    verdict = _verdict_failure(record, paths)
+    if verdict is not None:
+        return verdict
 
     if bound is not None:
         committed = bound.get(entry)

@@ -82,6 +82,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from loop.evidence import verify_bundle_is_green  # noqa: E402
 from loop.paths import LoopPaths, resolve_loop_paths  # noqa: E402
 
 import re  # noqa: E402
@@ -247,8 +248,8 @@ def _load_verify_bundles(loop_dir: Path) -> list[dict]:
         data = _read_json_object(path)
         if not data:
             continue
-        outcome = str(data.get("outcome", "")).upper()
-        green = outcome == "PASS" or data.get("passed") is True
+        # One definition, shared with the kernel's strict-completion bar.
+        green = verify_bundle_is_green(data)
         it = data.get("iteration_id", data.get("iteration"))
         task = data.get("task")
         verifier = data.get("verifier")

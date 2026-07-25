@@ -33,8 +33,23 @@ from .verifier import CODE_DIGEST_BASES
 
 
 EVIDENCE_SCHEMA_ID = "loop-engineer/evidence@1"
+VERIFY_BUNDLE_KIND = "verify-bundle"
 _URI_PATTERN = re.compile(r"^(?!/)(?![A-Za-z][A-Za-z0-9+.\-]*://).+$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+def verify_bundle_is_green(bundle: Mapping[str, Any]) -> bool:
+    """The repo's ONE green-marker rule for a verify bundle.
+
+    A bundle is green when it says so explicitly — ``outcome == "PASS"`` or
+    ``passed is True``. A bundle carrying only a numeric ``score`` reads RED: a
+    score is not a verdict, and treating one as a pass is exactly the false
+    completion this kernel exists to refuse (the rule originated in
+    ``scripts/metrics.py``, which now imports it rather than restating it).
+    """
+    if not isinstance(bundle, Mapping):
+        return False
+    return str(bundle.get("outcome", "")).upper() == "PASS" or bundle.get("passed") is True
 
 
 class EvidenceError(ValueError):
