@@ -202,6 +202,11 @@ def _structural_validate_event(data: dict[str, Any]) -> list[str]:
     for field in ("causation_id", "correlation_id"):
         if field in data and data[field] is not None and not isinstance(data[field], str):
             issues.append(f"{field} must be a string or null")
+    for field in ("prev_event_hash", "event_hash"):
+        if field in data and data[field] is not None and (
+                not isinstance(data[field], str)
+                or re.search(r"^[0-9a-f]{64}$", data[field]) is None):
+            issues.append(f"{field} must be null or a 64-character lowercase hex sha256")
     hashes = data.get("artifact_hashes", [])
     if not isinstance(hashes, list):
         issues.append("artifact_hashes must be an array")

@@ -298,3 +298,17 @@ def test_cli_refuses_a_schema_drifted_store_without_a_traceback(tmp_path, comman
     assert proc.returncode == 2
     assert "Traceback" not in proc.stderr
     assert proc.stderr.strip().startswith(f"{command}: ")
+
+
+from loop.events import validate_event
+
+
+@pytest.mark.parametrize("mode", ["strict", "basic"])
+def test_chain_fields_validate_in_both_modes(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    good = _chained(0, None)
+    assert validate_event(good, mode=mode)["ok"]
+    report = validate_event(dict(good, event_hash="not-hex"), mode=mode)
+    assert not report["ok"]
+    assert validate_event(dict(good, prev_event_hash=17), mode=mode)["ok"] is False
