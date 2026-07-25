@@ -29,6 +29,7 @@ from .contract import (
     _validate_terminal,
     _validation_mode,
 )
+from .evidence import EVIDENCE_SCHEMA_ID
 from .paths import ARTIFACTS_DIR_NAME, EVIDENCE_DIR_NAME, resolve_loop_paths
 from .scaffold import scaffold
 from .verifier import criterion_partition, verification_policy_digest
@@ -404,7 +405,6 @@ def sync_state_to_projection(target: str | Path, projection: dict[str, Any]) -> 
 
 UNATTRIBUTED_EXECUTOR = "unattributed"
 DEFAULT_VERIFIER_IDENTITY = "loop.run"
-_EVIDENCE_SCHEMA_ID = "loop-engineer/evidence@1"
 
 
 def write_verify_evidence(
@@ -459,7 +459,7 @@ def write_verify_evidence(
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     record = {
-        "schema": _EVIDENCE_SCHEMA_ID,
+        "schema": EVIDENCE_SCHEMA_ID,
         "id": f"{run_id}:{iteration_id}:verify",
         "kind": "verify-bundle",
         "uri": bundle_path.relative_to(paths.workspace).as_posix(),

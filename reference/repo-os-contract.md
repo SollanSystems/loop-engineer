@@ -866,7 +866,7 @@ why. The nine bases are the complete enumeration:
 | `path_lookup` | argv[0] has no path separator (`pytest`, `python3`, `true`) — the OS resolved it through `PATH`, so a same-named workspace file is *not* what ran | `null` |
 | `outside_workspace` | argv[0] resolved to a real file outside the workspace (`/usr/bin/python3`, a symlink escaping the tree) | `null` |
 | `not_a_file` | argv[0] does not resolve to an existing regular file (missing path, directory, dangling symlink) | `null` |
-| `unresolvable` | resolving argv[0] raised `OSError` (symlink loop, permission-denied parent, name too long) — the honest "could not determine" | `null` |
+| `unresolvable` | resolving argv[0] raised `OSError` (or pathlib's `RuntimeError` on Python ≤3.12 for a symlink loop), permission-denied parent, or name too long — the honest "could not determine" | `null` |
 | `unreadable` | the file exists inside the workspace but could not be read | `null` |
 | `unparseable_command` | `shlex.split` raised | `null` |
 | `empty_command` | `verify` is absent, blank, or splits to zero words | `null` |
@@ -923,10 +923,14 @@ to the bundle bytes via `sha256`). An evidence record MUST NOT be named
 bundle with no green marker, i.e. a phantom failing gate. `verifier.source` is
 `declared_command` only when the task's declared `verify` command was
 executed. A bundle whose source is `injected_callable` carries a
-caller-supplied verdict and is not gate evidence. `loop simulate` predicts
-decisions, not writes: it reports `legacy_sync_would_write` because that write
-is conditional, but it does not enumerate the bundle and record a dispatch
-always writes.
+caller-supplied verdict and is not gate evidence. `scripts/metrics.py` does not
+read `verifier.source` today, so an injected-callable bundle counts toward FCR
+exactly like a declared-command bundle — enforcing that distinction is Slice 3
+scope. Before this slice the runner wrote no bundles at all, so a
+runner-driven contract's FCR input set changes with this release. `loop
+simulate` predicts decisions, not writes: it reports `legacy_sync_would_write`
+because that write is conditional, but it does not enumerate the bundle and
+record a dispatch always writes.
 
 **The partition.** `visible` defaults to the task's `criterion_ref`;
 `holdout` is empty unless the task declares `holdout_criteria`; both fields
@@ -944,7 +948,7 @@ fails. On the `loop run` path both identities are operator-supplied
 (`--executor`, `--verifier-identity`); their defaults (`unattributed`,
 `loop.run`) never collide, so a default run cannot manufacture the finding.
 
-**The integrity boundary, in three honest tiers** — not a single "surfaces /
+**The integrity boundary, in four honest tiers** — not a single "surfaces /
 does not surface" pair:
 
 - **Fails `loop doctor`:** a record declaring self-verification
@@ -966,7 +970,14 @@ does not surface" pair:
   artifacts are plain files outside the hash chain: a worker with write
   access to `.loop/` can rewrite or remove them and `loop doctor` will not
   notice.** Binding the record digest into the chain requires a new event
-  type and is the evidence-wiring slice.
+  type and is the evidence-wiring slice. A record whose referenced bundle is
+  absent also passes `loop doctor` clean: `missing_evidence_record` is
+  one-directional (it walks bundles looking for their record, never the
+  reverse), so doctor never checks that a record's `uri` resolves. And an
+  iteration committed to the event log with no evidence written at all — the
+  sanctioned crash window between the durable append and the evidence write —
+  is undetectable, because the tripwire needs a bundle to fire before it can
+  notice anything missing. Closing both gaps is Slice 3 scope.
 
 This does not prove independence. It surfaces **declared** self-verification,
 and it records — honestly, with nulls where the process could not know —

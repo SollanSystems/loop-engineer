@@ -28,8 +28,10 @@ ships, on disk and runnable today:
   hash-chained; `loop doctor --expect-chain-head` verifies the log against an
   externally anchored head. The chain is tamper-evident **relative to an
   anchor** — an adversary with workspace write access can rewrite an unanchored
-  log. Verify runs record which verifier actually ran — command, code digest,
-  policy digest — and `loop doctor` fails when a record declares that its own
+  log. Verify runs record which verifier actually ran — command, code digest
+  (recorded only when the verifier is a workspace file, an honest null with a
+  named reason otherwise — e.g. `python3 -m pytest`), policy digest — and
+  `loop doctor` fails when a record declares that its own
   producer verified it; identity is recorded, not proven: a worker can write a
   false verifier name, and the records live outside the hash chain.
 

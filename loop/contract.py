@@ -634,7 +634,7 @@ def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) 
         _validate_record(data, schema_key, path, mode, issues)
 
 
-_RUNNER_BUNDLE_RE = re.compile(r"verify-iter(\d+)\.json")
+_RUNNER_BUNDLE_RE = re.compile(r"verify-iter([0-9]+)\.json")
 
 
 def _self_verified(record: Mapping[str, Any]) -> bool:
