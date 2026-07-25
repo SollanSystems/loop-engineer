@@ -694,7 +694,9 @@ def _policy_digest_issues(
     goalposts that were current when they were written, and comparing them would
     make every honest re-verification a permanent failure (repo-os-contract.md §17).
     A record naming a task that is no longer in TASKS.json is not compared at all —
-    a renamed or removed task is a replan, not a forgery.
+    a renamed or removed task is a replan, not a forgery. A task that is present but
+    cannot be canonicalized is reported rather than skipped: a comparison that cannot
+    run has not passed.
     """
     from .verifier import verification_policy_digest
 
@@ -722,8 +724,17 @@ def _policy_digest_issues(
             continue
         try:
             live = verification_policy_digest(entries[task_id])
-        except ChainHashError:
-            continue          # a non-canonicalizable task entry is TASKS.json's own defect
+        except ChainHashError as exc:
+            # Fail closed. Structural-fallback mode carries no tasks@1 type-check, so
+            # skipping here would leave a stale goalpost reported by nothing at all.
+            issues.append(ContractIssue(
+                "policy_digest_mismatch",
+                f"{record_path.name}: the goalpost recorded for task {task_id!r} "
+                f"({recorded}) cannot be compared against the live TASKS.json entry, "
+                f"because that entry is not canonicalizable ({exc}) — agreement is "
+                f"unestablished, and unestablished is not agreement",
+                record_path))
+            continue
         if live != recorded:
             issues.append(ContractIssue(
                 "policy_digest_mismatch",

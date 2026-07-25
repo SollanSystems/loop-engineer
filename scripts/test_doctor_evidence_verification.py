@@ -118,6 +118,31 @@ def test_a_record_without_a_policy_digest_is_not_compared(tmp_path):
     assert "policy_digest_mismatch" not in _codes(doctor_report(target))
 
 
+def _nan_task():
+    """A live entry json.loads accepts but verification_policy_digest cannot canonicalize."""
+    return dict(_TASK, criterion_ref=float("nan"))
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_a_non_canonicalizable_live_task_fails_closed_in_both_modes(tmp_path, mode):
+    """An unrunnable comparison is not an agreement.
+
+    jsonschema mode independently reports the malformed entry as a schema_violation,
+    but structural-fallback has no tasks@1 type-check — skipping here left a stale
+    goalpost reported by nothing, and doctor answered ok.
+    """
+    target = _ws(tmp_path, records=[(1, _record(policy_digest="d" * 64))],
+                 tasks=(_nan_task(),))
+    report = doctor_report(target, mode=mode)
+    assert "policy_digest_mismatch" in _codes(report)
+    assert report["ok"] is False
+
+
+def test_a_non_canonicalizable_task_no_record_names_is_not_a_goalpost_finding(tmp_path):
+    target = _ws(tmp_path, records=[(1, _record(task_id="T-404"))], tasks=(_nan_task(),))
+    assert "policy_digest_mismatch" not in _codes(doctor_report(target))
+
+
 @pytest.mark.parametrize("mode", _MODES)
 def test_evidence_schema_id_still_joins_schemas_checked(tmp_path, mode):
     target = _ws(tmp_path, records=[(1, _record())])
