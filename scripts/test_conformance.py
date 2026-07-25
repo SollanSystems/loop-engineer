@@ -500,11 +500,28 @@ def test_documented_artifact_binding_vector_matches_the_writer(tmp_path):
         f"§17 lists the bound set out of writer order: {positions}")
 
 
+def _new_issue_codes_table() -> str:
+    """§22's ``**New issue codes.**`` table, heading row to the end of the table."""
+    text = _CONTRACT_DOC.read_text(encoding="utf-8")
+    marker = "**New issue codes.**"
+    assert marker in text, "§22 does not publish a new-issue-codes table"
+    start = text.index(marker)
+    end = text.find("\n\n", text.index("|---|---|", start))
+    return text[start:] if end == -1 else text[start:end]
+
+
 def test_every_new_doctor_code_is_documented_in_section_22():
-    doc = _CONTRACT_DOC.read_text(encoding="utf-8")
+    """Scoped to the §22 TABLE, not the whole file.
+
+    Grepping the whole document could not fail: every one of these codes also appears
+    in §17's tier list, so deleting all four §22 rows left the pin green — the pin a PR
+    body would cite as proof that the codes are documented.
+    """
+    table = _new_issue_codes_table()
     for code in ("evidence_chain_mismatch", "missing_bound_evidence",
-                 "policy_digest_mismatch", "unverified_evidence_terminal"):
-        assert f"`{code}`" in doc, f"§22 does not document {code}"
+                 "policy_digest_mismatch", "unverified_evidence_terminal",
+                 "bound_evidence_escape"):
+        assert f"`{code}`" in table, f"§22's new-issue-codes table does not document {code}"
 
 
 def test_no_shipped_surface_still_claims_evidence_is_unverified():
