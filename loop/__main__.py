@@ -24,7 +24,8 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
 
 {_USAGE}
        {_PROG} metrics [--baseline] <workspace-or-.loop>
-       {_PROG} doctor|validate|verify [--mode basic|strict|release] <workspace-or-.loop>
+       {_PROG} doctor|validate|verify [--mode basic|strict|release]
+              [--expect-chain-head SHA256] <workspace-or-.loop>
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
        {_PROG} simulate [--mode basic|strict|release] <workspace>
@@ -71,6 +72,10 @@ options:
   --mode {{basic,strict,release}}
                 (doctor/validate/verify/plan-lint/status/replay/simulate/run) basic forces structural
                 checks; strict/release require jsonschema. Default: auto-detect.
+  --expect-chain-head SHA256
+                (doctor/validate/verify) fail unless the event store's chain head
+                is exactly this 64-character lowercase hex hash. A missing,
+                unreadable, unchained, or diverged store fails the gate.
   --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
                 run; exits non-zero and writes nothing otherwise.
   -h, --help    Show this help and exit.
@@ -240,6 +245,26 @@ def main(argv: list[str] | None = None) -> int:
             print(_USAGE, file=sys.stderr)
             return 2
 
+    expect_chain_head = None
+    if command in {"doctor", "validate", "verify"}:
+        try:
+            expect_chain_head, argv = _extract_value_flag(argv, "--expect-chain-head")
+        except ValueError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if expect_chain_head is not None and re.fullmatch(r"[0-9a-f]{64}", expect_chain_head) is None:
+            print(f"{command}: --expect-chain-head must be a 64-character lowercase hex sha256",
+                  file=sys.stderr)
+            return 2
+    elif any(a == "--expect-chain-head" or a.startswith("--expect-chain-head=") for a in argv):
+        # No generic unknown-flag guard exists for the other commands, and scaffold
+        # would otherwise CREATE a directory named after the flag.
+        print(f"{command}: --expect-chain-head is only valid for doctor/validate/verify",
+              file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
+        return 2
+
     decision = resume_target = reason = note = None
     if command in {"approve", "pause", "resume", "cancel"}:
         try:
@@ -310,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if command in {"doctor", "validate", "verify"}:
         try:
-            return _print_json(doctor_report(target, mode=mode))
+            return _print_json(doctor_report(target, mode=mode, expect_chain_head=expect_chain_head))
         except ValidationModeError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
             return 2

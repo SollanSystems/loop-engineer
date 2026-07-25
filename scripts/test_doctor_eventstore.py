@@ -6,6 +6,7 @@ import sqlite3
 import pytest
 from chain_fixtures import drop_triggers, make_legacy_store
 
+from loop.__main__ import main
 from loop.contract import doctor_report, validate_contract
 from loop.events import SQLiteEventStore
 from loop.migrate import migrate_store
@@ -301,6 +302,98 @@ def test_run_on_in_row_json_corruption_reports_corrupt_store(tmp_path):
     with pytest.raises(RuntimeStoreError) as excinfo:
         dispatch_once(ws)
     assert excinfo.value.code == "corrupt_store"
+
+
+def _head_hash(target):
+    return doctor_report(target)["event_store"]["chain"]["head"]["event_hash"]
+
+
+def test_expect_chain_head_matching_passes(tmp_path):
+    ws = _chained_workspace(tmp_path)
+    report = doctor_report(ws, expect_chain_head=_head_hash(ws))
+    assert report["ok"], report["issues"]
+
+
+def test_expect_chain_head_mismatch_fails_doctor(tmp_path):
+    ws = _chained_workspace(tmp_path)
+    report = doctor_report(ws, expect_chain_head="a" * 64)
+    assert not report["ok"]
+    assert "chain_anchor_mismatch" in _codes(report)
+
+
+def test_expect_chain_head_with_missing_store_fails_doctor(tmp_path):
+    target = _fresh_contract(tmp_path)
+    report = doctor_report(target, expect_chain_head="a" * 64)
+    assert not report["ok"]
+    assert "chain_anchor_mismatch" in _codes(report)
+
+
+def test_expect_chain_head_with_unreadable_store_fails_doctor(tmp_path):
+    ws = _chained_workspace(tmp_path)
+    _store_path(ws).write_text("not sqlite", encoding="utf-8")
+    report = doctor_report(ws, expect_chain_head="a" * 64)
+    assert not report["ok"]
+    assert {"corrupt_store", "chain_anchor_mismatch"} <= _codes(report)
+
+
+def test_expect_chain_head_on_tampered_store_fails_doctor(tmp_path):
+    """A broken chain degrades chain_head to None, so no anchor can ever match it."""
+    ws = _chained_workspace(tmp_path)
+    head = _head_hash(ws)
+    _tamper_payload(ws, '{"workspace":"tampered"}')
+    report = doctor_report(ws, expect_chain_head=head)
+    assert not report["ok"]
+    assert {"event_chain_broken", "chain_anchor_mismatch"} <= _codes(report)
+
+
+def test_sidecar_residue_without_db_fails_doctor(tmp_path):
+    ws = _chained_workspace(tmp_path)
+    _store_path(ws).unlink()
+    (ws / ".loop" / "events.db-wal").write_bytes(b"")
+    report = doctor_report(ws)
+    assert not report["ok"]
+    assert "missing_event_store" in _codes(report)
+    assert report["event_store"] == {"present": False, "sidecar_residue": True}
+
+
+def test_chain_columns_dropped_but_version_2_fails_doctor(tmp_path):
+    """Design change D2: the lazy downgrade attack."""
+    ws = _chained_workspace(tmp_path)
+    conn = sqlite3.connect(str(_store_path(ws)))
+    try:
+        conn.execute("ALTER TABLE events DROP COLUMN event_hash")
+        conn.commit()
+    finally:
+        conn.close()
+    report = doctor_report(ws)
+    assert not report["ok"]
+    assert "chain_columns_missing" in _codes(report)
+
+
+def test_absent_store_without_flag_or_sidecars_stays_byte_stable(tmp_path):
+    target = _fresh_contract(tmp_path)
+    assert doctor_report(target)["event_store"] == {"present": False}
+
+
+def test_cli_doctor_accepts_flag_before_target(tmp_path):
+    """The action.yml invocation shape: flag BEFORE the positional target."""
+    ws = _chained_workspace(tmp_path)
+    head = _head_hash(ws)
+    assert main(["doctor", "--expect-chain-head", head, str(ws)]) == 0
+    assert main(["doctor", "--expect-chain-head", "a" * 64, str(ws)]) == 1
+
+
+def test_cli_rejects_flag_on_other_commands_and_creates_nothing(tmp_path):
+    ws = _chained_workspace(tmp_path)
+    target = tmp_path / "fresh"
+    assert main(["scaffold", "--expect-chain-head", "a" * 64, str(target)]) == 2
+    assert not target.exists()
+    assert main(["status", "--expect-chain-head", "a" * 64, str(ws)]) == 2
+
+
+def test_cli_rejects_malformed_anchor_value(tmp_path):
+    ws = _chained_workspace(tmp_path)
+    assert main(["doctor", "--expect-chain-head", "nothex", str(ws)]) == 2
 
 
 def test_read_verbs_leave_no_wal_sidecars_on_clean_store(tmp_path):

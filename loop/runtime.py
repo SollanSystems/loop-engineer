@@ -10,7 +10,15 @@ from typing import Any, Callable, TypeVar
 
 from .completion import CompletionPolicyError, criteria_satisfy_completion
 from .contract import ContractIssue
-from .events import EVENT_SCHEMA_ID, EVENT_TYPES, EventRowDecodeError, read_event_rows, validate_event
+from .events import (
+    EVENT_SCHEMA_ID,
+    EVENT_TYPES,
+    EventRowDecodeError,
+    has_chain_columns,
+    read_event_rows,
+    store_user_version,
+    validate_event,
+)
 from .paths import resolve_loop_paths
 from .reducer import ChainBreakError, EventReplayError, reduce_events
 
@@ -219,21 +227,60 @@ def replay_report(target: str | Path, *, mode: str | None = None) -> dict[str, A
     }
 
 
+def _store_declares_chain_without_columns(path: Path) -> bool:
+    """True when the store still declares generation 2 but its chain columns are gone.
+
+    PRAGMA-only probe, routed through _read_store so a lost immutable=1 race
+    retries plainly instead of being mistaken for corruption (the D4 hole).
+    """
+    return _read_store(path, lambda conn: store_user_version(conn) >= 2 and not has_chain_columns(conn))
+
+
+def _anchor_mismatch(message: str) -> dict[str, Any]:
+    return ContractIssue("chain_anchor_mismatch", message)
+
+
 def event_consistency_issues(
-    target: str | Path, *, mode: str | None = None
+    target: str | Path, *, mode: str | None = None, expect_chain_head: str | None = None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Return event-store health and the existing status/replay findings."""
     path = _store_path(target)
     if not path.exists():
+        absent_issues: list[dict[str, Any]] = []
+        residue = [suffix for suffix in ("-wal", "-shm")
+                   if path.with_name(path.name + suffix).exists()]
+        if residue:
+            absent_issues.append(ContractIssue(
+                "missing_event_store",
+                "events.db is absent but SQLite sidecar files remain — the store was deleted"))
+        if expect_chain_head is not None:
+            absent_issues.append(_anchor_mismatch(
+                "an anchored chain head was supplied but no event store is present"))
+        if absent_issues:
+            return {"present": False, "sidecar_residue": bool(residue)}, absent_issues
         return {"present": False}, []
     try:
         status = status_report(target, mode=mode)
         replay = replay_report(target, mode=mode)
+        declares_chain_without_columns = _store_declares_chain_without_columns(path)
     except RuntimeStoreError as exc:
-        return {"present": True, "readable": False, "error_code": exc.code}, [
-            ContractIssue(exc.code, str(exc))
-        ]
+        unreadable_issues = [ContractIssue(exc.code, str(exc))]
+        if expect_chain_head is not None:
+            unreadable_issues.append(_anchor_mismatch(
+                "an anchored chain head was supplied but the event store cannot be read"))
+        return {"present": True, "readable": False, "error_code": exc.code}, unreadable_issues
     issues = list(status["divergence"]) + list(replay["findings"])
+    if declares_chain_without_columns:
+        issues.append(ContractIssue(
+            "chain_columns_missing",
+            "store declares user_version >= 2 but the chain columns are absent — "
+            "the chain was dropped (this check only catches the lazy downgrade; "
+            "an anchored head is the real control)"))
+    if expect_chain_head is not None:
+        actual = (status["chain_head"] or {}).get("event_hash")
+        if actual != expect_chain_head:
+            issues.append(_anchor_mismatch(
+                f"chain head {actual!r} does not match expected {expect_chain_head!r}"))
     return {
         "present": True,
         "readable": True,
