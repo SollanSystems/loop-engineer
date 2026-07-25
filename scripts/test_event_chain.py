@@ -428,10 +428,14 @@ def test_reducer_refuses_a_prechain_snapshot_at_a_chained_seam(tmp_path):
 
 
 def test_reducer_accepts_a_prechain_snapshot_at_a_genesis_seam(tmp_path):
+    # A two-event chained tail pins the refusal to the FIRST event only: event 2
+    # legitimately links to the head event 1 just established, so a seam guard
+    # that stays armed past the first event would false-refuse it.
     ws = _workspace_with_legacy_store(tmp_path)
     migrate_store(ws)
     store = SQLiteEventStore(ws / ".loop" / "events.db")
     store.append("r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    store.append("r1", "iteration_appended", {"iteration_id": 2, "outcome": "task_passed"}, actor="operator")
     events = store.read("r1")
     resumed = reduce_events(events[1:], initial=_prechain_snapshot(reduce_events(events[:1])))
     assert resumed["chain_head"] == reduce_events(events)["chain_head"]
