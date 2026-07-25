@@ -67,13 +67,10 @@ def _predict(paths: Any, projection: dict[str, Any]) -> dict[str, Any]:
     if task is None:
         done = runner.done_task_ids(tasks, projection)
         if all(candidate.get("id") in done for candidate in tasks):
-            payload = {
-                "state": "Succeeded",
-                "criteria_met": {candidate["id"]: True for candidate in tasks},
-                "evidence": ["RUNLOG.md"], "false_completion": False,
-                "completion_policy": {"mode": "all_required"},
-                "iteration_id": projection["iteration_id"],
-            }
+            # Built by the runner's own function, never restated here: a second copy of
+            # the auto-terminal payload silently breaks the predicted-equals-real pin
+            # (test_simulate_predicted_terminal_payload_matches_real_..._exactly).
+            payload = runner._auto_terminal_payload(paths, tasks, projection)
             return {**empty, "action": "would_write_terminal", "predicted_terminal": payload}
         return {**empty, "action": "would_block"}
 

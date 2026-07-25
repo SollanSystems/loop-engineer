@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -8,9 +9,11 @@ from typing import Any, Mapping
 from . import fsm
 from .chain import ChainHashError
 from .completion import (
+    VERIFIED_EVIDENCE_MODE,
     CompletionPolicyError,
     criteria_satisfy_completion,
     normalize_completion_policy,
+    policy_requires_verified_evidence,
     unmet_required_criteria,
 )
 from .paths import ARTIFACTS_DIR_NAME, EVIDENCE_DIR_NAME, LoopPaths, resolve_loop_paths
@@ -787,6 +790,113 @@ def _validate_evidence_records(paths: LoopPaths, mode: str, issues: list[dict]) 
     return checked
 
 
+def _strict_evidence_failure(entry: object, paths: LoopPaths,
+                             bound: Mapping[str, str] | None) -> str | None:
+    """The ONE definition of the verified-evidence bar (plan decision 14).
+
+    Returns ``None`` when the cited entry can back ``Succeeded``, otherwise a detail
+    string naming which of the three sub-checks failed:
+
+    1. self-consistency — the entry is a readable evidence@1 record whose ``uri``
+       resolves inside the workspace and hashes to the digest it declares;
+    2. chain-boundness — some event bound this record's path AT its current bytes.
+       ``bound is None`` means there is no event store at all, and the sub-check is
+       skipped: the store-less writer-API path is a DOCUMENTED degradation, not a pass;
+    3. goalpost agreement — when the record names a task still in TASKS.json, its
+       recorded ``policy_digest`` equals the live one.  A goalpost that cannot even be
+       computed is a FAILURE, not a skip: unestablished is not agreement (R007).
+
+    ``emit.terminate`` imports this function rather than restating it.  Two hand-written
+    copies of a three-part security check drift, and a drift here is a silent false
+    completion.
+    """
+    from .evidence import validate_evidence, verify_evidence  # local: loop.evidence imports this module
+    from .verifier import verification_policy_digest
+
+    if not isinstance(entry, str) or not entry.strip():
+        return "is not a workspace-relative evidence record path"
+    try:
+        blob = (paths.workspace / entry).read_bytes()
+    except (OSError, ValueError) as exc:
+        return f"is not verified evidence: the record cannot be read ({exc})"
+    try:
+        record = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"is not verified evidence: the record is not UTF-8 JSON ({exc})"
+    if not isinstance(record, dict):
+        return "is not verified evidence: the record is not a JSON object"
+    validation = validate_evidence(record, mode="basic")
+    if not validation["ok"]:
+        return f"is not verified evidence: {[issue['message'] for issue in validation['issues']]}"
+    verified = verify_evidence(record, workspace_root=paths.workspace)
+    if not verified["ok"]:
+        return f"is not verified evidence: {[issue['message'] for issue in verified['issues']]}"
+
+    if bound is not None:
+        committed = bound.get(entry)
+        if committed is None:
+            return ("is not bound into the event chain — no event committed this record's "
+                    "digest, so no dispatch produced it")
+        current = hashlib.sha256(blob).hexdigest()
+        if committed != current:
+            return (f"is bound at a different digest: the chain committed {committed}, "
+                    f"the record now hashes to {current}")
+
+    produced_by = record.get("produced_by")
+    task_id = produced_by.get("task_id") if isinstance(produced_by, dict) else None
+    if not isinstance(task_id, str):
+        return None
+    declared = _read_json(paths.tasks, [])   # already reported by the contract read
+    entries = declared.get("tasks") if isinstance(declared, dict) else None
+    live = next((task for task in (entries if isinstance(entries, list) else [])
+                 if isinstance(task, dict) and task.get("id") == task_id), None)
+    if live is None:
+        # A renamed or removed task is a replan, not a forgery (decision 5).
+        return None
+    verified_by = record.get("verified_by")
+    recorded = verified_by.get("policy_digest") if isinstance(verified_by, dict) else None
+    try:
+        current_goalpost = verification_policy_digest(live)
+    except ChainHashError as exc:
+        return (f"records a goalpost that cannot be compared against the live TASKS.json "
+                f"goalpost for task {task_id!r}: that entry is not canonicalizable ({exc}), "
+                f"so agreement is unestablished — and unestablished is not agreement")
+    if recorded != current_goalpost:
+        return (f"records a goalpost that is not the live TASKS.json goalpost for task "
+                f"{task_id!r}: recorded {recorded!r}, live {current_goalpost!r}")
+    return None
+
+
+def _check_verified_evidence_terminal(terminal: Any, paths: LoopPaths, issues: list[dict]) -> None:
+    """Read-time twin of emit.terminate's strict bar — one predicate, two callers."""
+    if not isinstance(terminal, dict) or terminal.get("state") != "Succeeded":
+        return
+    try:
+        if not policy_requires_verified_evidence(terminal.get("completion_policy")):
+            return
+    except CompletionPolicyError:
+        return   # already reported by _validate_terminal / the terminal@1 schema
+    from .runtime import RuntimeStoreError, bound_artifact_digests  # local: runtime imports this module
+
+    try:
+        bound = bound_artifact_digests(paths.workspace)
+    except RuntimeStoreError as exc:
+        issues.append(ContractIssue(
+            "unverified_evidence_terminal",
+            f"the terminal declares {VERIFIED_EVIDENCE_MODE} but the event store could not "
+            f"be read ({exc}) — chain-boundness is unestablished, and unestablished is not "
+            f"proof", paths.terminal))
+        return
+    evidence = terminal.get("evidence")
+    for entry in evidence if isinstance(evidence, list) else []:
+        detail = _strict_evidence_failure(entry, paths, bound)
+        if detail is not None:
+            issues.append(ContractIssue(
+                "unverified_evidence_terminal",
+                f"the terminal declares {VERIFIED_EVIDENCE_MODE} but {entry!r} {detail}",
+                paths.terminal))
+
+
 def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) -> set[str]:
     """Validate record files that are present; return the set of record schema
     keys actually checked (``repair``/``rollout``/``receipt``/``evidence``) so ``doctor`` can
@@ -888,6 +998,8 @@ def validate_contract(target: str | Path, *, mode: str | None = None) -> dict[st
     _check_stub_verify_scripts(paths, issues)
     _check_verify_surface(paths, tasks, issues)
     records_checked = _validate_optional_records(paths, mode, issues)
+    if terminal is not None:
+        _check_verified_evidence_terminal(terminal, paths, issues)
 
     schemas_checked = list(SCHEMA_IDS) + [
         schema_id for key, schema_id in _RECORD_SCHEMA_IDS if key in records_checked

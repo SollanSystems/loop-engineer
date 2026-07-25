@@ -83,7 +83,7 @@ def test_simulate_on_execute_task_with_undeclared_or_unparseable_verify_command_
 
 def test_simulate_on_execute_task_with_all_tasks_done_predicts_would_write_terminal_with_exact_payload_preview(tmp_path):
     w, _ = _ws(tmp_path, [_task(status="done")]); r = simulate_run(w)["would"]
-    assert r["action"] == "would_write_terminal" and r["predicted_terminal"] == {"state": "Succeeded", "criteria_met": {"T-1": True}, "evidence": ["RUNLOG.md"], "false_completion": False, "completion_policy": {"mode": "all_required"}, "iteration_id": 4}
+    assert r["action"] == "would_write_terminal" and r["predicted_terminal"] == {"state": "Succeeded", "criteria_met": {"T-1": True}, "evidence": ["RUNLOG.md"], "false_completion": False, "completion_policy": {"mode": "all_required"}, "iteration_id": 4, "reason": "tasks with no evidence record: T-1"}
 
 
 def test_simulate_on_execute_task_with_unsatisfiable_dependency_predicts_would_block_with_null_refusal_reason(tmp_path):

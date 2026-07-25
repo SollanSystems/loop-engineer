@@ -77,7 +77,10 @@
       ],
       "properties": {
         "mode": {
-          "const": "all_required"
+          "enum": [
+            "all_required",
+            "all_required_verified_evidence"
+          ]
         }
       },
       "additionalProperties": false,

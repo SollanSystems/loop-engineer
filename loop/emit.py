@@ -19,13 +19,16 @@ from typing import Any, Mapping, Sequence
 from . import fsm
 from .chain import ChainHashError
 from .completion import (
+    VERIFIED_EVIDENCE_MODE,
     CompletionPolicyError,
     criteria_satisfy_completion,
     normalize_completion_policy,
+    policy_requires_verified_evidence,
     unmet_required_criteria,
 )
 from .contract import (
     TERMINAL_STATES,
+    _strict_evidence_failure,
     _validate_record,
     _validate_terminal,
     _validation_mode,
@@ -243,6 +246,28 @@ def append_receipt(
     return receipts
 
 
+def _refuse_unverified_evidence(paths, evidence: Sequence[str]) -> None:
+    """Enforce the verified-evidence bar at write time, through contract's one definition.
+
+    An unreadable store is a REFUSAL, never a skip: the whole point of the mode is that
+    a cited record is bound into a chain, and a chain nobody can read proves nothing.
+    """
+    from .runtime import RuntimeStoreError, bound_artifact_digests  # local: runtime -> events -> emit
+
+    try:
+        bound = bound_artifact_digests(paths.workspace)
+    except RuntimeStoreError as exc:
+        raise EmitError(
+            f"refusing Succeeded under {VERIFIED_EVIDENCE_MODE}: the event store could not be "
+            f"read ({exc}) — chain-boundness is unestablished, and unestablished is not proof"
+        ) from exc
+    for entry in evidence:
+        detail = _strict_evidence_failure(entry, paths, bound)
+        if detail is not None:
+            raise EmitError(
+                f"refusing Succeeded under {VERIFIED_EVIDENCE_MODE}: {entry} {detail}")
+
+
 def terminate(
     target: str | Path,
     *,
@@ -303,6 +328,10 @@ def terminate(
             raise EmitError(
                 "refusing Succeeded because not all required criteria are proven true: " + detail
             )
+        if policy_requires_verified_evidence(normalized_policy):
+            # Resolved here rather than by hoisting the assignment below, so the order in
+            # which terminate reports its refusals is exactly what it was.
+            _refuse_unverified_evidence(_require_contract(target), evidence)
 
     paths = _require_contract(target)
     terminal_path = paths.loop_dir / "terminal_state.json"

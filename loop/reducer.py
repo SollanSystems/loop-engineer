@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from . import chain, fsm
-from .completion import CompletionPolicyError, criteria_satisfy_completion, normalize_completion_policy
+from .completion import (CompletionPolicyError, criteria_satisfy_completion,
+                         evidence_entry_is_record_shaped, normalize_completion_policy,
+                         policy_requires_verified_evidence)
 from .contract import TERMINAL_STATES
 from .events import _structural_validate_event
 
@@ -47,6 +49,13 @@ def _validate_terminal_payload_semantics(payload: Mapping[str, Any]) -> None:
     evidence = payload.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         raise EventReplayError("Succeeded terminal has empty evidence (G1)")
+    # The STRUCTURAL half only: this fold is pure and holds no workspace, so it can
+    # check the shape of a citation and nothing more (repo-os-contract §16).
+    if (policy_requires_verified_evidence(policy)
+            and not all(evidence_entry_is_record_shaped(item) for item in evidence)):
+        raise EventReplayError(
+            "Succeeded terminal declares verified evidence but an entry is not a "
+            ".loop/evidence record (G1)")
 
 
 def _validate_superseded_payload_semantics(payload: Mapping[str, Any]) -> None:
