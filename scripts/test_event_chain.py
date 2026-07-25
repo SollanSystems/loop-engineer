@@ -55,3 +55,80 @@ def test_event_hash_treats_absent_optionals_as_null():
     implicit = {k: v for k, v in _record().items()
                 if k not in ("causation_id", "correlation_id", "prev_event_hash")}
     assert compute_event_hash(explicit) == compute_event_hash(implicit)
+
+
+from loop.chain import link_issue, verify_chain
+
+
+def _chained(seq, prev_hash, **overrides):
+    rec = _record(sequence=seq, event_id=f"e{seq}", prev_event_hash=prev_hash,
+                  type="iteration_appended" if seq else "contract_opened",
+                  payload={"iteration_id": seq, "outcome": "task_passed"} if seq else {"workspace": "ws"})
+    rec.update(overrides)
+    rec["event_hash"] = compute_event_hash(rec)
+    return rec
+
+
+def test_link_issue_genesis_requires_null_prev():
+    assert link_issue(_chained(0, None), None) is None
+    assert "prev_event_hash mismatch" in link_issue(_chained(0, "a" * 64), None)
+
+
+def test_link_issue_detects_recompute_mismatch():
+    rec = _chained(0, None)
+    rec["payload"] = {"workspace": "tampered"}
+    assert "event_hash mismatch" in link_issue(rec, None)
+
+
+def test_link_issue_unchained_after_chained_is_a_break_and_names_the_likely_cause():
+    head = {"sequence": 0, "event_hash": "b" * 64}
+    unchained = _record(sequence=1, event_id="e1")
+    message = link_issue(unchained, head)
+    assert "unchained event after chained prefix" in message
+    assert "pre-0.10.0 writer" in message           # self-diagnosing per design change D1
+    assert link_issue(unchained, None) is None
+
+
+def test_verify_chain_happy_path_and_head():
+    e0 = _chained(0, None)
+    e1 = _chained(1, e0["event_hash"])
+    report = verify_chain([e0, e1])
+    assert report["ok"] and report["chained_events"] == 2 and report["unchained_prefix"] == 0
+    assert report["head"] == {"sequence": 1, "event_hash": e1["event_hash"]}
+
+
+def test_verify_chain_legacy_prefix_then_genesis():
+    legacy = _record(sequence=0)          # no event_hash key at all
+    e1 = _chained(1, None)                # genesis after unchained prefix
+    report = verify_chain([legacy, e1])
+    assert report["ok"] and report["unchained_prefix"] == 1 and report["chained_events"] == 1
+
+
+def test_verify_chain_detects_splice():
+    e0 = _chained(0, None)
+    e1 = _chained(1, e0["event_hash"])
+    forged = dict(e1, payload={"iteration_id": 1, "outcome": "task_failed"})
+    forged["event_hash"] = compute_event_hash(forged)   # recomputed own hash...
+    e2 = _chained(2, e1["event_hash"])                  # ...but successor cites the original
+    report = verify_chain([e0, forged, e2])
+    assert not report["ok"] and any("prev_event_hash mismatch" in i for i in report["issues"])
+
+
+def test_verify_chain_reports_first_record_failure_without_counting_it():
+    bad = _chained(0, "a" * 64)                          # bad genesis
+    report = verify_chain([bad])
+    assert not report["ok"] and report["chained_events"] == 0
+    assert report["unchained_prefix"] == 0 and report["head"] is None
+
+
+def test_verify_chain_truncation_needs_expected_head():
+    e0 = _chained(0, None)
+    e1 = _chained(1, e0["event_hash"])
+    assert verify_chain([e0])["ok"]                      # honest limit: shorter valid chain verifies
+    report = verify_chain([e0], expected_head=e1["event_hash"])
+    assert not report["ok"] and any("chain head" in i for i in report["issues"])
+
+
+def test_verify_chain_reports_missing_head_when_anchor_supplied_on_unchained_stream():
+    report = verify_chain([_record(sequence=0)], expected_head="a" * 64)
+    assert not report["ok"] and any("no chained events" in i for i in report["issues"])
