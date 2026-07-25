@@ -92,6 +92,104 @@ jobs:
         # recipe-langgraph) this job carries no cache step.
         run: python -B -m pytest -q -p no:cacheprovider scripts/test_temporal_recipe.py
 
+  anchor-live:
+    name: chain anchor (live end-to-end)
+    runs-on: ubuntu-latest
+    # action-dogfood gates a store-free example, so the anchor surface — the
+    # --expect-chain-head gate and the action's chain-head output — has no live
+    # cover there. This job seeds a chained store and pins both verdicts.
+    env:
+      WRONG_HEAD: "0000000000000000000000000000000000000000000000000000000000000000"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install probe dependencies
+        # jsonschema so the probe's own doctor gate is as strict as the action's.
+        run: python -m pip install --upgrade pip pyyaml jsonschema
+
+      - name: Seed a chained workspace
+        id: seed
+        run: |
+          workspace="${RUNNER_TEMP}/anchor-ws"
+          head="$(python -B scripts/ci_anchor_probe.py "$workspace")"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+
+      - name: doctor accepts the seeded anchor
+        env:
+          ANCHOR_WS: ${{ steps.seed.outputs.workspace }}
+          ANCHOR_HEAD: ${{ steps.seed.outputs.head }}
+        run: python -B -m loop doctor --expect-chain-head "$ANCHOR_HEAD" "$ANCHOR_WS"
+
+      - name: doctor rejects a wrong anchor
+        env:
+          ANCHOR_WS: ${{ steps.seed.outputs.workspace }}
+        run: |
+          # Inverted so an unexpected PASS fails the job. 1 is doctor's
+          # report-not-ok code; 2 means the flag itself was refused, which would
+          # prove nothing about the anchor comparison — so pin 1 exactly.
+          set +e
+          out="$(python -B -m loop doctor --expect-chain-head "$WRONG_HEAD" "$ANCHOR_WS" 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "::error::doctor exited $status on a wrong anchor; expected 1"
+            echo "$out"
+            exit 1
+          fi
+          case "$out" in
+            *chain_anchor_mismatch*) ;;
+            *) echo "::error::doctor did not report chain_anchor_mismatch"; echo "$out"; exit 1 ;;
+          esac
+
+      - name: Action gate with the seeded anchor
+        id: gate
+        uses: ./
+        with:
+          path: ${{ steps.seed.outputs.workspace }}
+          expect-chain-head: ${{ steps.seed.outputs.head }}
+          # 0 keeps inspect warn-only: the scaffold's advisory score must never
+          # be able to flake the anchor verdict this job exists to pin.
+          fail-under-score: "0"
+
+      - name: Action emitted the seeded head
+        env:
+          GATE_HEAD: ${{ steps.gate.outputs.chain-head }}
+          SEED_HEAD: ${{ steps.seed.outputs.head }}
+        run: |
+          if [ "$GATE_HEAD" != "$SEED_HEAD" ]; then
+            echo "::error::action chain-head output '$GATE_HEAD' != seeded head '$SEED_HEAD'"
+            exit 1
+          fi
+
+      - name: Action gate with a wrong anchor
+        id: gate-mismatch
+        continue-on-error: true
+        uses: ./
+        with:
+          path: ${{ steps.seed.outputs.workspace }}
+          expect-chain-head: ${{ env.WRONG_HEAD }}
+          fail-under-score: "0"
+
+      - name: Wrong anchor failed the gate and still recorded the head
+        env:
+          GATE_OUTCOME: ${{ steps.gate-mismatch.outcome }}
+          GATE_HEAD: ${{ steps.gate-mismatch.outputs.chain-head }}
+          SEED_HEAD: ${{ steps.seed.outputs.head }}
+        run: |
+          if [ "$GATE_OUTCOME" != "failure" ]; then
+            echo "::error::a wrong anchor did not fail the action (outcome: $GATE_OUTCOME)"
+            exit 1
+          fi
+          if [ "$GATE_HEAD" != "$SEED_HEAD" ]; then
+            echo "::error::the always-run anchor step recorded '$GATE_HEAD', not the observed head"
+            exit 1
+          fi
+
   action-dogfood:
     name: action (dogfood on flagship example)
     runs-on: ubuntu-latest
