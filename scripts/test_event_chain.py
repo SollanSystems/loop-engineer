@@ -132,3 +132,55 @@ def test_verify_chain_truncation_needs_expected_head():
 def test_verify_chain_reports_missing_head_when_anchor_supplied_on_unchained_stream():
     report = verify_chain([_record(sequence=0)], expected_head="a" * 64)
     assert not report["ok"] and any("no chained events" in i for i in report["issues"])
+
+
+import sqlite3
+
+from chain_fixtures import make_legacy_store
+from loop.events import SQLiteEventStore, has_chain_columns, read_event_rows, store_user_version
+
+
+def test_fresh_store_has_chain_columns_and_user_version_2(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.db")
+    store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+    conn = sqlite3.connect(str(tmp_path / "events.db"))
+    try:
+        assert has_chain_columns(conn) and store_user_version(conn) == 2
+        notnull = {row[1]: row[3] for row in conn.execute("PRAGMA table_info(events)")}
+        assert notnull["event_hash"] == 1 and notnull["prev_event_hash"] == 0
+    finally:
+        conn.close()
+
+
+def test_legacy_store_is_not_upgraded_by_connect(tmp_path):
+    path = make_legacy_store(tmp_path / "events.db")
+    SQLiteEventStore(path).read("r1")     # any connect on a legacy store
+    conn = sqlite3.connect(str(path))
+    try:
+        assert not has_chain_columns(conn) and store_user_version(conn) == 0
+    finally:
+        conn.close()
+
+
+def test_read_event_rows_projects_hash_keys_on_legacy_store(tmp_path):
+    path = make_legacy_store(tmp_path / "events.db")
+    conn = sqlite3.connect(str(path))
+    try:
+        rows = read_event_rows(conn, "r1")
+    finally:
+        conn.close()
+    assert rows[0]["prev_event_hash"] is None and rows[0]["event_hash"] is None
+
+
+def test_read_event_rows_raises_typed_error_on_corrupt_payload_json(tmp_path):
+    from loop.events import EventRowDecodeError
+    path = make_legacy_store(tmp_path / "events.db")
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("DROP TRIGGER events_no_update")
+        conn.execute("UPDATE events SET payload = 'not json' WHERE sequence = 0")
+        conn.commit()
+        with pytest.raises(EventRowDecodeError):
+            read_event_rows(conn, "r1")
+    finally:
+        conn.close()

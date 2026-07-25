@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from . import chain
 from .contract import ContractIssue, _resolve_requested_mode, _schemas_dir
 from .emit import _ITERATION_OUTCOMES, _RECEIPT_OUTCOMES, _RECEIPT_ROLES
 
@@ -41,6 +42,8 @@ CREATE TABLE IF NOT EXISTS events (
     ts TEXT NOT NULL,
     payload TEXT NOT NULL,
     artifact_hashes TEXT NOT NULL,
+    prev_event_hash TEXT,
+    event_hash TEXT NOT NULL,
     PRIMARY KEY (run_id, sequence)
 )
 """
@@ -64,6 +67,10 @@ class DuplicateEventError(ValueError):
 
 class SequenceConflictError(ValueError):
     """expected_sequence differed from the atomically assigned next sequence."""
+
+
+class EventRowDecodeError(ValueError):
+    """A stored payload/artifact_hashes column is not valid JSON."""
 
 
 @runtime_checkable
@@ -234,6 +241,45 @@ def validate_event(data: dict[str, Any], *, mode: str | None = None) -> dict[str
     return _validate_event_dict(data, mode=mode)
 
 
+def has_chain_columns(conn: sqlite3.Connection) -> bool:
+    return any(row[1] == "event_hash" for row in conn.execute("PRAGMA table_info(events)"))
+
+
+def store_user_version(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+
+_BASE_COLUMNS = ("run_id", "sequence", "event_id", "type", "actor", "causation_id",
+                 "correlation_id", "ts", "payload", "artifact_hashes")
+
+
+def read_event_rows(conn: sqlite3.Connection, run_id: str, *,
+                    since_sequence: int | None = None) -> list[dict[str, Any]]:
+    """The single event-row projection shared by store, runtime, and runner reads.
+
+    Records always carry prev_event_hash/event_hash keys; legacy stores project
+    None. Owns the JSON-decode translation every call site used to repeat.
+    """
+    chained = has_chain_columns(conn)
+    columns = _BASE_COLUMNS + (("prev_event_hash", "event_hash") if chained else ())
+    operator, cursor = (">=", 0) if since_sequence is None else (">", since_sequence)
+    rows = conn.execute(
+        f"SELECT {', '.join(columns)} FROM events WHERE run_id = ? AND sequence {operator} ? "
+        "ORDER BY sequence ASC", (run_id, cursor)).fetchall()
+    records: list[dict[str, Any]] = []
+    try:
+        for row in rows:
+            records.append({
+                "schema": EVENT_SCHEMA_ID, "run_id": row[0], "sequence": row[1], "event_id": row[2],
+                "type": row[3], "actor": row[4], "causation_id": row[5], "correlation_id": row[6],
+                "ts": row[7], "payload": json.loads(row[8]), "artifact_hashes": json.loads(row[9]),
+                "prev_event_hash": row[10] if chained else None,
+                "event_hash": row[11] if chained else None})
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise EventRowDecodeError(f"event row is not decodable: {exc}") from exc
+    return records
+
+
 class SQLiteEventStore:
     """A transactional SQLite/WAL event store with DB-enforced append-only rows."""
 
@@ -245,9 +291,13 @@ class SQLiteEventStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=FULL")
         conn.execute("PRAGMA busy_timeout=5000")
+        fresh = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='events'").fetchone() is None
         conn.execute(_CREATE_EVENTS_TABLE)
         conn.execute(_CREATE_NO_UPDATE_TRIGGER)
         conn.execute(_CREATE_NO_DELETE_TRIGGER)
+        if fresh:
+            conn.execute("PRAGMA user_version = 2")
         return conn
 
     def append(self, run_id: str, event_type: str, payload: Mapping[str, Any], *, actor: str,
@@ -275,11 +325,29 @@ class SQLiteEventStore:
                 conn.execute("ROLLBACK")
                 raise SequenceConflictError(f"expected next sequence {next_sequence} for run_id {run_id!r}, caller supplied {expected_sequence}")
             record["sequence"] = next_sequence
+            chained = has_chain_columns(conn)
+            if chained:
+                prev_row = conn.execute(
+                    "SELECT event_hash FROM events WHERE run_id = ? AND sequence = ?",
+                    (run_id, next_sequence - 1)).fetchone() if next_sequence else None
+                record["prev_event_hash"] = prev_row[0] if prev_row else None
+                try:
+                    record["event_hash"] = chain.compute_event_hash(record)
+                except chain.ChainHashError as exc:
+                    conn.execute("ROLLBACK")
+                    raise EventValidationError(str(exc)) from exc
+            else:
+                record["prev_event_hash"] = None
+                record["event_hash"] = None
             payload_json = json.dumps(record["payload"], sort_keys=True)
             hashes_json = json.dumps([dict(item) for item in record["artifact_hashes"]], sort_keys=True)
             try:
-                conn.execute("INSERT INTO events (run_id, sequence, event_id, type, actor, causation_id, correlation_id, ts, payload, artifact_hashes) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                             (record["run_id"], record["sequence"], record["event_id"], record["type"], record["actor"], record["causation_id"], record["correlation_id"], record["ts"], payload_json, hashes_json))
+                if chained:
+                    conn.execute("INSERT INTO events (run_id, sequence, event_id, type, actor, causation_id, correlation_id, ts, payload, artifact_hashes, prev_event_hash, event_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                 (record["run_id"], record["sequence"], record["event_id"], record["type"], record["actor"], record["causation_id"], record["correlation_id"], record["ts"], payload_json, hashes_json, record["prev_event_hash"], record["event_hash"]))
+                else:
+                    conn.execute("INSERT INTO events (run_id, sequence, event_id, type, actor, causation_id, correlation_id, ts, payload, artifact_hashes) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                 (record["run_id"], record["sequence"], record["event_id"], record["type"], record["actor"], record["causation_id"], record["correlation_id"], record["ts"], payload_json, hashes_json))
             except sqlite3.IntegrityError as exc:
                 conn.execute("ROLLBACK")
                 raise DuplicateEventError(record["event_id"]) from exc
@@ -292,11 +360,9 @@ class SQLiteEventStore:
         """Read the full stream for None, or events strictly after an integer cursor."""
         conn = self._connect()
         try:
-            operator, cursor = (">=", 0) if since_sequence is None else (">", since_sequence)
-            rows = conn.execute(f"SELECT run_id, sequence, event_id, type, actor, causation_id, correlation_id, ts, payload, artifact_hashes FROM events WHERE run_id = ? AND sequence {operator} ? ORDER BY sequence ASC", (run_id, cursor)).fetchall()
+            return read_event_rows(conn, run_id, since_sequence=since_sequence)
         finally:
             conn.close()
-        return [{"schema": EVENT_SCHEMA_ID, "run_id": row[0], "sequence": row[1], "event_id": row[2], "type": row[3], "actor": row[4], "causation_id": row[5], "correlation_id": row[6], "ts": row[7], "payload": json.loads(row[8]), "artifact_hashes": json.loads(row[9])} for row in rows]
 
     def latest_sequence(self, run_id: str) -> int | None:
         conn = self._connect()
