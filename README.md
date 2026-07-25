@@ -28,7 +28,10 @@ ships, on disk and runnable today:
   hash-chained; `loop doctor --expect-chain-head` verifies the log against an
   externally anchored head. The chain is tamper-evident **relative to an
   anchor** — an adversary with workspace write access can rewrite an unanchored
-  log.
+  log. Verify runs record which verifier actually ran — command, code digest,
+  policy digest — and `loop doctor` fails when a record declares that its own
+  producer verified it; identity is recorded, not proven: a worker can write a
+  false verifier name, and the records live outside the hash chain.
 
 ![The inspector scores a self-asserted DIY loop 0/weak, then the gate-backed example 90/strong — both runs live](docs/demo.gif)
 

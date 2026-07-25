@@ -69,6 +69,9 @@ A third-party harness whose output satisfies the §14 conformance checklist may 
     checkpoints/      # point-in-time snapshots of best-known-good state
     artifacts/        # intermediate work products (drafts, generated files)
     approvals/        # one file per approval request + its resolution
+    repair/           # repair@1 records — scanned by doctor when present
+    receipts/         # receipt@1 ledgers (*.jsonl) — scanned by doctor when present
+    evidence/         # evidence@1 records — the declared location doctor scans (§17)
     memory/
       session-summary.md   # short-term: continue-this-run compaction summary (disposable at terminal)
       lessons.md           # long-term: durable lessons that improve future runs
@@ -831,10 +834,11 @@ workspace, rejects traversal and symlink escapes, and verifies the file hash.
 `artifact_object_path()` supplies the v1 content-addressed object layout under
 `.loop/artifacts/objects/` without writing it.
 
-**Scope boundary:** like plan@1 and event@1 (§15/§16), evidence@1 is
-**standalone in v1** and is **not yet** an artifact `loop doctor` reads from a
-scaffolded workspace. Writer and doctor wiring are deferred to the
-execution-runtime milestone.
+**Scope boundary:** `loop doctor` reads evidence@1 records from the declared
+location `.loop/evidence/*.json` and validates them; it does **not** yet
+hash-verify the artifacts they reference, does **not** compare any recorded
+digest against anything, and `Succeeded` still requires non-empty evidence
+*paths*, not verified hashes. Those tightenings are the next slice.
 
 **Artifact provenance:** `kind` remains an open vocabulary (for example,
 `verify-bundle`, `log`, `diff`, `screenshot`, or `report`), while `produced_by`
@@ -842,6 +846,131 @@ identifies the run, task, attempt, and executor that produced it. Verification
 does not trust a path string: resolution and containment provide one mechanism
 for rejecting both `..` traversal and symlink escapes before a 64 KiB-chunked
 SHA-256 comparison is attempted.
+
+### Verifier identity (v0.11.0+)
+
+**The four fields.** `verified_by` gains four additive, nullable fields —
+`command`, `code_digest`, `code_digest_basis`, and `policy_digest` — recording
+what verified a task and how. `required` on `verified_by` stays `["by",
+"at"]`; all four fields are optional and nullable, and both the JSON Schema
+mode and the structural-fallback mode type-check them identically.
+
+**The code-digest honesty rule.** `code_digest` hashes argv[0] of the declared
+`verify` command only when it resolves to a readable regular file inside the
+workspace; every other case is `null`, and `code_digest_basis` names exactly
+why. The nine bases are the complete enumeration:
+
+| basis | when | digest |
+|---|---|---|
+| `workspace_file` | argv[0] is a regular file under the workspace and was readable | hex sha256 |
+| `path_lookup` | argv[0] has no path separator (`pytest`, `python3`, `true`) — the OS resolved it through `PATH`, so a same-named workspace file is *not* what ran | `null` |
+| `outside_workspace` | argv[0] resolved to a real file outside the workspace (`/usr/bin/python3`, a symlink escaping the tree) | `null` |
+| `not_a_file` | argv[0] does not resolve to an existing regular file (missing path, directory, dangling symlink) | `null` |
+| `unresolvable` | resolving argv[0] raised `OSError` (symlink loop, permission-denied parent, name too long) — the honest "could not determine" | `null` |
+| `unreadable` | the file exists inside the workspace but could not be read | `null` |
+| `unparseable_command` | `shlex.split` raised | `null` |
+| `empty_command` | `verify` is absent, blank, or splits to zero words | `null` |
+| `injected_verifier` | the caller injected a verifier callable, so **no declared command ran** — recording one would be a fabrication | `null` |
+
+`python3 -m pytest -q` has no hashable workspace script; `null` with basis
+`path_lookup` is the truthful record, and a fabricated digest would be worse
+than none. When a caller injects a verifier callable the declared command does
+not run at all: `command` and `code_digest` are `null` with basis
+`injected_verifier`. These nine values co-move across four surfaces:
+`CODE_DIGEST_BASES` (`loop/verifier.py`), the `enum` in
+`schemas/evidence.schema.json`, the structural-fallback check in
+`loop/evidence.py`, and this table.
+
+**The policy digest.** `policy_digest` is sha256 over
+`loop.chain.canonical_json` of `{criterion_ref, depends_on, id, verify}` — the
+TASKS.json entry's declared goalpost. Run state (`status`, `attempts`,
+`evidence`) is excluded because it changes for non-policy reasons and would
+make the digest noise; `id` binds *which* goalpost the digest names, and
+`depends_on` binds its declared ordering, so both are included.
+
+The digest binds the criterion **reference**, not the criterion **text** —
+editing `SPEC.md`'s acceptance wording leaves it unchanged. Binding criterion
+text is the evidence-wiring slice.
+
+**Conformance vector.** Over the task entry
+
+```python
+{"id": "T-1", "title": "ignored", "status": "pending", "criterion_ref": "C-1",
+ "verify": "./scripts/verify-fast.sh", "depends_on": [], "attempts": 0, "evidence": None}
+```
+
+`verification_policy` produces the canonical JSON
+
+```
+{"criterion_ref":"C-1","depends_on":[],"id":"T-1","verify":"./scripts/verify-fast.sh"}
+```
+
+and `verification_policy_digest` produces
+
+```
+cb28ced25ec75a20a153f821e7335464a1734eb781146a9d36a598e713caa9fe
+```
+
+`scripts/test_conformance.py` pins both literals against the live
+implementation.
+
+**The bundle/record pair.** A verified dispatch writes two files:
+`.loop/artifacts/verify-iter<N>.json` (the bundle — carries `outcome`/`passed`
+per the metrics green-marker convention, `verifier` including `source`, and
+`partition`) and `.loop/evidence/evidence-iter<N>.json` (evidence@1 — commits
+to the bundle bytes via `sha256`). An evidence record MUST NOT be named
+`verify-*.json` — a record in the bundle namespace is read by metrics as a
+bundle with no green marker, i.e. a phantom failing gate. `verifier.source` is
+`declared_command` only when the task's declared `verify` command was
+executed. A bundle whose source is `injected_callable` carries a
+caller-supplied verdict and is not gate evidence. `loop simulate` predicts
+decisions, not writes: it reports `legacy_sync_would_write` because that write
+is conditional, but it does not enumerate the bundle and record a dispatch
+always writes.
+
+**The partition.** `visible` defaults to the task's `criterion_ref`;
+`holdout` is empty unless the task declares `holdout_criteria`; both fields
+are optional `array of string` on tasks@1; `holdout_executed` is always
+`false` because the runner executes exactly the declared `verify` command.
+Running a holdout set remains `scripts/holdout_gate.py`'s job and its verdict
+keeps its own canonical shape. A misspelled field name validates (tasks@1 is
+`additionalProperties: true`) and yields `declared: false` — an undeclared
+partition and a mistyped one are indistinguishable.
+
+**The independence rule.** A record whose `produced_by.executor` equals its
+`verified_by.by` (compared strip+casefold) declares that the producer
+verified its own work. `loop doctor` reports `self_verified_evidence` and
+fails. On the `loop run` path both identities are operator-supplied
+(`--executor`, `--verifier-identity`); their defaults (`unattributed`,
+`loop.run`) never collide, so a default run cannot manufacture the finding.
+
+**The integrity boundary, in three honest tiers** — not a single "surfaces /
+does not surface" pair:
+
+- **Fails `loop doctor`:** a record declaring self-verification
+  (`self_verified_evidence`); a runner-written bundle whose record is absent
+  (`missing_evidence_record`); a malformed or unparseable record
+  (`invalid_evidence` — an errored check fails, it never skips).
+- **Recorded for later comparison, not checked by any shipped surface:**
+  `policy_digest` and `code_digest`. Nothing in v0.11.0 compares either
+  against the live TASKS.json entry or re-hashes the verifier file, so a moved
+  goalpost or a swapped verify script is *legible in a diff of two records*
+  and nothing more. Automated comparison is the evidence-wiring slice.
+- **Detectable only by explicitly calling `verify_evidence()`:** a swapped
+  bundle. `loop doctor` does not hash-verify referenced artifacts in this
+  release.
+- **Not surfaced at all:** a worker that writes a false `verified_by.by`; a
+  worker that omits its executor identity; a hand-written record whose
+  digests are invented (doctor validates their *shape*, never their truth); a
+  rewrite or deletion of the record **and** its bundle together. **Both
+  artifacts are plain files outside the hash chain: a worker with write
+  access to `.loop/` can rewrite or remove them and `loop doctor` will not
+  notice.** Binding the record digest into the chain requires a new event
+  type and is the evidence-wiring slice.
+
+This does not prove independence. It surfaces **declared** self-verification,
+and it records — honestly, with nulls where the process could not know —
+what verified the work.
 
 ---
 
@@ -997,6 +1126,15 @@ it is the honest statement of how much of the log the chain does not cover.
 | `chain_anchor_mismatch` | `--expect-chain-head` was supplied and the store's actual head is absent, unreadable, unchained, or a different digest. |
 | `chain_columns_missing` | The store declares `user_version >= 2` but the chain columns are gone — the lazy downgrade. A downgrade that also resets `user_version` is invisible here; the anchor is the real control. |
 | `missing_event_store` | `events.db` is absent but `-wal`/`-shm` sidecars remain — the store was deleted. Distinct from the pre-existing `missing_store`, which `status`/`replay`/`run`/`migrate` raise when a verb that *requires* a store is pointed at a workspace that has none; `missing_event_store` is a doctor finding about a store that evidently once existed. |
+| `self_verified_evidence` | A discovered evidence@1 record declares `produced_by.executor == verified_by.by` (strip+casefold) — the producer verified its own work. Enforces the independence rule of `reference/safety-and-approvals.md` §5, which was prose-only before v0.11.0. |
+| `missing_evidence_record` | A runner-written verify bundle `.loop/artifacts/verify-iter<N>.json` exists with no matching `.loop/evidence/evidence-iter<N>.json`. Residue of a removed provenance record, in the same family as `missing_event_store`. Fires only when a bundle is present, so an absent-everything contract stays byte-identical. |
+
+**Evidence discovery (v0.11.0+).** `loop doctor` scans `.loop/evidence/*.json`
+when the directory exists; an absent directory with no runner bundle is a
+no-op that leaves every doctor key byte-identical (no new top-level key was
+added). A malformed or unparseable record **fails** doctor rather than being
+skipped, and `loop-engineer/evidence@1` joins `schemas_checked` when at least
+one record was read.
 
 **`loop migrate`.** `loop migrate <workspace>` is the only store-upgrade path:
 explicit, idempotent, and non-rewriting. It widens `events` with the two

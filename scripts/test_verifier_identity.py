@@ -138,3 +138,29 @@ def test_criterion_partition_records_a_declared_split_and_never_claims_execution
     task = _task(visible_criteria=["C-1", "C-2"], holdout_criteria=["C-9"])
     assert criterion_partition(task) == {
         "visible": ["C-1", "C-2"], "holdout": ["C-9"], "declared": True, "holdout_executed": False}
+
+
+_ROOT = Path(__file__).resolve().parent.parent
+_DOC = _ROOT / "reference" / "repo-os-contract.md"
+_SAFETY = _ROOT / "reference" / "safety-and-approvals.md"
+
+
+def test_every_code_digest_basis_is_documented_and_in_the_schema():
+    """The nine values co-move across four surfaces; two of them are pinned here."""
+    import json as _json
+    text = _DOC.read_text(encoding="utf-8")
+    schema = _json.loads((_ROOT / "schemas" / "evidence.schema.json").read_text(encoding="utf-8"))
+    enum = schema["properties"]["verified_by"]["properties"]["code_digest_basis"]["enum"]
+    assert all(basis in text for basis in CODE_DIGEST_BASES)
+    assert set(CODE_DIGEST_BASES) | {None} == set(enum)
+
+
+def test_safety_reference_names_the_machine_check():
+    assert "self_verified_evidence" in _SAFETY.read_text(encoding="utf-8")
+
+
+def test_no_shipped_surface_still_claims_evidence_is_unread():
+    """Task 5 makes both claims false; nothing may still ship them."""
+    for path in (_ROOT / "loop" / "evidence.py", _ROOT / "schemas" / "evidence.schema.json"):
+        text = path.read_text(encoding="utf-8")
+        assert "standalone in v1" not in text and "not yet read by" not in text

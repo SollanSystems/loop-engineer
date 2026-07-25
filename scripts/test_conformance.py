@@ -415,3 +415,24 @@ def test_conformance_checklist_documented():
     assert "conformance checklist" in text.lower(), "normative doc lacks a conformance-checklist section"
     for cid in CHECKLIST_IDS:
         assert cid in text, f"checklist ID {cid} missing from normative doc"
+
+
+# --------------------------------------------------------------------------- #
+# §17 policy-digest conformance vector — docs and code cannot drift.
+# --------------------------------------------------------------------------- #
+
+from loop.verifier import verification_policy, verification_policy_digest  # noqa: E402
+
+_POLICY_VECTOR_TASK = {"id": "T-1", "title": "ignored", "status": "pending", "criterion_ref": "C-1",
+                       "verify": "./scripts/verify-fast.sh", "depends_on": [], "attempts": 0,
+                       "evidence": None}
+_POLICY_VECTOR_CANONICAL = '{"criterion_ref":"C-1","depends_on":[],"id":"T-1","verify":"./scripts/verify-fast.sh"}'
+_POLICY_VECTOR_DIGEST = "cb28ced25ec75a20a153f821e7335464a1734eb781146a9d36a598e713caa9fe"
+
+
+def test_documented_policy_digest_vector_matches_the_implementation():
+    from loop.chain import canonical_json
+    assert canonical_json(verification_policy(_POLICY_VECTOR_TASK)) == _POLICY_VECTOR_CANONICAL
+    assert verification_policy_digest(_POLICY_VECTOR_TASK) == _POLICY_VECTOR_DIGEST
+    doc = (Path(__file__).resolve().parent.parent / "reference" / "repo-os-contract.md").read_text(encoding="utf-8")
+    assert _POLICY_VECTOR_DIGEST in doc and _POLICY_VECTOR_CANONICAL in doc
