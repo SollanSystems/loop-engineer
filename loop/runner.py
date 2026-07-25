@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import emit
-from .events import EVENT_SCHEMA_ID, EventStoreOperationalError, SQLiteEventStore, validate_event
+from .events import (EventRowDecodeError, EventStoreOperationalError, SQLiteEventStore,
+                    read_event_rows, validate_event)
 from .paths import resolve_loop_paths
-from .reducer import reduce_events
-from .runtime import RuntimeStoreError
+from .reducer import ChainBreakError, reduce_events
+from .runtime import RuntimeStoreError, _read_only_connect
 
 
 class RunnerError(RuntimeError):
@@ -118,16 +119,12 @@ def _load_tasks(paths: Any) -> list[dict]:
 
 
 def _projection(target: str | Path, mode: str | None) -> tuple[str, dict[str, Any]]:
-    """Read with SQLite's immutable URI so failed attempts create no WAL files."""
+    """Read through the shared read-only connector so a dispatch attempt writes nothing."""
     path = resolve_loop_paths(target).loop_dir / "events.db"
     if not path.exists():
         raise RuntimeStoreError("missing_store", f"event store does not exist: {path}")
-    # A clean, closed WAL store can be read immutable without creating SQLite
-    # sidecars.  A post-COMMIT crash deliberately leaves a WAL sidecar, which
-    # must be read in ordinary read-only mode so its durable frames are replayed.
-    query = "mode=ro" if path.with_name(path.name + "-wal").exists() else "mode=ro&immutable=1"
     try:
-        conn = sqlite3.connect(f"{path.absolute().as_uri()}?{query}", uri=True)
+        conn = _read_only_connect(path)
         try:
             run_ids = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
             if not run_ids:
@@ -135,14 +132,12 @@ def _projection(target: str | Path, mode: str | None) -> tuple[str, dict[str, An
             if len(run_ids) != 1:
                 raise RuntimeStoreError("ambiguous_run_id", f"event store has ambiguous run_id values: {path}")
             run_id = run_ids[0][0]
-            rows = conn.execute("SELECT run_id, sequence, event_id, type, actor, causation_id, correlation_id, ts, payload, artifact_hashes FROM events WHERE run_id = ? ORDER BY sequence ASC", (run_id,)).fetchall()
+            events = read_event_rows(conn, run_id)
         finally:
             conn.close()
     except sqlite3.DatabaseError as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
-    try:
-        events = [{"schema": EVENT_SCHEMA_ID, "run_id": row[0], "sequence": row[1], "event_id": row[2], "type": row[3], "actor": row[4], "causation_id": row[5], "correlation_id": row[6], "ts": row[7], "payload": json.loads(row[8]), "artifact_hashes": json.loads(row[9])} for row in rows]
-    except (TypeError, json.JSONDecodeError) as exc:
+    except EventRowDecodeError as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
     for event in events:
         report = validate_event(event, mode=mode)
@@ -150,6 +145,8 @@ def _projection(target: str | Path, mode: str | None) -> tuple[str, dict[str, An
             raise RuntimeStoreError("invalid_event", f"event store contains invalid event: {report['issues']}")
     try:
         return run_id, reduce_events(events)
+    except ChainBreakError as exc:
+        raise RuntimeStoreError("event_chain_broken", str(exc)) from exc
     except ValueError as exc:
         raise RuntimeStoreError("invalid_event_stream", str(exc)) from exc
 

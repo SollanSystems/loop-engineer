@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from .completion import CompletionPolicyError, criteria_satisfy_completion
 from .contract import ContractIssue
-from .events import EVENT_SCHEMA_ID, EVENT_TYPES, validate_event
+from .events import EVENT_SCHEMA_ID, EVENT_TYPES, EventRowDecodeError, read_event_rows, validate_event
 from .paths import resolve_loop_paths
-from .reducer import EventReplayError, reduce_events
+from .reducer import ChainBreakError, EventReplayError, reduce_events
+
+_T = TypeVar("_T")
 
 
 class RuntimeStoreError(RuntimeError):
@@ -26,46 +29,49 @@ def _store_path(target: str | Path) -> Path:
     return resolve_loop_paths(target).loop_dir / "events.db"
 
 
+def _read_only_connect(path: Path) -> sqlite3.Connection:
+    """Read-only connection; immutable when no WAL sidecar exists so reads leave no files.
+
+    immutable=1 assumes no concurrent writer. A live append can surface as
+    SQLITE_CORRUPT, so a failed immutable open is retried once as plain mode=ro
+    before the caller may conclude corruption: real corruption fails both.
+    """
+    uri = path.absolute().as_uri()
+    if not path.with_name(path.name + "-wal").exists():
+        try:
+            return sqlite3.connect(f"{uri}?mode=ro&immutable=1", uri=True)
+        except sqlite3.DatabaseError:
+            pass
+    return sqlite3.connect(f"{uri}?mode=ro", uri=True)
+
+
+def _read_store(path: Path, read: Callable[[sqlite3.Connection], _T]) -> _T:
+    """Run one read; a lost immutable=1 race retries plainly before counting as corruption."""
+    try:
+        with closing(_read_only_connect(path)) as conn:
+            return read(conn)
+    except sqlite3.DatabaseError:
+        pass
+    try:
+        with closing(sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)) as conn:
+            return read(conn)
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
+
+
 def _read_events_readonly(path: Path, run_id: str) -> list[dict[str, Any]]:
     """Read the EventStore row shape without invoking its write-capable connector."""
     try:
-        conn = sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)
-        try:
-            rows = conn.execute(
-                "SELECT run_id, sequence, event_id, type, actor, causation_id, "
-                "correlation_id, ts, payload, artifact_hashes FROM events "
-                "WHERE run_id = ? ORDER BY sequence ASC",
-                (run_id,),
-            ).fetchall()
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError as exc:
-        raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
-    try:
-        return [
-            {
-                "schema": EVENT_SCHEMA_ID, "run_id": row[0], "sequence": row[1],
-                "event_id": row[2], "type": row[3], "actor": row[4],
-                "causation_id": row[5], "correlation_id": row[6], "ts": row[7],
-                "payload": json.loads(row[8]), "artifact_hashes": json.loads(row[9]),
-            }
-            for row in rows
-        ]
-    except (TypeError, json.JSONDecodeError) as exc:
+        return _read_store(path, lambda conn: read_event_rows(conn, run_id))
+    except EventRowDecodeError as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
 
 
 def _discover_run_id(path: Path) -> str:
     if not path.exists():
         raise RuntimeStoreError("missing_store", f"event store does not exist: {path}")
-    try:
-        conn = sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)
-        try:
-            rows = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError as exc:
-        raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
+    rows = _read_store(
+        path, lambda conn: conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall())
     if not rows:
         raise RuntimeStoreError("empty_store", f"event store is empty: {path}")
     if len(rows) != 1:
@@ -83,7 +89,11 @@ def _events(target: str | Path, mode: str | None) -> tuple[Path, str, list[dict[
     validation: dict[str, Any] | None = None
     for event in events:
         validation = validate_event(event, mode=mode)
-    assert validation is not None
+        if not validation["ok"]:
+            raise RuntimeStoreError("invalid_event",
+                                    f"event store contains invalid event: {validation['issues']}")
+    if validation is None:
+        raise RuntimeStoreError("empty_store", f"event store is empty: {path}")
     return path, run_id, events, validation
 
 
@@ -125,11 +135,16 @@ def status_report(target: str | Path, *, mode: str | None = None) -> dict[str, A
     """Project a single event stream and reconcile it with live state.json."""
     _, run_id, events, validation = _events(target, mode)
     paths = resolve_loop_paths(target)
+    degraded = {"state": None, "iteration_id": None, "active_task": None, "terminal": None,
+                "chain_head": None, "unchained_prefix": 0}
     try:
         projection = reduce_events(events)
         divergence = _state_divergence(paths, projection)
+    except ChainBreakError as exc:
+        projection = degraded
+        divergence = [ContractIssue("event_chain_broken", str(exc))]
     except EventReplayError as exc:
-        projection = {"state": None, "iteration_id": None, "active_task": None, "terminal": None}
+        projection = degraded
         divergence = [ContractIssue("illegal_event_sequence", str(exc))]
     return {
         "ok": not divergence,
@@ -138,6 +153,8 @@ def status_report(target: str | Path, *, mode: str | None = None) -> dict[str, A
         "state": projection["state"], "iteration_id": projection["iteration_id"],
         "active_task": projection["active_task"], "terminal": projection["terminal"],
         "completion_satisfied": _completion_satisfied(projection["terminal"]),
+        "chain_head": projection.get("chain_head"),
+        "unchained_prefix": projection.get("unchained_prefix", 0),
         "state_json_agrees": not divergence, "divergence": divergence,
     }
 
@@ -181,6 +198,9 @@ def replay_report(target: str | Path, *, mode: str | None = None) -> dict[str, A
         projection = first
         if not deterministic:
             findings.append(ContractIssue("nondeterministic_replay", "two event folds produced different projections"))
+    except ChainBreakError as exc:
+        legal_sequence = False
+        findings.append(ContractIssue("event_chain_broken", str(exc)))
     except EventReplayError as exc:
         legal_sequence = False
         findings.append(ContractIssue("illegal_event_sequence", str(exc)))
@@ -193,6 +213,8 @@ def replay_report(target: str | Path, *, mode: str | None = None) -> dict[str, A
         "validation_mode": validation["validation_mode"], "requested_mode": validation["requested_mode"],
         "schemas_checked": [EVENT_SCHEMA_ID], "run_id": run_id, "event_count": len(events),
         "deterministic": deterministic, "legal_sequence": legal_sequence,
+        "chain_head": (projection or {}).get("chain_head"),
+        "unchained_prefix": (projection or {}).get("unchained_prefix", 0),
         "terminal_desync": terminal_desync, "findings": findings,
     }
 
@@ -220,4 +242,5 @@ def event_consistency_issues(
         "state_json_agrees": status["state_json_agrees"],
         "deterministic": replay["deterministic"],
         "legal_sequence": replay["legal_sequence"],
+        "chain": {"head": status["chain_head"], "unchained_prefix": status["unchained_prefix"]},
     }, issues
