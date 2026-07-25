@@ -15,9 +15,9 @@ def test_readme_has_no_stale_seven_skills():
     assert "all 9 skills" in readme
 
 
-def test_plugin_version_is_0_9_0():
+def test_plugin_version_is_0_10_0():
     plugin = json.loads(_read(".claude-plugin/plugin.json"))
-    assert plugin["version"] == "0.9.0"
+    assert plugin["version"] == "0.10.0"
 
 
 def test_pyproject_version_matches_plugin():
@@ -28,8 +28,18 @@ def test_pyproject_version_matches_plugin():
     assert match.group(1) == plugin["version"]
 
 
+def test_readme_version_surfaces_match_plugin_version():
+    version = json.loads(_read(".claude-plugin/plugin.json"))["version"]
+    readme = _read("README.md")
+    assert f"release-{version}-blue" in readme, "README release badge is stale"
+    assert f"SollanSystems/loop-engineer@v{version}" in readme, "README action pin is stale"
+    assert f"- Version: `{version}`" in readme, "README Status version is stale"
+    assert f"- Release tag: `v{version}`" in readme, "README Status release tag is stale"
+
+
 def test_changelog_has_current_and_historical_entries():
     changelog = _read("CHANGELOG.md")
+    assert "## 0.10.0" in changelog
     assert "## 0.9.0" in changelog
     assert "## 0.8.0" in changelog
     assert "## 0.7.0" in changelog

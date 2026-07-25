@@ -14,6 +14,90 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## 0.10.0 — 2026-07-25
+
+**The hash-linked event chain.** Every `loop-engineer/event@1` row now carries
+`prev_event_hash` and `event_hash` — a sha256 over a canonical JSON preimage of
+the event's hashed fields, `prev_event_hash` among them. Canonical form is
+`json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+allow_nan=False)` encoded UTF-8, pinned normatively with conformance vectors in
+`reference/repo-os-contract.md` §16. The digest is computed **inside the store on
+append**, never supplied by a caller, and the deterministic reducer re-verifies
+each link as it folds: a spliced, reordered, or edited row raises
+`ChainBreakError` and stops the fold instead of projecting a plausible state.
+`loop.chain` is stdlib-only and imports no other module of this package, so
+`verify_chain()` re-verifies an exported event stream without the store code
+(#82).
+
+**Store generations and `loop migrate`.** A fresh store stamps `PRAGMA
+user_version = 2` and widens the `events` DDL with `event_hash TEXT NOT NULL`.
+`loop migrate` is the only store-upgrade path — explicit, idempotent, and
+non-rewriting: it adds the two columns and stamps `user_version = 2`, but never
+backfills hashes onto existing rows, because the append-only `BEFORE UPDATE`
+trigger forbids it. Pre-migration rows therefore stay an **unchained prefix**
+that doctor reports rather than elides, and the first post-migration append is a
+chain genesis.
+
+**Anchored doctor gate.** `loop doctor` gains an `event_store.chain` block
+(`head`, `unchained_prefix`) and a `--expect-chain-head SHA256` flag — also
+accepted by `validate` and `verify` — that fails the gate unless the store's head
+equals an externally remembered anchor. Four new issue codes: `event_chain_broken`
+(a link does not verify), `chain_anchor_mismatch` (the head differs from the
+supplied anchor, or an anchor was supplied with no readable store),
+`missing_event_store` (`events.db` is absent while SQLite sidecars remain — the
+store was deleted), and `chain_columns_missing` (the store still declares
+generation 2 with its chain columns gone — the lazy downgrade). The composite
+action publishes the observed head as a `chain-head` output on every run and
+optionally enforces one through an `expect-chain-head` input.
+
+**Integrity boundary.** The chain is **tamper-evident relative to an anchored
+head** — a detection property, not a prevention one, and scoped to the anchor.
+It detects splicing, reordering, an edit that does not recompute every downstream
+digest, and byte corruption of any hashed field; given an anchor it detects *any*
+divergence from the head that anchor names, including tail truncation, which is
+otherwise invisible because deleting trailing events leaves a shorter but
+internally valid chain. It does **not** detect a full in-workspace recompute, a
+chain-column downgrade that also resets `user_version`, deletion of the store when
+no sidecars remain and no anchor is supplied, well-formed lies (nothing in the
+chain judges whether a payload is true), or anything in a never-migrated prefix.
+And the window stays open at the head: "An anchor certifies the log only up to the
+anchored head. Everything appended after the last externally-read anchor —
+including a rewrite of the suffix — is unverified until the next anchor is read
+and remembered outside the workspace. The chain narrows the tampering window; it
+does not close it." `scripts/test_adversarial_chain.py` pins both sides — the
+attacks that are caught and four `PINNED LIMITATION` cases that are not. The full
+boundary, with the anchor's trust assumptions, is normative in
+`reference/repo-os-contract.md` §16.
+
+**Stricter reads.** `status`, `replay`, and `doctor` now **reject** a store
+containing any schema-invalid event, raising `invalid_event` instead of silently
+folding past it as they did in 0.9.0. Validation runs before the fold, so a tamper
+that also violates `event@1` surfaces as `invalid_event` rather than
+`event_chain_broken`.
+
+**Sidecars resolved.** Read verbs no longer leave `-wal`/`-shm` files beside a
+clean `.loop/events.db` — the 0.9.0 known limitation recorded below. #80 landed
+the first half, opening read-only connections with `immutable=1` when no WAL
+sidecar exists; this release completes it with a two-stage retry so that a lost
+`immutable=1` race against a live writer retries plainly as `mode=ro` before
+anything may be called corruption, the same read path in the runner, and a
+zero-carve-out tripwire proving every read verb leaves a clean store
+byte-identical on both store generations.
+
+**Compatibility, both directions.** Pre-0.10.0 *readers* can read a v2 store:
+their explicit ten-column `SELECT` is unaffected by the two added columns.
+Pre-0.10.0 *writers* must not append to a chained store. A fresh v0.10.0 store
+refuses such an append at the database, because `event_hash` is `NOT NULL`; a
+*migrated* store keeps its columns nullable, so the append succeeds and produces a
+permanent, unrepairable `event_chain_broken` — the row cannot be re-linked
+afterwards, since `UPDATE` is trigger-blocked. Pin your `loop-engineer` and action
+version per store.
+
+Test baseline: 1021 passed / 16 skipped with the `yaml`+`schemas` extras;
+951 / 86 in structural-fallback mode (PyYAML only). Both measured in a fresh
+worktree; a live checkout reads +2 passed / −2 skipped through two
+checked-when-present tests.
+
 ## 0.9.0 — 2026-07-17
 
 **The event-sourced kernel.** The contract gains a durable runtime substrate:
@@ -71,7 +155,7 @@ least-privilege workflow permissions (#46, #47).
 `-wal`/`-shm` sidecars next to `.loop/events.db` (read-only connections
 recreate them and cannot checkpoint on close). Store content is never
 mutated, but tree-byte-identity checks over a store-backed workspace will
-notice them.
+notice them. *(Resolved in 0.10.0 — see "Sidecars resolved" above.)*
 
 Test baseline: 933 passed / 16 skipped with the `yaml`+`schemas` extras;
 864 / 85 in structural-fallback mode (PyYAML only).
