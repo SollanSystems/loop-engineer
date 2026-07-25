@@ -294,6 +294,15 @@ def test_in_row_json_corruption_fails_doctor_without_traceback(tmp_path):
     assert not report["ok"] and report["event_store"]["error_code"] == "corrupt_store"
 
 
+def test_run_on_in_row_json_corruption_reports_corrupt_store(tmp_path):
+    """Without runner's EventRowDecodeError clause dispatch_once leaks a bare ValueError."""
+    ws = _chained_workspace(tmp_path)
+    _tamper_payload(ws, "not json")
+    with pytest.raises(RuntimeStoreError) as excinfo:
+        dispatch_once(ws)
+    assert excinfo.value.code == "corrupt_store"
+
+
 def test_read_verbs_leave_no_wal_sidecars_on_clean_store(tmp_path):
     ws = _chained_workspace(tmp_path)
     status_report(ws)

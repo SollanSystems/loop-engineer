@@ -288,6 +288,28 @@ def test_runner_append_translates_operational_error_to_typed_store_error(tmp_pat
                       actor="loop.run")
 
 
+def test_runner_read_path_retries_plain_mode_ro_before_declaring_corruption(tmp_path, monkeypatch):
+    """Design change D4 on the run/simulate surface: one lost race is not corruption."""
+    from loop import runner
+
+    workspace = tmp_path / "workspace"
+    (workspace / ".loop").mkdir(parents=True)
+    _drifted_store(workspace / ".loop" / "events.db")
+    seen = []
+    real_connect = sqlite3.connect
+
+    def record(*args, **kwargs):
+        seen.append(args[0])
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", record)
+    with pytest.raises(RuntimeStoreError) as excinfo:
+        runner.dispatch_once(workspace)
+    assert excinfo.value.code == "corrupt_store"      # real corruption fails BOTH attempts
+    assert len(seen) == 2 and all("mode=ro" in uri for uri in seen)
+    assert "immutable=1" in seen[0] and "immutable=1" not in seen[1]
+
+
 @pytest.mark.parametrize("command,extra", [("run", []), ("pause", ["--reason", "drift probe"])])
 def test_cli_refuses_a_schema_drifted_store_without_a_traceback(tmp_path, command, extra):
     workspace = tmp_path / "workspace"

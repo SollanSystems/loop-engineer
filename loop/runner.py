@@ -15,7 +15,7 @@ from .events import (EventRowDecodeError, EventStoreOperationalError, SQLiteEven
                     read_event_rows, validate_event)
 from .paths import resolve_loop_paths
 from .reducer import ChainBreakError, reduce_events
-from .runtime import RuntimeStoreError, _read_only_connect
+from .runtime import RuntimeStoreError, _read_store
 
 
 class RunnerError(RuntimeError):
@@ -119,24 +119,23 @@ def _load_tasks(paths: Any) -> list[dict]:
 
 
 def _projection(target: str | Path, mode: str | None) -> tuple[str, dict[str, Any]]:
-    """Read through the shared read-only connector so a dispatch attempt writes nothing."""
+    """Read through the shared read path so a dispatch attempt writes nothing and never
+    mistakes a lost race with a live appender for a corrupt store (design change D4)."""
     path = resolve_loop_paths(target).loop_dir / "events.db"
     if not path.exists():
         raise RuntimeStoreError("missing_store", f"event store does not exist: {path}")
+
+    def read_stream(conn: sqlite3.Connection) -> tuple[str, list[dict[str, Any]]]:
+        run_ids = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
+        if not run_ids:
+            raise RuntimeStoreError("empty_store", f"event store is empty: {path}")
+        if len(run_ids) != 1:
+            raise RuntimeStoreError("ambiguous_run_id", f"event store has ambiguous run_id values: {path}")
+        run_id = run_ids[0][0]
+        return run_id, read_event_rows(conn, run_id)
+
     try:
-        conn = _read_only_connect(path)
-        try:
-            run_ids = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
-            if not run_ids:
-                raise RuntimeStoreError("empty_store", f"event store is empty: {path}")
-            if len(run_ids) != 1:
-                raise RuntimeStoreError("ambiguous_run_id", f"event store has ambiguous run_id values: {path}")
-            run_id = run_ids[0][0]
-            events = read_event_rows(conn, run_id)
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError as exc:
-        raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
+        run_id, events = _read_store(path, read_stream)
     except EventRowDecodeError as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
     for event in events:
