@@ -205,7 +205,7 @@ def _structural_validate_event(data: dict[str, Any]) -> list[str]:
     for field in ("prev_event_hash", "event_hash"):
         if field in data and data[field] is not None and (
                 not isinstance(data[field], str)
-                or re.search(r"^[0-9a-f]{64}$", data[field]) is None):
+                or re.fullmatch(r"[0-9a-f]{64}", data[field]) is None):
             issues.append(f"{field} must be null or a 64-character lowercase hex sha256")
     hashes = data.get("artifact_hashes", [])
     if not isinstance(hashes, list):
@@ -214,7 +214,7 @@ def _structural_validate_event(data: dict[str, Any]) -> list[str]:
         for item in hashes:
             path = item.get("path") if isinstance(item, dict) else None
             digest = item.get("sha256") if isinstance(item, dict) else None
-            if not isinstance(path, str) or not path or not isinstance(digest, str) or re.search(r"^[0-9a-f]{64}$", digest) is None:
+            if not isinstance(path, str) or not path or not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 issues.append("artifact_hashes entries need non-empty string path + 64-character lowercase hex sha256")
                 break
     if isinstance(data.get("type"), str):
@@ -309,6 +309,12 @@ class SQLiteEventStore:
             conn.execute("PRAGMA user_version = 2")
         return conn
 
+    def _open(self) -> sqlite3.Connection:
+        try:
+            return self._connect()
+        except sqlite3.Error as exc:
+            raise EventStoreOperationalError(f"event store cannot be opened: {exc}") from exc
+
     def append(self, run_id: str, event_type: str, payload: Mapping[str, Any], *, actor: str,
                event_id: str | None = None, causation_id: str | None = None,
                correlation_id: str | None = None,
@@ -325,7 +331,7 @@ class SQLiteEventStore:
         report = _validate_event_dict(record)
         if not report["ok"]:
             raise EventValidationError(f"event failed validation: {report['issues']}")
-        conn = self._connect()
+        conn = self._open()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT MAX(sequence) FROM events WHERE run_id = ?", (run_id,)).fetchone()
@@ -359,9 +365,11 @@ class SQLiteEventStore:
                                  (record["run_id"], record["sequence"], record["event_id"], record["type"], record["actor"], record["causation_id"], record["correlation_id"], record["ts"], payload_json, hashes_json))
             except sqlite3.IntegrityError as exc:
                 conn.execute("ROLLBACK")
-                raise DuplicateEventError(record["event_id"]) from exc
+                if "UNIQUE" in str(exc) and "events.event_id" in str(exc):
+                    raise DuplicateEventError(record["event_id"]) from exc
+                raise EventStoreOperationalError(f"event store refused the append: {exc}") from exc
             conn.execute("COMMIT")
-        except sqlite3.OperationalError as exc:
+        except sqlite3.Error as exc:
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:
@@ -373,16 +381,20 @@ class SQLiteEventStore:
 
     def read(self, run_id: str, *, since_sequence: int | None = None) -> list[dict[str, Any]]:
         """Read the full stream for None, or events strictly after an integer cursor."""
-        conn = self._connect()
+        conn = self._open()
         try:
             return read_event_rows(conn, run_id, since_sequence=since_sequence)
+        except sqlite3.Error as exc:
+            raise EventStoreOperationalError(f"event store cannot be read: {exc}") from exc
         finally:
             conn.close()
 
     def latest_sequence(self, run_id: str) -> int | None:
-        conn = self._connect()
+        conn = self._open()
         try:
             row = conn.execute("SELECT MAX(sequence) FROM events WHERE run_id = ?", (run_id,)).fetchone()
+        except sqlite3.Error as exc:
+            raise EventStoreOperationalError(f"event store cannot be read: {exc}") from exc
         finally:
             conn.close()
         return row[0]
