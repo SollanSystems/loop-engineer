@@ -29,7 +29,8 @@ _TASK = {"id": "T-1", "title": "t", "status": "pending", "criterion_ref": "C-1",
          "verify": "./scripts/verify-fast.sh", "depends_on": [], "attempts": 0, "evidence": None}
 
 
-def _ws(tmp_path, *, records, bundle_text='{"outcome": "PASS", "passed": true}', tasks=(_TASK,)):
+def _ws(tmp_path, *, records=(), named_records=(),
+        bundle_text='{"outcome": "PASS", "passed": true}', tasks=(_TASK,)):
     target = tmp_path / "workspace"
     scaffold(target)
     (target / "TASKS.json").write_text(json.dumps(
@@ -44,6 +45,8 @@ def _ws(tmp_path, *, records, bundle_text='{"outcome": "PASS", "passed": true}',
     for iteration_id, record in records:
         (directory / f"evidence-iter{iteration_id}.json").write_text(
             json.dumps(record), encoding="utf-8")
+    for name, record in named_records:
+        (directory / name).write_text(json.dumps(record), encoding="utf-8")
     return target
 
 
@@ -103,6 +106,65 @@ def test_only_the_latest_record_per_task_is_compared(tmp_path):
     stale = _record(iteration_id=1, policy_digest="d" * 64)
     current = _record(iteration_id=2)
     target = _ws(tmp_path, records=[(1, stale), (2, current)])
+    assert "policy_digest_mismatch" not in _codes(doctor_report(target))
+
+
+# --- unnumbered records are ranked, never excluded ----------------------------
+#
+# The sweep used to `continue` on any record outside `evidence-iter<N>.json`, so a
+# task whose ONLY record carried no iteration id was never compared: move its
+# goalpost and doctor stayed ok with zero issues, while the identical record renamed
+# `evidence-iter9.json` fired. Being unnumbered was a way out of the comparison, and
+# §22 meanwhile claimed "the latest evidence record for a task" is compared. Latest
+# now RANKS the unnumbered below every numbered record (ties by filename) rather
+# than dropping them, so the only record for a task is always compared.
+
+
+def test_a_tasks_only_record_is_compared_even_when_it_is_unnumbered(tmp_path):
+    moved = dict(_TASK, verify="true")
+    target = _ws(tmp_path, named_records=[("evidence-hand.json", _record())], tasks=(moved,))
+    assert "policy_digest_mismatch" in _codes(doctor_report(target))
+
+
+def test_an_unnumbered_record_is_silent_when_its_goalpost_agrees(tmp_path):
+    """Positive control: ranking them in did not make every hand-written record a finding.
+
+    Scoped to the goalpost code — the fixture's numbered BUNDLE legitimately reports
+    ``missing_evidence_record`` (no ``evidence-iter1.json`` describes it), which is a
+    different check and not what this test is about.
+    """
+    target = _ws(tmp_path, named_records=[("evidence-hand.json", _record())])
+    assert "policy_digest_mismatch" not in _codes(doctor_report(target))
+
+
+def test_a_numbered_record_outranks_an_unnumbered_one_for_the_same_task(tmp_path):
+    """An unnumbered record carries no position in the run's order, so it can never be
+    the latest while a numbered record exists — the stale digest below is not compared."""
+    target = _ws(tmp_path,
+                 records=[(2, _record(iteration_id=2))],
+                 named_records=[("evidence-hand.json", _record(policy_digest="d" * 64))])
+    assert "policy_digest_mismatch" not in _codes(doctor_report(target))
+
+
+def test_unnumbered_records_tie_break_by_filename(tmp_path):
+    """With no ordering to appeal to, filename order is the deterministic tie-break —
+    the same rule the numbered path already used for equal iteration ids."""
+    target = _ws(tmp_path, named_records=[
+        ("evidence-a.json", _record(policy_digest="d" * 64)),
+        ("evidence-b.json", _record()),
+    ])
+    assert "policy_digest_mismatch" not in _codes(doctor_report(target))
+    later_is_stale = _ws(tmp_path / "second", named_records=[
+        ("evidence-a.json", _record()),
+        ("evidence-b.json", _record(policy_digest="d" * 64)),
+    ])
+    assert "policy_digest_mismatch" in _codes(doctor_report(later_is_stale))
+
+
+def test_an_unnumbered_record_naming_an_unknown_task_is_still_not_compared(tmp_path):
+    """Decision 5 is untouched: a renamed or removed task is a replan, not a forgery."""
+    target = _ws(tmp_path, named_records=[
+        ("evidence-hand.json", _record(task_id="T-404", policy_digest="d" * 64))])
     assert "policy_digest_mismatch" not in _codes(doctor_report(target))
 
 

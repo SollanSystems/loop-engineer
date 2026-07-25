@@ -697,6 +697,11 @@ def _policy_digest_issues(
     Only the latest record backs the task's current claim; older records describe
     goalposts that were current when they were written, and comparing them would
     make every honest re-verification a permanent failure (repo-os-contract.md §17).
+    "Latest" orders numbered ``evidence-iter<N>.json`` records by iteration and ranks
+    every unnumbered record below all of them (ties by filename), so a task whose only
+    record carries no iteration id is still compared — being unnumbered is not a way
+    out of the comparison.
+
     A record naming a task that is no longer in TASKS.json is not compared at all —
     a renamed or removed task is a replan, not a forgery. A task that is present but
     cannot be canonicalized is reported rather than skipped: a comparison that cannot
@@ -708,20 +713,22 @@ def _policy_digest_issues(
     declared = tasks.get("tasks") if isinstance(tasks, dict) else None
     entries = {t["id"]: t for t in (declared if isinstance(declared, list) else [])
                if isinstance(t, dict) and isinstance(t.get("id"), str)}
-    latest: dict[str, tuple[int, Path, dict]] = {}
+    latest: dict[str, tuple[tuple[int, int, str], Path, dict]] = {}
     for iteration_id, record_path, data in records:
-        if not isinstance(iteration_id, int):
-            # A record outside the runner's evidence-iter<N>.json name carries no
-            # position in the run's order, so it can never be shown to be latest.
-            continue
         produced_by = data.get("produced_by")
         task_id = produced_by.get("task_id") if isinstance(produced_by, dict) else None
         if not isinstance(task_id, str) or task_id not in entries:
             continue
-        if task_id not in latest or (iteration_id, record_path.name) > (
-                latest[task_id][0], latest[task_id][1].name):
-            latest[task_id] = (iteration_id, record_path, data)
-    for task_id, (_iteration_id, record_path, data) in sorted(latest.items()):
+        # A record outside the runner's evidence-iter<N>.json name carries no position
+        # in the run's order, so it sorts BELOW every numbered record (ties by
+        # filename). Excluding it outright left a hole: the only record for a task is
+        # still that task's latest, and skipping it meant a moved goalpost went
+        # unreported for exactly the hand-written records most worth comparing.
+        rank = ((1, iteration_id, record_path.name) if isinstance(iteration_id, int)
+                else (0, 0, record_path.name))
+        if task_id not in latest or rank > latest[task_id][0]:
+            latest[task_id] = (rank, record_path, data)
+    for task_id, (_rank, record_path, data) in sorted(latest.items()):
         verified_by = data.get("verified_by")
         recorded = verified_by.get("policy_digest") if isinstance(verified_by, dict) else None
         if not isinstance(recorded, str):
