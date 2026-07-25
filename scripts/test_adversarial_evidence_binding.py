@@ -253,7 +253,9 @@ def test_a_full_rewrite_of_artifacts_and_store_is_not_caught_without_an_anchor_p
     new_sha = _rewrite_everything(workspace)
     # the forge is real, not a no-op: different bytes, and the chain now commits to them
     assert new_sha != before
-    assert bound_artifact_digests(workspace)[".loop/artifacts/verify-iter1.json"] == new_sha
+    # One digest, not a conflict set: the re-chain REPLACES the binding rather than
+    # appending a second one, which is exactly why this rewrite still verifies clean.
+    assert bound_artifact_digests(workspace)[".loop/artifacts/verify-iter1.json"] == (new_sha,)
     assert json.loads(_bundle(workspace).read_text(encoding="utf-8"))["forged"] is True
     report = doctor_report(workspace)
     assert report["ok"] is True and report["issues"] == []

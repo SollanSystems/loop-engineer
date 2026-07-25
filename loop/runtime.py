@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import sqlite3
@@ -340,22 +339,35 @@ def _bound_evidence_issues(target: str | Path, mode: str | None) -> list[dict[st
     Driven by what each event DECLARES: a legacy event carries an empty
     artifact_hashes list and is silent by construction, because the append-only
     triggers make a retroactive binding impossible (repo-os-contract.md #22).
+
+    A declared path is attacker-nameable — event@1 constrains it only to a non-empty
+    string, and the chain covers a binding rather than vouching for it. Every path is
+    therefore containment-checked BEFORE anything is opened and hashed under a cap
+    (``loop.evidence.hash_bound_artifact``); an escaping path is reported as
+    ``bound_evidence_escape``, never read.
     """
+    from .evidence import hash_bound_artifact
+
     _, _run_id, events, _validation = _events(target, mode)
     workspace = resolve_loop_paths(target).workspace
     issues: list[dict[str, Any]] = []
     for event in events:
         for entry in event.get("artifact_hashes") or []:
-            path = workspace / entry["path"]
-            try:
-                blob = path.read_bytes()
-            except OSError:
+            code, detail = hash_bound_artifact(workspace, entry["path"])
+            if code == "escape":
+                issues.append(ContractIssue(
+                    "bound_evidence_escape",
+                    f"event {event['event_id']} (sequence {event['sequence']}) bound "
+                    f"{entry['path']!r}, which {detail} — a bound path outside the "
+                    f"workspace is a finding, not something to read"))
+                continue
+            if code == "unreadable":
                 issues.append(ContractIssue(
                     "missing_bound_evidence",
                     f"event {event['event_id']} (sequence {event['sequence']}) bound "
-                    f"{entry['path']} into the chain but it is absent or unreadable"))
+                    f"{entry['path']} into the chain but it {detail}"))
                 continue
-            actual = hashlib.sha256(blob).hexdigest()
+            actual = detail
             if actual != entry["sha256"]:
                 issues.append(ContractIssue(
                     "evidence_chain_mismatch",
@@ -366,8 +378,20 @@ def _bound_evidence_issues(target: str | Path, mode: str | None) -> list[dict[st
     return issues
 
 
-def bound_artifact_digests(target: str | Path, mode: str | None = None) -> dict[str, str] | None:
-    """{workspace-relative POSIX path: sha256} for every artifact any event bound.
+def bound_artifact_digests(target: str | Path,
+                           mode: str | None = None) -> dict[str, tuple[str, ...]] | None:
+    """{workspace-relative POSIX path: every DISTINCT sha256 an event bound it at}.
+
+    Conflict-aware by construction. A dict-comprehension keyed on path would collapse
+    repeat bindings LAST-WINS, which is not a summary but a laundering channel: an
+    append-only forge that re-binds a tampered path at its new digest would look bound
+    to this write-time view while ``_bound_evidence_issues`` — which checks PER EVENT —
+    still reports ``evidence_chain_mismatch`` on the same tree. Returning the full
+    conflict set keeps the two views in agreement on every tree; the strict bar refuses
+    a path carrying more than one digest, because ambiguous is not proof.
+
+    Digests are in first-bound order and de-duplicated, so the ordinary case (the same
+    path bound repeatedly at the same bytes) stays a one-element tuple.
 
     None means there is no event store, and the caller MUST degrade explicitly and say
     so (decision 14) rather than treat absence as satisfaction. An empty dict means a
@@ -377,5 +401,10 @@ def bound_artifact_digests(target: str | Path, mode: str | None = None) -> dict[
     if not (resolve_loop_paths(target).loop_dir / "events.db").is_file():
         return None
     _, _run_id, events, _validation = _events(target, mode)
-    return {entry["path"]: entry["sha256"]
-            for event in events for entry in event.get("artifact_hashes") or []}
+    digests: dict[str, list[str]] = {}
+    for event in events:
+        for entry in event.get("artifact_hashes") or []:
+            seen = digests.setdefault(entry["path"], [])
+            if entry["sha256"] not in seen:
+                seen.append(entry["sha256"])
+    return {path: tuple(seen) for path, seen in digests.items()}

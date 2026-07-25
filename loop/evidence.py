@@ -25,7 +25,7 @@ import json
 import os
 import re
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from .contract import ContractIssue, _resolve_requested_mode, _schemas_dir
@@ -242,3 +242,85 @@ def verify_evidence(evidence: Mapping[str, Any], *, workspace_root: str | Path) 
 def artifact_object_path(workspace_root: str | Path, sha256: str) -> Path:
     """Return evidence@1's content-addressed artifact location without I/O."""
     return Path(workspace_root) / ".loop" / "artifacts" / "objects" / sha256[:2] / sha256
+
+
+#: A chain-bound path is attacker-nameable — any event may declare any string. A gate
+#: must therefore never perform an unbounded read on one. 64 MiB is far above any
+#: artifact this kernel writes and far below "read whatever is at the other end".
+MAX_BOUND_ARTIFACT_BYTES = 64 * 1024 * 1024
+
+_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+
+
+def _lexical_escape(rel: object) -> str | None:
+    """Why this declared path is not workspace-relative — decided with ZERO I/O.
+
+    Runs before anything is opened, so an escaping path is reported rather than read.
+    """
+    if not isinstance(rel, str) or not rel.strip():
+        return "is not a non-empty path"
+    if "\\" in rel:
+        return "contains a backslash, which is not a workspace-relative POSIX path"
+    if _DRIVE_PREFIX.match(rel):
+        return "names a drive letter"
+    pure = PurePosixPath(rel)
+    if pure.is_absolute():
+        return "is an absolute path"
+    if ".." in pure.parts:
+        return "traverses out of the workspace with '..'"
+    return None
+
+
+def hash_bound_artifact(
+    workspace_root: str | Path, rel: object, *, max_bytes: int = MAX_BOUND_ARTIFACT_BYTES,
+) -> tuple[str, str]:
+    """Containment-check a chain-bound path, then stream-hash it under a cap.
+
+    Returns ``(code, detail)``:
+
+    * ``("ok", <hex digest>)``;
+    * ``("escape", <why>)`` — the path is not inside the workspace. For a lexical
+      escape NOTHING on disk was touched; a symlinked escape is caught after
+      resolution, exactly as ``verify_evidence`` catches it;
+    * ``("unreadable", <why>)`` — contained, but its bytes could not be hashed:
+      absent, not a regular file (so ``/dev/zero`` and friends are refused rather
+      than read forever), or larger than ``max_bytes``.
+    """
+    escape = _lexical_escape(rel)
+    if escape is not None:
+        return "escape", escape
+    root = Path(workspace_root)
+    try:
+        resolved = (root / str(rel)).resolve(strict=True)
+    except (OSError, ValueError, RuntimeError):
+        return "unreadable", "is absent or cannot be resolved"
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError:
+        return "escape", "resolves outside the workspace (a symlinked component)"
+    try:
+        fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return "unreadable", "is absent or cannot be opened"
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            return "unreadable", "is not a regular file"
+        if file_stat.st_size > max_bytes:
+            return "unreadable", (f"is {file_stat.st_size} bytes, above the {max_bytes}-byte "
+                                  f"bound-artifact read cap, so its digest was not computed")
+        digest = hashlib.sha256()
+        read = 0
+        with os.fdopen(os.dup(fd), "rb") as source:
+            while chunk := source.read(64 * 1024):
+                read += len(chunk)
+                if read > max_bytes:
+                    return "unreadable", (f"grew past the {max_bytes}-byte bound-artifact "
+                                          f"read cap while being hashed")
+                digest.update(chunk)
+    except OSError:
+        return "unreadable", "is absent or cannot be read"
+    finally:
+        os.close(fd)
+    return "ok", digest.hexdigest()

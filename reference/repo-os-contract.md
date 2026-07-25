@@ -1303,11 +1303,11 @@ only finding is the anchor. A present, readable store adds
 "state_json_agrees", "deterministic", "legal_sequence", "chain"}`; any of
 `state_field_mismatch`, `desynced_terminal_window`, `terminal_state_mismatch`,
 `illegal_event_sequence`, `event_chain_broken`, `chain_columns_missing`,
-`evidence_chain_mismatch`, `missing_bound_evidence`, or
+`evidence_chain_mismatch`, `missing_bound_evidence`, `bound_evidence_escape`, or
 `chain_anchor_mismatch` fails doctor (`ok: false`). The findings that come from
 the composed verbs keep the identical issue code those verbs already use;
-`chain_columns_missing`, `evidence_chain_mismatch` and `missing_bound_evidence`
-are doctor's own store-gated checks, appended to the same list. A store that cannot be read at
+`chain_columns_missing`, `evidence_chain_mismatch`, `missing_bound_evidence` and
+`bound_evidence_escape` are doctor's own store-gated checks, appended to the same list. A store that cannot be read at
 all — `corrupt_store`, `empty_store`, `invalid_event`, or `ambiguous_run_id` —
 also fails doctor rather than being silently skipped; `"event_store"` reports
 `{"present": true, "readable": false, "error_code": <code>}` in that case.
@@ -1340,7 +1340,8 @@ it is the honest statement of how much of the log the chain does not cover.
 | `self_verified_evidence` | A discovered evidence@1 record declares `produced_by.executor == verified_by.by` (strip+casefold) — the producer verified its own work. Enforces the independence rule of `reference/safety-and-approvals.md` §5, which was prose-only before v0.11.0. |
 | `missing_evidence_record` | A runner-written verify bundle `.loop/artifacts/verify-iter<N>.json` exists with no matching `.loop/evidence/evidence-iter<N>.json`. Residue of a removed provenance record, in the same family as `missing_event_store`. Fires only when a bundle is present, so an absent-everything contract stays byte-identical. |
 | `evidence_chain_mismatch` | An artifact whose digest an event bound into the hash chain no longer matches its bytes on disk. The message names the digest the chain committed and the digest found; the original bytes may still remain in the content-addressed object store at `.loop/artifacts/objects/<aa>/<sha256>`. |
-| `missing_bound_evidence` | An event bound an artifact path into the chain and that path is now absent or unreadable — a deleted bundle/record pair, a deleted object, or the sanctioned crash window between the durable append and the evidence write. Fires only for events that bound something: a legacy event binds nothing and is silent by construction. |
+| `missing_bound_evidence` | An event bound an artifact path into the chain and that path is now absent or unreadable — a deleted bundle/record pair, a deleted object, the sanctioned crash window between the durable append and the evidence write, or a path that resolves to something the gate refuses to read (a non-regular file such as a device or FIFO, or a file above the 64 MiB bound-artifact read cap). Fires only for events that bound something: a legacy event binds nothing and is silent by construction. |
+| `bound_evidence_escape` | An event bound a path that is not inside the workspace — absolute, drive-lettered, backslashed, `..`-traversing, or resolving outside through a symlinked component. `event@1` constrains `path` only to a non-empty string and the chain covers a binding rather than vouching for it, so the binding walk containment-checks every declared path **before** opening anything: an escaping path is reported, never read. |
 | `policy_digest_mismatch` | The **latest** evidence record for a task records a `policy_digest` that is not the live `TASKS.json` goalpost — the declared `verify`/`criterion_ref`/`depends_on`/`id` changed after the verification. Also fires when the live entry cannot be canonicalized at all, because a comparison that cannot run has not passed. Re-verify to record the current goalpost. |
 | `unverified_evidence_terminal` | A `Succeeded` terminal declaring `completion_policy.mode: all_required_verified_evidence` has an evidence entry that fails one of the mode's three checks: it is not a hash-verified evidence@1 record; or (when an event store exists) no event bound those bytes into the chain; or the record's `policy_digest` is not the live `TASKS.json` goalpost for the task it names. The message names which. An unreadable store is also a failure. In a contract with **no** event store the middle check is skipped — the mode's strength is store-dependent by construction (§17). |
 

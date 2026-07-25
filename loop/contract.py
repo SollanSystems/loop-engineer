@@ -837,7 +837,7 @@ def _verdict_failure(record: Mapping[str, Any], paths: LoopPaths) -> str | None:
 
 
 def _strict_evidence_failure(entry: object, paths: LoopPaths,
-                             bound: Mapping[str, str] | None) -> str | None:
+                             bound: Mapping[str, tuple[str, ...]] | None) -> str | None:
     """The ONE definition of the verified-evidence bar (plan decision 14).
 
     Returns ``None`` when the cited entry can back ``Succeeded``, otherwise a detail
@@ -847,9 +847,11 @@ def _strict_evidence_failure(entry: object, paths: LoopPaths,
        resolves inside the workspace and hashes to the digest it declares;
     2. verdict — the artifact it points at is a verify bundle that says PASS.  An
        authentic record of a FAILING verification is still not proof of success;
-    3. chain-boundness — some event bound this record's path AT its current bytes.
-       ``bound is None`` means there is no event store at all, and the sub-check is
-       skipped: the store-less writer-API path is a DOCUMENTED degradation, not a pass;
+    3. chain-boundness — some event bound this record's path AT its current bytes,
+       and at exactly ONE digest.  A path bound at two or more different digests is
+       ambiguous, and ambiguous is not proof.  ``bound is None`` means there is no
+       event store at all, and the sub-check is skipped: the store-less writer-API
+       path is a DOCUMENTED degradation, not a pass;
     4. goalpost agreement — when the record names a task still in TASKS.json, its
        recorded ``policy_digest`` equals the live one.  A goalpost that cannot even be
        computed is a FAILURE, not a skip: unestablished is not agreement (R007).
@@ -891,12 +893,18 @@ def _strict_evidence_failure(entry: object, paths: LoopPaths,
 
     if bound is not None:
         committed = bound.get(entry)
-        if committed is None:
+        if not committed:
             return ("is not bound into the event chain — no event committed this record's "
                     "digest, so no dispatch produced it")
+        if len(committed) > 1:
+            # Append-only forgery: a later ordinary event re-binds a tampered path at its
+            # new digest. Collapsing the bindings would let the writer accept a tree the
+            # doctor walk still reports, so an ambiguous binding is refused outright.
+            return (f"is bound at {len(committed)} different digests "
+                    f"({', '.join(committed)}) — an ambiguous binding is not proof")
         current = hashlib.sha256(blob).hexdigest()
-        if committed != current:
-            return (f"is bound at a different digest: the chain committed {committed}, "
+        if committed[0] != current:
+            return (f"is bound at a different digest: the chain committed {committed[0]}, "
                     f"the record now hashes to {current}")
 
     produced_by = record.get("produced_by")
