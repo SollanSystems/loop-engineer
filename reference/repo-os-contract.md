@@ -731,6 +731,16 @@ but all-or-nothing after the first chained event: once an event carries
 canonical preimage exactly, or the reference implementation hard-fails the
 store.
 
+**Resume rule (normative).** `reduce_events(events, initial=snapshot)` folds a
+suffix onto a caller-supplied projection, and the chain is anchored by that
+snapshot's `chain_head`. A snapshot that predates v0.10.0 has no `chain_head`
+key at all, so a suffix whose first event is chained with a non-null
+`prev_event_hash` has nothing to link against: that is refused as an
+`EventReplayError` naming the stale snapshot, never as a `ChainBreakError` —
+an honest resume is not a tamper report. Re-fold from sequence 0, or carry
+`chain_head` in the snapshot. A suffix that begins at a chain genesis
+(`prev_event_hash: null`), and a fully unchained suffix, resume unchanged.
+
 **Compatibility rule.** A pre-0.10.0 writer must not append to a chained
 store. A fresh v0.10.0 store refuses such an append at the database
 (`event_hash NOT NULL`); a migrated store cannot, and an unchained row
