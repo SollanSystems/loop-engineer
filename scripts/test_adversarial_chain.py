@@ -211,9 +211,15 @@ def test_full_rewrite_with_recompute_passes_without_anchor_pinned(tmp_path):
     unanchored = doctor_report(ws)
     assert "event_chain_broken" not in _codes(unanchored)        # PINNED LIMITATION
     assert _chain_block(unanchored)["head"] is not None
-    # the forge is complete: no projection check fires either, so nothing but the anchor is left
+    # the forge is complete: no projection check fires either, so nothing but the anchor is
+    # left. These are the event-store block's own flags, so ANY new event-store-layer
+    # detection flips the pin — an absence-of-known-codes assertion would not.
     assert not _codes(unanchored) & {"state_field_mismatch", "desynced_terminal_window",
                                      "terminal_state_mismatch"}
+    store_block = unanchored["event_store"]
+    assert store_block["state_json_agrees"] is True
+    assert store_block["deterministic"] is True
+    assert store_block["legal_sequence"] is True
 
     anchored = doctor_report(ws, expect_chain_head=original_head)
     assert "chain_anchor_mismatch" in _codes(anchored)           # the anchor is the control
