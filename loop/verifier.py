@@ -64,16 +64,19 @@ def verifier_code_digest(command: str | None, workspace: str | Path) -> tuple[st
         root = Path(workspace).resolve()
         candidate = Path(argv0)
         resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
-        # stat(), not Path.is_file(): pathlib swallows ENOENT/ENOTDIR/EBADF/ELOOP
-        # alike, so a symlink loop — a resolution this process could NOT complete —
-        # would be recorded as the confident "not_a_file". The errno keeps the two
-        # apart: only "there is definitively no regular file here" is not_a_file.
+        # stat(), not Path.is_file(): pathlib ignores ENOENT/ENOTDIR/EBADF/ELOOP
+        # alike, so on 3.13 — where resolve() returns a symlink loop unresolved
+        # rather than raising — is_file() would report that undeterminable case as
+        # the confident "not_a_file". The errno keeps the two apart.
         is_file = stat.S_ISREG(os.stat(resolved).st_mode)
     except (FileNotFoundError, NotADirectoryError, ValueError):
-        # ValueError is the embedded-NUL argv0: no such path can exist, and
-        # stat() raises it where the discarded Path.is_file() absorbed it.
+        # ValueError is an embedded NUL in argv0, raised by resolve() itself on
+        # every supported version: no such path can exist, so this is definite.
         return None, "not_a_file"
-    except OSError:
+    except (OSError, RuntimeError):
+        # RuntimeError is pathlib's symlink-loop signal, raised by resolve() on
+        # <=3.12; 3.13 surfaces the same ELOOP as an OSError from stat(). Both are
+        # "this process could not complete the resolution".
         return None, "unresolvable"
     if not is_file:
         return None, "not_a_file"
