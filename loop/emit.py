@@ -7,14 +7,16 @@ criterion) is enforced HERE, at write time, before doctor ever sees the file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from . import fsm
+from .chain import ChainHashError
 from .completion import (
     CompletionPolicyError,
     criteria_satisfy_completion,
@@ -27,8 +29,9 @@ from .contract import (
     _validate_terminal,
     _validation_mode,
 )
-from .paths import resolve_loop_paths
+from .paths import ARTIFACTS_DIR_NAME, EVIDENCE_DIR_NAME, resolve_loop_paths
 from .scaffold import scaffold
+from .verifier import criterion_partition, verification_policy_digest
 
 _ITERATION_OUTCOMES = (
     "task_passed",
@@ -397,3 +400,85 @@ def sync_state_to_projection(target: str | Path, projection: dict[str, Any]) -> 
     current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     _write_state(paths, current)
     return paths.state
+
+
+UNATTRIBUTED_EXECUTOR = "unattributed"
+DEFAULT_VERIFIER_IDENTITY = "loop.run"
+_EVIDENCE_SCHEMA_ID = "loop-engineer/evidence@1"
+
+
+def write_verify_evidence(
+    target: str | Path, *, run_id: str, iteration_id: int, task: Mapping[str, Any], passed: bool,
+    code_identity: Mapping[str, Any], summary: str = "", executor: str | None = None,
+    verifier_identity: str | None = None, attempt: int | None = None,
+) -> dict[str, Any]:
+    """Write one verify bundle and its hashed evidence@1 record.
+
+    ``code_identity`` is REQUIRED and is never derived here: only the caller knows
+    which verifier actually ran (see loop.verifier.executed_verifier_identity vs
+    injected_verifier_identity). Deriving it from ``task['verify']`` would record a
+    command that an injected verifier never executed.
+
+    The bundle is the artifact (metrics-compatible; carries verifier identity, the
+    verdict's source, and the DECLARED criterion partition); the record is the
+    schema-validated pointer that commits to the bundle's bytes. Identities are
+    recorded, never inferred: an unsupplied executor is the literal ``unattributed``
+    and an unsupplied attempt is ``null``.
+    """
+    paths = _require_contract(target)
+    iteration_id = _require_iteration_id(iteration_id)
+    try:
+        policy_digest = verification_policy_digest(task)
+    except ChainHashError as exc:
+        raise EmitError(f"task entry is not canonical-JSON serializable: {exc}") from exc
+
+    identity = {
+        "by": verifier_identity or DEFAULT_VERIFIER_IDENTITY,
+        "command": code_identity["command"],
+        "code_digest": code_identity["code_digest"],
+        "code_digest_basis": code_identity["code_digest_basis"],
+        "source": code_identity["source"],
+        "policy_digest": policy_digest,
+    }
+    bundle = {
+        "iteration_id": iteration_id,
+        "task": task.get("id"),
+        "outcome": "PASS" if passed else "FAIL",
+        "passed": bool(passed),
+        "summary": summary,
+        "verifier": identity,
+        "partition": criterion_partition(task),
+    }
+    bundle_path = paths.loop_dir / ARTIFACTS_DIR_NAME / f"verify-iter{iteration_id}.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_text = json.dumps(bundle, indent=2, sort_keys=True) + "\n"
+    # Staged under a name metrics does not rglob, so a failure before the record is
+    # written cannot leave an orphan green bundle for FCR to count.
+    staged = bundle_path.with_name(bundle_path.name + ".staged")
+    _atomic_write_text(staged, bundle_text)
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    record = {
+        "schema": _EVIDENCE_SCHEMA_ID,
+        "id": f"{run_id}:{iteration_id}:verify",
+        "kind": "verify-bundle",
+        "uri": bundle_path.relative_to(paths.workspace).as_posix(),
+        "sha256": hashlib.sha256(bundle_text.encode("utf-8")).hexdigest(),
+        "media_type": "application/json",
+        "created_at": now,
+        "produced_by": {"run_id": run_id, "task_id": task.get("id"), "attempt": attempt,
+                        "executor": executor or UNATTRIBUTED_EXECUTOR},
+        "verified_by": {"by": identity["by"], "at": now, "command": identity["command"],
+                        "code_digest": identity["code_digest"],
+                        "code_digest_basis": identity["code_digest_basis"],
+                        "policy_digest": identity["policy_digest"]},
+    }
+    record_path = paths.loop_dir / EVIDENCE_DIR_NAME / f"evidence-iter{iteration_id}.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _atomic_write_text(record_path, json.dumps(record, indent=2, sort_keys=True) + "\n")
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    os.replace(staged, bundle_path)
+    return {"bundle": bundle_path, "evidence": record_path, "sha256": record["sha256"]}
