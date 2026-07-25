@@ -24,7 +24,11 @@ ships, on disk and runnable today:
 - an **event-sourced runtime** — `run`, `status`, `replay`, `simulate`, and
   approve/pause/resume/cancel over an append-only SQLite event log
   (`.loop/events.db`), folded by a deterministic reducer that enforces the same
-  completion gate as the writers, with crash-safe single-step resume.
+  completion gate as the writers, with crash-safe single-step resume. Events are
+  hash-chained; `loop doctor --expect-chain-head` verifies the log against an
+  externally anchored head. The chain is tamper-evident **relative to an
+  anchor** — an adversary with workspace write access can rewrite an unanchored
+  log.
 
 ![The inspector scores a self-asserted DIY loop 0/weak, then the gate-backed example 90/strong — both runs live](docs/demo.gif)
 

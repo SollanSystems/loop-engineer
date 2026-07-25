@@ -450,3 +450,51 @@ def test_verify_chain_agrees_with_reducer(tmp_path, generation):
     report = verify_chain(events)
     assert report["head"] == projection["chain_head"]
     assert report["unchained_prefix"] == projection["unchained_prefix"]
+
+
+# --- documented conformance vectors (reference/repo-os-contract.md #16) -------
+# Literal records + literal digests. The digests are also asserted to appear in
+# the contract document, so the spec and the implementation cannot drift apart.
+
+_VECTOR_GENESIS = {
+    "schema": "loop-engineer/event@1", "run_id": "run-1", "sequence": 0,
+    "event_id": "e0", "type": "contract_opened", "actor": "operator",
+    "ts": "2026-07-24T00:00:00+00:00", "causation_id": None, "correlation_id": None,
+    "payload": {"workspace": "ws"}, "artifact_hashes": [], "prev_event_hash": None,
+}
+_DIGEST_GENESIS = "3ca65d4da7d87a98616441a86c6866ff39b5513ccd156d8526abfd6df7ec88a7"
+
+_VECTOR_SECOND = {
+    "schema": "loop-engineer/event@1", "run_id": "run-1", "sequence": 1,
+    "event_id": "e1", "type": "iteration_appended", "actor": "operator",
+    "ts": "2026-07-24T00:00:01+00:00", "causation_id": None, "correlation_id": None,
+    "payload": {"iteration_id": 1, "outcome": "task_passed", "state": "execute-task"},
+    "artifact_hashes": [], "prev_event_hash": _DIGEST_GENESIS,
+}
+_DIGEST_SECOND = "bb40984d1b98bda565d93dd90a39ea212be999078a66cf013f37cbed650c155d"
+
+_VECTOR_UNICODE = {
+    "schema": "loop-engineer/event@1", "run_id": "run-1", "sequence": 2,
+    "event_id": "e2", "type": "receipt_appended", "actor": "operator",
+    "ts": "2026-07-24T00:00:02+00:00", "causation_id": None, "correlation_id": None,
+    "payload": {"iteration_id": 1, "note": "café — naïve ✅", "summary": "日本語"},
+    "artifact_hashes": [], "prev_event_hash": _DIGEST_SECOND,
+}
+_DIGEST_UNICODE = "0d0413aa0a1903a46a802f98f0a28abafd10ca09d5e312622f729482cfc40a19"
+
+_CONFORMANCE_VECTORS = (
+    ("genesis", _VECTOR_GENESIS, _DIGEST_GENESIS),
+    ("second", _VECTOR_SECOND, _DIGEST_SECOND),
+    ("unicode-payload", _VECTOR_UNICODE, _DIGEST_UNICODE),
+)
+
+
+def test_documented_conformance_vectors():
+    """The three vectors published in the contract are exactly what chain.py computes,
+    and the published digests are still literally in the document."""
+    contract = (_ROOT / "reference" / "repo-os-contract.md").read_text(encoding="utf-8")
+    for name, record, digest in _CONFORMANCE_VECTORS:
+        assert compute_event_hash(record) == digest, f"vector {name} drifted from chain.py"
+        assert digest in contract, f"vector {name} digest is not documented in the contract"
+    chained = [dict(record, event_hash=digest) for _, record, digest in _CONFORMANCE_VECTORS]
+    assert verify_chain(chained, expected_head=_DIGEST_UNICODE)["ok"] is True
