@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -29,7 +30,7 @@ from .contract import (
     _validate_terminal,
     _validation_mode,
 )
-from .evidence import EVIDENCE_SCHEMA_ID
+from .evidence import EVIDENCE_SCHEMA_ID, artifact_object_path, validate_evidence
 from .paths import ARTIFACTS_DIR_NAME, EVIDENCE_DIR_NAME, resolve_loop_paths
 from .scaffold import scaffold
 from .verifier import criterion_partition, verification_policy_digest
@@ -407,23 +408,36 @@ UNATTRIBUTED_EXECUTOR = "unattributed"
 DEFAULT_VERIFIER_IDENTITY = "loop.run"
 
 
-def write_verify_evidence(
+@dataclass(frozen=True)
+class BuiltEvidence:
+    """Every byte and digest of one verify write, computed without touching disk.
+
+    Separating the computation from the write lets a caller commit to the exact
+    artifact hashes BEFORE anything is placed, so the digests a durable event
+    carries and the bytes on disk cannot disagree.
+    """
+
+    bundle_path: Path
+    bundle_text: str
+    sha256: str
+    record_path: Path
+    record_text: str
+    record_sha256: str
+    object_path: Path
+    artifact_hashes: tuple[dict[str, str], ...]
+
+
+def build_verify_evidence(
     target: str | Path, *, run_id: str, iteration_id: int, task: Mapping[str, Any], passed: bool,
     code_identity: Mapping[str, Any], summary: str = "", executor: str | None = None,
     verifier_identity: str | None = None, attempt: int | None = None,
-) -> dict[str, Any]:
-    """Write one verify bundle and its hashed evidence@1 record.
+) -> BuiltEvidence:
+    """Render one verify bundle, its evidence@1 record, and their bound digests.
 
-    ``code_identity`` is REQUIRED and is never derived here: only the caller knows
-    which verifier actually ran (see loop.verifier.executed_verifier_identity vs
-    injected_verifier_identity). Deriving it from ``task['verify']`` would record a
-    command that an injected verifier never executed.
-
-    The bundle is the artifact (metrics-compatible; carries verifier identity, the
-    verdict's source, and the DECLARED criterion partition); the record is the
-    schema-validated pointer that commits to the bundle's bytes. Identities are
-    recorded, never inferred: an unsupplied executor is the literal ``unattributed``
-    and an unsupplied attempt is ``null``.
+    Pure with respect to the workspace: it reads the contract and writes nothing.
+    The record it renders is byte-identical to what ``write_verify_evidence``
+    places, and is schema-validated here so an invalid record is refused before
+    any file exists rather than after.
     """
     paths = _require_contract(target)
     iteration_id = _require_iteration_id(iteration_id)
@@ -450,12 +464,8 @@ def write_verify_evidence(
         "partition": criterion_partition(task),
     }
     bundle_path = paths.loop_dir / ARTIFACTS_DIR_NAME / f"verify-iter{iteration_id}.json"
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_text = json.dumps(bundle, indent=2, sort_keys=True) + "\n"
-    # Staged under a name metrics does not rglob, so a failure before the record is
-    # written cannot leave an orphan green bundle for FCR to count.
-    staged = bundle_path.with_name(bundle_path.name + ".staged")
-    _atomic_write_text(staged, bundle_text)
+    bundle_sha256 = hashlib.sha256(bundle_text.encode("utf-8")).hexdigest()
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     record = {
@@ -463,7 +473,7 @@ def write_verify_evidence(
         "id": f"{run_id}:{iteration_id}:verify",
         "kind": "verify-bundle",
         "uri": bundle_path.relative_to(paths.workspace).as_posix(),
-        "sha256": hashlib.sha256(bundle_text.encode("utf-8")).hexdigest(),
+        "sha256": bundle_sha256,
         "media_type": "application/json",
         "created_at": now,
         "produced_by": {"run_id": run_id, "task_id": task.get("id"), "attempt": attempt,
@@ -473,12 +483,82 @@ def write_verify_evidence(
                         "code_digest_basis": identity["code_digest_basis"],
                         "policy_digest": identity["policy_digest"]},
     }
+    validation = validate_evidence(record, mode="basic")
+    if not validation["ok"]:
+        raise EmitError(f"evidence record failed schema validation: {validation['issues']}")
+
     record_path = paths.loop_dir / EVIDENCE_DIR_NAME / f"evidence-iter{iteration_id}.json"
-    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_text = json.dumps(record, indent=2, sort_keys=True) + "\n"
+    record_sha256 = hashlib.sha256(record_text.encode("utf-8")).hexdigest()
+    object_path = artifact_object_path(paths.workspace, bundle_sha256)
+    artifact_hashes = tuple(
+        {"path": path.relative_to(paths.workspace).as_posix(), "sha256": digest}
+        for path, digest in ((bundle_path, bundle_sha256), (record_path, record_sha256),
+                             (object_path, bundle_sha256))
+    )
+    return BuiltEvidence(
+        bundle_path=bundle_path, bundle_text=bundle_text, sha256=bundle_sha256,
+        record_path=record_path, record_text=record_text, record_sha256=record_sha256,
+        object_path=object_path, artifact_hashes=artifact_hashes,
+    )
+
+
+def write_verify_evidence(
+    target: str | Path, *, run_id: str, iteration_id: int, task: Mapping[str, Any], passed: bool,
+    code_identity: Mapping[str, Any], summary: str = "", executor: str | None = None,
+    verifier_identity: str | None = None, attempt: int | None = None,
+    built: BuiltEvidence | None = None,
+) -> dict[str, Any]:
+    """Write one verify bundle, its content-addressed object, and its evidence@1 record.
+
+    ``code_identity`` is REQUIRED and is never derived here: only the caller knows
+    which verifier actually ran (see loop.verifier.executed_verifier_identity vs
+    injected_verifier_identity). Deriving it from ``task['verify']`` would record a
+    command that an injected verifier never executed.
+
+    The bundle is the artifact (metrics-compatible; carries verifier identity, the
+    verdict's source, and the DECLARED criterion partition); the record is the
+    schema-validated pointer that commits to the bundle's bytes. Identities are
+    recorded, never inferred: an unsupplied executor is the literal ``unattributed``
+    and an unsupplied attempt is ``null``.
+
+    ``built`` lets a caller that already rendered the write place exactly those
+    bytes, so the digests it committed to elsewhere describe what landed.
+    """
+    if built is None:
+        built = build_verify_evidence(
+            target, run_id=run_id, iteration_id=iteration_id, task=task, passed=passed,
+            code_identity=code_identity, summary=summary, executor=executor,
+            verifier_identity=verifier_identity, attempt=attempt,
+        )
+
+    # The object is placed FIRST and never replaced: it is the recovery copy the
+    # evidence record's digest still resolves to after the mutable bundle path is
+    # overwritten.
     try:
-        _atomic_write_text(record_path, json.dumps(record, indent=2, sort_keys=True) + "\n")
+        built.object_path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_create_text(built.object_path, built.bundle_text)
+    except FileExistsError:
+        existing = hashlib.sha256(built.object_path.read_bytes()).hexdigest()
+        if existing != built.sha256:
+            raise EmitError(
+                f"object store holds different bytes for {built.sha256}: refusing to overwrite "
+                f"a content-addressed object (found {existing})")
+    except OSError as exc:
+        raise EmitError(f"object store write failed at {built.object_path}: {exc}") from exc
+
+    built.bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    # Staged under a name metrics does not rglob, so a failure before the record is
+    # written cannot leave an orphan green bundle for FCR to count.
+    staged = built.bundle_path.with_name(built.bundle_path.name + ".staged")
+    _atomic_write_text(staged, built.bundle_text)
+
+    built.record_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _atomic_write_text(built.record_path, built.record_text)
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
-    os.replace(staged, bundle_path)
-    return {"bundle": bundle_path, "evidence": record_path, "sha256": record["sha256"]}
+    os.replace(staged, built.bundle_path)
+    return {"bundle": built.bundle_path, "evidence": built.record_path,
+            "sha256": built.sha256, "object": built.object_path}
