@@ -67,6 +67,20 @@ def test_code_digest_says_unresolvable_when_resolution_raises(tmp_path):
     assert verifier_code_digest("./a.sh", tmp_path) == (None, "unresolvable")
 
 
+def test_code_digest_says_unresolvable_when_the_WORKSPACE_ROOT_cannot_be_resolved(tmp_path):
+    """The workspace root is resolved inside the SAME try as argv[0], and must stay there.
+
+    Both interpreter behaviours land on `unresolvable`: on <=3.12 `Path.resolve()` raises
+    pathlib's RuntimeError for a symlink loop, while 3.13 returns the loop unresolved and
+    `os.stat` raises ELOOP as an OSError. Narrowing that except boundary to argv[0] alone
+    is exactly how Slice 2's Task-1 Critical was born, so the root variant is pinned too.
+    """
+    root, other = tmp_path / "root-a", tmp_path / "root-b"
+    root.symlink_to(other)
+    other.symlink_to(root)  # ELOOP on resolving the workspace root itself
+    assert verifier_code_digest("./scripts/verify-fast.sh", root) == (None, "unresolvable")
+
+
 def test_code_digest_is_null_and_explained_when_the_file_cannot_be_read(tmp_path, monkeypatch):
     _script(tmp_path, "scripts/verify-fast.sh")
     monkeypatch.setattr(verifier, "_digest_file", lambda path: None)
