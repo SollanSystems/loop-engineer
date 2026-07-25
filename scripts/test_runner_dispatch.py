@@ -216,9 +216,6 @@ def test_run_cli_accepts_executor_and_records_it(tmp_path):
     assert result.returncode == 0 and _record(workspace)["produced_by"]["executor"] == "worker-a"
 
 
-@pytest.mark.xfail(strict=True, reason="doctor does not discover .loop/evidence/*.json yet: the "
-                                       "self_verified_evidence finding is wired in the doctor-discovery "
-                                       "slice. Delete this marker there — strict=True makes it XPASS loudly.")
 def test_run_cli_verifier_identity_makes_the_finding_reachable(tmp_path):
     """Without this flag verified_by.by is always 'loop.run' and the kernel's own
     write path could never trip self_verified_evidence."""
