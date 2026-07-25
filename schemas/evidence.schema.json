@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/evidence@1",
   "title": "Loop Engineer Evidence @1",
-  "description": "A hashed evidence record with artifact provenance. It is standalone in v1; see reference/repo-os-contract.md #17.",
+  "description": "A hashed evidence record with artifact provenance. loop doctor discovers and validates records from the declared location .loop/evidence/*.json; it does not yet hash-verify the artifacts they reference. See reference/repo-os-contract.md #17.",
   "type": "object",
   "required": ["schema", "id", "kind", "uri", "sha256", "media_type", "produced_by", "created_at"],
   "properties": {
@@ -28,7 +28,20 @@
       "default": null,
       "properties": {
         "by": {"type": "string", "minLength": 1},
-        "at": {"type": "string", "minLength": 1, "description": "ISO-8601 timestamp."}
+        "at": {"type": "string", "minLength": 1, "description": "ISO-8601 timestamp."},
+        "command": {"type": ["string", "null"], "default": null,
+                    "description": "The declared verify command that was executed; null when no declared command ran."},
+        "code_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "maxLength": 64, "default": null,
+                        "description": "sha256 of argv[0]'s file when it is a workspace file; null otherwise."},
+        "code_digest_basis": {"type": ["string", "null"],
+                              "enum": ["workspace_file", "path_lookup", "outside_workspace",
+                                       "not_a_file", "unresolvable", "unreadable",
+                                       "unparseable_command", "empty_command",
+                                       "injected_verifier", null],
+                              "default": null,
+                              "description": "Why code_digest is what it is. Always explains a null."},
+        "policy_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "maxLength": 64, "default": null,
+                          "description": "sha256 of the canonical JSON of the declared goalpost (repo-os-contract §17)."}
       },
       "required": ["by", "at"],
       "additionalProperties": true

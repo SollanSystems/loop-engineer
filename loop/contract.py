@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from . import fsm
 from .completion import (
@@ -11,7 +12,7 @@ from .completion import (
     normalize_completion_policy,
     unmet_required_criteria,
 )
-from .paths import LoopPaths, resolve_loop_paths
+from .paths import ARTIFACTS_DIR_NAME, EVIDENCE_DIR_NAME, LoopPaths, resolve_loop_paths
 
 TERMINAL_STATES = (
     "Succeeded",
@@ -565,6 +566,7 @@ _RECORD_SCHEMA_IDS = (
     ("repair", "loop-engineer/repair@1"),
     ("rollout", "loop-engineer/rollout@1"),
     ("receipt", "loop-engineer/receipt@1"),
+    ("evidence", "loop-engineer/evidence@1"),
 )
 
 
@@ -632,9 +634,86 @@ def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) 
         _validate_record(data, schema_key, path, mode, issues)
 
 
+_RUNNER_BUNDLE_RE = re.compile(r"verify-iter([0-9]+)\.json")
+
+
+def _self_verified(record: Mapping[str, Any]) -> bool:
+    """True when a record DECLARES that its producer also verified it.
+
+    Comparison is strip+casefold: it closes trivial case evasion with no realistic
+    false positive. A genuine rename still evades — this surfaces DECLARED
+    self-verification, it does not prove independence
+    (reference/safety-and-approvals.md §5).
+    """
+    produced_by, verified_by = record.get("produced_by"), record.get("verified_by")
+    if not isinstance(produced_by, dict) or not isinstance(verified_by, dict):
+        return False
+    executor, verifier = produced_by.get("executor"), verified_by.get("by")
+    if not isinstance(executor, str) or not isinstance(verifier, str):
+        return False
+    normalized = executor.strip().casefold()
+    return bool(normalized) and normalized == verifier.strip().casefold()
+
+
+def _orphan_bundle_issues(paths: LoopPaths, issues: list[dict]) -> None:
+    """A runner-written bundle with no matching record is detectable residue.
+
+    Mirrors the shipped `missing_event_store` tripwire (repo-os-contract §22): the
+    check fires ONLY when a bundle is present, so absent-everything stays
+    byte-identical. Scoped to the runner's own `verify-iter<N>.json` name, so the
+    shipped example bundles (`verify-T1.json`, `verify-T1-iter1.json`) never trip it.
+    Deleting BOTH files remains undetectable — the honest residual, pinned by name.
+    """
+    artifacts_dir = paths.loop_dir / ARTIFACTS_DIR_NAME
+    if not artifacts_dir.is_dir():
+        return
+    for bundle_path in sorted(artifacts_dir.glob("verify-iter*.json")):
+        match = _RUNNER_BUNDLE_RE.fullmatch(bundle_path.name)
+        if match is None:
+            continue
+        record_path = paths.loop_dir / EVIDENCE_DIR_NAME / f"evidence-iter{match.group(1)}.json"
+        if not record_path.is_file():
+            issues.append(ContractIssue(
+                "missing_evidence_record",
+                f"{bundle_path.name} has no matching evidence record at "
+                f".loop/{EVIDENCE_DIR_NAME}/{record_path.name} — the bundle's provenance "
+                f"record is absent or was removed",
+                bundle_path))
+
+
+def _validate_evidence_records(paths: LoopPaths, mode: str, issues: list[dict]) -> bool:
+    """Validate declared evidence@1 records and surface declared self-verification.
+
+    Declared location: `.loop/evidence/*.json` (repo-os-contract.md §17). An absent
+    directory is a no-op, so a contract with no evidence produces a byte-identical
+    report — the same rule §22 pins for an absent event store.
+    """
+    from .evidence import evidence_issues  # local: loop.evidence imports this module
+
+    _orphan_bundle_issues(paths, issues)
+    evidence_dir = paths.loop_dir / EVIDENCE_DIR_NAME
+    if not evidence_dir.is_dir():
+        return False
+    checked = False
+    for record_path in sorted(evidence_dir.glob("*.json")):
+        data = _read_json(record_path, issues)
+        if data is None:
+            continue
+        checked = True
+        for issue in evidence_issues(data, resolved_mode=mode):
+            issues.append(ContractIssue(issue["code"], f"{record_path.name}: {issue['message']}", record_path))
+        if _self_verified(data):
+            issues.append(ContractIssue(
+                "self_verified_evidence",
+                f"{record_path.name}: produced_by.executor == verified_by.by "
+                f"({data['produced_by']['executor']!r}) — the producer declares it verified its own work",
+                record_path))
+    return checked
+
+
 def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) -> set[str]:
     """Validate record files that are present; return the set of record schema
-    keys actually checked (``repair``/``rollout``/``receipt``) so ``doctor`` can
+    keys actually checked (``repair``/``rollout``/``receipt``/``evidence``) so ``doctor`` can
     report them under ``schemas_checked`` instead of under-counting its coverage."""
     checked: set[str] = set()
     repair_dir = paths.loop_dir / "repair"
@@ -654,6 +733,8 @@ def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) 
         for receipt_path in sorted(receipts_dir.glob("*.jsonl")):
             _validate_jsonl(receipt_path, "receipt", mode, issues)
             checked.add("receipt")
+    if _validate_evidence_records(paths, mode, issues):
+        checked.add("evidence")
     return checked
 
 

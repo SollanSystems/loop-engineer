@@ -4,6 +4,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
+# Declared .loop/ subdirectory names (reference/repo-os-contract.md §1). Defined here,
+# the lowest module both the writer and the validator already import, so the literal
+# never forks between loop.emit and loop.contract.
+ARTIFACTS_DIR_NAME = "artifacts"
+EVIDENCE_DIR_NAME = "evidence"
+
+
 @dataclass(frozen=True)
 class LoopPaths:
     """Resolved filesystem paths for one loop contract instance."""

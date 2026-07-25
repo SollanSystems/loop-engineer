@@ -96,6 +96,8 @@ Operational consequences inside [[loop-run]]:
 
 This is why two structural rules from [[loop-repair]] are load-bearing safety rules, not style preferences: **no editing the tests to make them pass** and **no widening scope to dodge a failing check.** The verifier must remain an *independent* signal; the moment the agent under test can also move the goalposts, the success signal is worthless. Detection is reinforced by the deterministic, in-repo nature of the verification layer (it runs the contract's `scripts/verify-*` gate — optionally `/verify-slice` / `/verify-milestone`, see `reference/eval-suite.md` — rather than a self-graded model claim) and by treating verifier/test/fixture/spec files as a protected set whose modification during a run is itself a gaming signal.
 
+Since v0.11.0 this invariant has a machine check: `loop doctor` reports `self_verified_evidence` when an evidence@1 record declares that its producer also verified it (`reference/repo-os-contract.md` §17). The check surfaces *declared* self-verification — a worker that writes a false verifier name, or that rewrites the record afterwards, is not caught, which is why the protected-file and canary rules above remain load-bearing.
+
 ---
 
 ## 6. Anti-cheat canaries

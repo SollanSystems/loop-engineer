@@ -20,7 +20,11 @@
           "verify": { "type": "string", "minLength": 1 },
           "depends_on": { "type": "array", "items": { "type": "string" } },
           "attempts": { "type": "integer", "minimum": 0 },
-          "evidence": { "type": ["string", "array", "null"], "items": { "type": "string" } }
+          "evidence": { "type": ["string", "array", "null"], "items": { "type": "string" } },
+          "visible_criteria": {"type": ["array", "null"], "items": {"type": "string"}, "default": null,
+                               "description": "Criterion refs the verifier may see (repo-os-contract §17)."},
+          "holdout_criteria": {"type": ["array", "null"], "items": {"type": "string"}, "default": null,
+                               "description": "Criterion refs held back from the verifier (repo-os-contract §17)."}
         },
         "additionalProperties": true
       }

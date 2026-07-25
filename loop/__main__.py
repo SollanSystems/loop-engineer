@@ -76,6 +76,10 @@ options:
                 (doctor/validate/verify) fail unless the event store's chain head
                 is exactly this 64-character lowercase hex hash. A missing,
                 unreadable, unchained, or diverged store fails the gate.
+  --executor ID           (run) record this identity as produced_by.executor on the
+                          run's evidence records; unset records "unattributed".
+  --verifier-identity ID  (run) record this identity as verified_by.by; unset records
+                          "loop.run". Equal to --executor => self_verified_evidence.
   --baseline    (metrics only) write docs/metrics-baseline.json over a gate-backed
                 run; exits non-zero and writes nothing otherwise.
   -h, --help    Show this help and exit.
@@ -265,6 +269,29 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE, file=sys.stderr)
         return 2
 
+    executor = verifier_identity = None
+    if command == "run":
+        for flag, slot in (("--executor", "executor"), ("--verifier-identity", "verifier_identity")):
+            try:
+                value, argv = _extract_value_flag(argv, flag)
+            except ValueError as exc:
+                print(f"{command}: {exc}", file=sys.stderr)
+                return 2
+            if value is not None and not value.strip():
+                print(f"{command}: {flag} must be a non-empty identity", file=sys.stderr)
+                return 2
+            if slot == "executor":
+                executor = value
+            else:
+                verifier_identity = value
+    else:
+        # Same reason as the --expect-chain-head guard above: there is no generic
+        # unknown-flag guard, so scaffold would CREATE a directory named after the flag.
+        for flag in ("--executor", "--verifier-identity"):
+            if any(a == flag or a.startswith(f"{flag}=") for a in argv):
+                print(f"{command}: {flag} is only valid for run", file=sys.stderr)
+                return 2
+
     decision = resume_target = reason = note = None
     if command in {"approve", "pause", "resume", "cancel"}:
         try:
@@ -375,7 +402,8 @@ def main(argv: list[str] | None = None) -> int:
         from .runner import RunnerError, dispatch_once
 
         try:
-            return _print_json(dispatch_once(target, mode=mode))
+            return _print_json(dispatch_once(target, mode=mode, executor=executor,
+                                             verifier_identity=verifier_identity))
         except (RunnerError, RuntimeStoreError, ValidationModeError) as exc:
             print(f"run: {exc}", file=sys.stderr)
             return 2

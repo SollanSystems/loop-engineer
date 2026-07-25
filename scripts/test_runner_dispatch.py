@@ -11,8 +11,10 @@ from pathlib import Path
 import pytest
 
 from loop import emit
+from loop.contract import doctor_report
 from loop.events import SQLiteEventStore, SequenceConflictError
-from loop.runner import NotReadyError, VerifyOutcome, VerifierNotImplementedError, dispatch_once, select_next_task
+from loop.runner import (NotReadyError, RunnerError, VerifyOutcome, VerifierNotImplementedError,
+                         dispatch_once, select_next_task)
 from loop.runtime import replay_report
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -127,3 +129,111 @@ def test_run_nonexistent_target_gives_actionable_error_exit_2(tmp_path):
 def test_run_cli_default_verifier_not_implemented_exits_2_no_traceback(tmp_path):
     w, _ = _ws(tmp_path, [{**_task("T-1"), "verify": ""}]); r = _cli("run", str(w))
     assert r.returncode == 2 and "no verify command declared" in r.stderr and r.stdout == "" and "Traceback" not in r.stderr
+
+
+def _verify_ws(tmp_path, verify="./scripts/verify-fast.sh"):
+    workspace, store = _ws(tmp_path, [{**_task("T-1"), "verify": verify}])
+    script = workspace / "scripts" / "verify-fast.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    return workspace, store
+
+
+def _bundle(workspace, n=5):
+    return json.loads((workspace / ".loop" / "artifacts" / f"verify-iter{n}.json").read_text())
+
+
+def _record(workspace, n=5):
+    return json.loads((workspace / ".loop" / "evidence" / f"evidence-iter{n}.json").read_text())
+
+
+def test_dispatch_with_the_declared_verifier_records_a_workspace_file_digest(tmp_path):
+    """Only the path that ACTUALLY executes ./scripts/verify-fast.sh may hash it."""
+    workspace, _ = _verify_ws(tmp_path)
+    result = dispatch_once(workspace)  # no injected verifier -> the declared command runs
+    record = _record(workspace)
+    assert _bundle(workspace)["outcome"] == "PASS"
+    assert record["verified_by"]["command"] == "./scripts/verify-fast.sh"
+    assert record["verified_by"]["code_digest_basis"] == "workspace_file"
+    assert record["verified_by"]["code_digest"] == hashlib.sha256(
+        (workspace / "scripts" / "verify-fast.sh").read_bytes()).hexdigest()
+    assert result["evidence"].endswith("evidence-iter5.json")
+
+
+def test_dispatch_with_an_injected_verifier_records_no_fabricated_identity(tmp_path):
+    """The declared command never ran, so command/digest are null with an explicit basis."""
+    workspace, _ = _verify_ws(tmp_path)
+    dispatch_once(workspace, verifier=_pass)
+    record = _record(workspace)
+    assert record["verified_by"]["command"] is None
+    assert record["verified_by"]["code_digest"] is None
+    assert record["verified_by"]["code_digest_basis"] == "injected_verifier"
+    assert _bundle(workspace)["verifier"]["source"] == "injected_callable"
+
+
+def test_dispatch_once_writes_a_red_bundle_for_a_failing_task(tmp_path):
+    workspace, _ = _verify_ws(tmp_path)
+    dispatch_once(workspace, verifier=lambda task, root: VerifyOutcome(False, "boom"))
+    assert _bundle(workspace)["passed"] is False and _bundle(workspace)["summary"] == "boom"
+
+
+def test_dispatch_once_records_the_supplied_executor(tmp_path):
+    workspace, _ = _verify_ws(tmp_path)
+    dispatch_once(workspace, verifier=_pass, executor="worker-a")
+    record = _record(workspace)
+    assert record["produced_by"]["executor"] == "worker-a" and record["verified_by"]["by"] == "loop.run"
+
+
+def test_attempt_counts_durable_prior_iterations_for_this_task(tmp_path):
+    """Derived from the event log, not from the never-incremented TASKS.json `attempts`."""
+    workspace, _ = _verify_ws(tmp_path)
+    dispatch_once(workspace, verifier=lambda task, root: VerifyOutcome(False, "red"))
+    assert _record(workspace, 5)["produced_by"]["attempt"] == 1
+    dispatch_once(workspace, verifier=lambda task, root: VerifyOutcome(False, "red again"))
+    assert _record(workspace, 6)["produced_by"]["attempt"] == 2
+
+
+def test_terminal_dispatch_writes_no_verify_bundle(tmp_path):
+    workspace, _ = _ws(tmp_path, [_task("T-1", status="done")])
+    assert dispatch_once(workspace, verifier=_pass)["action"] == "terminal_written"
+    assert not (workspace / ".loop" / "evidence").exists()
+
+
+def test_evidence_write_failure_after_a_committed_event_is_loud(tmp_path, monkeypatch):
+    workspace, store = _verify_ws(tmp_path)
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(emit, "write_verify_evidence", boom)
+    with pytest.raises(RunnerError, match="committed"):
+        dispatch_once(workspace, verifier=_pass)
+    assert len(store.read("run-1")) == 6  # the event IS durable; the failure is reported, not hidden
+
+
+def test_run_cli_accepts_executor_and_records_it(tmp_path):
+    workspace, _ = _verify_ws(tmp_path, verify="true")
+    result = _cli("run", "--executor", "worker-a", str(workspace))
+    assert result.returncode == 0 and _record(workspace)["produced_by"]["executor"] == "worker-a"
+
+
+def test_run_cli_verifier_identity_makes_the_finding_reachable(tmp_path):
+    """Without this flag verified_by.by is always 'loop.run' and the kernel's own
+    write path could never trip self_verified_evidence."""
+    workspace, _ = _verify_ws(tmp_path, verify="true")
+    result = _cli("run", "--executor", "solo", "--verifier-identity", "Solo", str(workspace))
+    assert result.returncode == 0
+    assert _record(workspace)["verified_by"]["by"] == "Solo"
+    assert "self_verified_evidence" in {i["code"] for i in doctor_report(workspace)["issues"]}
+
+
+def test_identity_flags_are_rejected_on_other_commands_and_create_nothing(tmp_path):
+    for flag in ("--executor", "--verifier-identity"):
+        target = tmp_path / f"fresh{flag}"
+        result = _cli("scaffold", flag, "worker-a", str(target))
+        assert result.returncode == 2 and "only valid for run" in result.stderr and not target.exists()
+
+
+def test_run_help_documents_the_identity_flags():
+    result = _cli("--help")
+    assert result.returncode == 0
+    assert "--executor" in result.stdout and "--verifier-identity" in result.stdout
