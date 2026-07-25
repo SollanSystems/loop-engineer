@@ -5,8 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from . import emit, fsm, runner
-from .events import EventValidationError, SequenceConflictError, SQLiteEventStore
+from .events import (
+    EventStoreOperationalError,
+    EventValidationError,
+    SequenceConflictError,
+    SQLiteEventStore,
+)
 from .paths import resolve_loop_paths
+from .runtime import RuntimeStoreError
 
 
 class RunControlError(RuntimeError):
@@ -36,6 +42,8 @@ def _append_event(target: str | Path, run_id: str, projection: dict[str, Any], e
         raise RunControlConflictError("retry: another writer advanced the run") from exc
     except EventValidationError as exc:
         raise RunControlUsageError(str(exc)) from exc
+    except EventStoreOperationalError as exc:
+        raise RuntimeStoreError("event_store_unusable", str(exc)) from exc
 
 
 def approve_run(target: str | Path, *, decision: str, resume_target: str | None = None,

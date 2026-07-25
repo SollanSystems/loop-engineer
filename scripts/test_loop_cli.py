@@ -50,7 +50,7 @@ def test_short_help_flag_matches_long_help():
 
 def test_help_lists_every_command_with_a_description():
     out = _run("--help").stdout
-    for command in ("scaffold", "doctor", "validate", "verify", "inspect"):
+    for command in ("scaffold", "doctor", "validate", "verify", "inspect", "migrate"):
         assert command in out, f"help omits command {command!r}"
     # Per-command descriptions, not a bare command list.
     assert "Validate" in out or "validate the contract" in out.lower()

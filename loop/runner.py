@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import emit
-from .events import EVENT_SCHEMA_ID, SQLiteEventStore, validate_event
+from .events import (EventRowDecodeError, EventStoreOperationalError, SQLiteEventStore,
+                    read_event_rows, validate_event)
 from .paths import resolve_loop_paths
-from .reducer import reduce_events
-from .runtime import RuntimeStoreError
+from .reducer import ChainBreakError, reduce_events
+from .runtime import RuntimeStoreError, _read_store
 
 
 class RunnerError(RuntimeError):
@@ -98,6 +99,14 @@ def _subprocess_verifier(task: dict[str, Any], workspace: Path) -> VerifyOutcome
     return VerifyOutcome(proc.returncode == 0, summary=(proc.stdout + proc.stderr)[-2000:])
 
 
+def _store_append(store: SQLiteEventStore, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Keep an unusable store (schema drift, lock) inside the typed runtime family."""
+    try:
+        return store.append(*args, **kwargs)
+    except EventStoreOperationalError as exc:
+        raise RuntimeStoreError("event_store_unusable", str(exc)) from exc
+
+
 def _load_tasks(paths: Any) -> list[dict]:
     try:
         raw = json.loads(paths.tasks.read_text(encoding="utf-8"))
@@ -110,31 +119,24 @@ def _load_tasks(paths: Any) -> list[dict]:
 
 
 def _projection(target: str | Path, mode: str | None) -> tuple[str, dict[str, Any]]:
-    """Read with SQLite's immutable URI so failed attempts create no WAL files."""
+    """Read through the shared read path so a dispatch attempt writes nothing and never
+    mistakes a lost race with a live appender for a corrupt store (design change D4)."""
     path = resolve_loop_paths(target).loop_dir / "events.db"
     if not path.exists():
         raise RuntimeStoreError("missing_store", f"event store does not exist: {path}")
-    # A clean, closed WAL store can be read immutable without creating SQLite
-    # sidecars.  A post-COMMIT crash deliberately leaves a WAL sidecar, which
-    # must be read in ordinary read-only mode so its durable frames are replayed.
-    query = "mode=ro" if path.with_name(path.name + "-wal").exists() else "mode=ro&immutable=1"
+
+    def read_stream(conn: sqlite3.Connection) -> tuple[str, list[dict[str, Any]]]:
+        run_ids = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
+        if not run_ids:
+            raise RuntimeStoreError("empty_store", f"event store is empty: {path}")
+        if len(run_ids) != 1:
+            raise RuntimeStoreError("ambiguous_run_id", f"event store has ambiguous run_id values: {path}")
+        run_id = run_ids[0][0]
+        return run_id, read_event_rows(conn, run_id)
+
     try:
-        conn = sqlite3.connect(f"{path.absolute().as_uri()}?{query}", uri=True)
-        try:
-            run_ids = conn.execute("SELECT DISTINCT run_id FROM events ORDER BY run_id ASC").fetchall()
-            if not run_ids:
-                raise RuntimeStoreError("empty_store", f"event store is empty: {path}")
-            if len(run_ids) != 1:
-                raise RuntimeStoreError("ambiguous_run_id", f"event store has ambiguous run_id values: {path}")
-            run_id = run_ids[0][0]
-            rows = conn.execute("SELECT run_id, sequence, event_id, type, actor, causation_id, correlation_id, ts, payload, artifact_hashes FROM events WHERE run_id = ? ORDER BY sequence ASC", (run_id,)).fetchall()
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError as exc:
-        raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
-    try:
-        events = [{"schema": EVENT_SCHEMA_ID, "run_id": row[0], "sequence": row[1], "event_id": row[2], "type": row[3], "actor": row[4], "causation_id": row[5], "correlation_id": row[6], "ts": row[7], "payload": json.loads(row[8]), "artifact_hashes": json.loads(row[9])} for row in rows]
-    except (TypeError, json.JSONDecodeError) as exc:
+        run_id, events = _read_store(path, read_stream)
+    except EventRowDecodeError as exc:
         raise RuntimeStoreError("corrupt_store", f"cannot read event store: {exc}") from exc
     for event in events:
         report = validate_event(event, mode=mode)
@@ -142,6 +144,8 @@ def _projection(target: str | Path, mode: str | None) -> tuple[str, dict[str, An
             raise RuntimeStoreError("invalid_event", f"event store contains invalid event: {report['issues']}")
     try:
         return run_id, reduce_events(events)
+    except ChainBreakError as exc:
+        raise RuntimeStoreError("event_chain_broken", str(exc)) from exc
     except ValueError as exc:
         raise RuntimeStoreError("invalid_event_stream", str(exc)) from exc
 
@@ -220,8 +224,8 @@ def dispatch_once(
                 "completion_policy": {"mode": "all_required"}, "iteration_id": iteration_id,
             }
             store = SQLiteEventStore(paths.loop_dir / "events.db")
-            store.append(run_id, "terminal_written", payload, actor="loop.run",
-                         expected_sequence=projection["last_sequence"] + 1)
+            _store_append(store, run_id, "terminal_written", payload, actor="loop.run",
+                          expected_sequence=projection["last_sequence"] + 1)
             _reconcile_legacy_terminal(target, {**projection, "terminal": payload})
             return {"ok": True, "action": "terminal_written", "iteration_id": iteration_id, "run_id": run_id}
         return {"ok": False, "action": "blocked", "run_id": run_id}
@@ -237,8 +241,8 @@ def dispatch_once(
         "summary": outcome.summary,
     }
     store = SQLiteEventStore(paths.loop_dir / "events.db")
-    store.append(run_id, "iteration_appended", payload, actor="loop.run",
-                 expected_sequence=projection["last_sequence"] + 1)
+    _store_append(store, run_id, "iteration_appended", payload, actor="loop.run",
+                  expected_sequence=projection["last_sequence"] + 1)
     emit.append_iteration(target, iteration_id=iteration_id, outcome=payload["outcome"],
                           task_id=payload["task_id"], notes=payload["summary"])
     return {"ok": True, "action": "dispatched", "task_id": task["id"],

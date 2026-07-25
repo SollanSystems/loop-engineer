@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
-from . import fsm
+from . import chain, fsm
 from .completion import CompletionPolicyError, criteria_satisfy_completion, normalize_completion_policy
 from .contract import TERMINAL_STATES
 from .events import _structural_validate_event
@@ -14,10 +14,19 @@ class EventReplayError(ValueError):
     """An event stream is malformed or violates a replay domain invariant."""
 
 
+class ChainBreakError(EventReplayError):
+    """The event stream's hash link is broken or forged.
+
+    Not a gap detector: a mid-stream deletion surfaces as a sequence error, and a
+    truncated tail is caught only by an anchored head.
+    """
+
+
 def _empty_projection(run_id: str | None) -> dict[str, Any]:
     return {"run_id": run_id, "state": None, "iteration_id": None, "active_task": None,
             "terminal": None, "runlog_entries": [], "receipts": [], "superseded_history": [], "event_count": 0,
-            "last_sequence": None, "paused": False, "pause_reason": None, "pending_approval": None}
+            "last_sequence": None, "paused": False, "pause_reason": None, "pending_approval": None,
+            "chain_head": None, "unchained_prefix": 0}
 
 
 def _validate_terminal_payload_semantics(payload: Mapping[str, Any]) -> None:
@@ -80,6 +89,9 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
     expected_sequence = 0 if state["last_sequence"] is None else state["last_sequence"] + 1
     if event["sequence"] != expected_sequence:
         raise EventReplayError(f"non-monotonic sequence: expected {expected_sequence}, got {event['sequence']!r}")
+    issue = chain.link_issue(event, state["chain_head"])
+    if issue is not None:
+        raise ChainBreakError(f"event chain broken: {issue}")
     event_type = event["type"]
     if state["terminal"] is not None:
         if event_type != "terminal_superseded":
@@ -91,6 +103,10 @@ def _reduce_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, An
     if event_type != "contract_opened" and state["state"] is None:
         raise EventReplayError(f"{event_type} event before contract_opened")
     new_state = {**state, "run_id": run_id, "last_sequence": event["sequence"], "event_count": state["event_count"] + 1}
+    if event.get("event_hash") is None:
+        new_state["unchained_prefix"] = state["unchained_prefix"] + 1
+    else:
+        new_state["chain_head"] = {"sequence": event["sequence"], "event_hash": event["event_hash"]}
     payload = event["payload"]
     if event_type == "contract_opened":
         new_state["state"] = "intake"

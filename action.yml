@@ -25,6 +25,18 @@ inputs:
     description: "Token for the optional PR scorecard comment. Empty skips the comment."
     required: false
     default: ""
+  expect-chain-head:
+    description: >-
+      Fail the gate unless the store's chain head equals this 64-hex value (an
+      externally remembered anchor). Empty performs NO cross-run tamper
+      detection — the gate then only records the head for a later comparison.
+    required: false
+    default: ""
+
+outputs:
+  chain-head:
+    description: "Chain head event_hash observed by this gate run ('' when the store has no chained events)."
+    value: ${{ steps.chain-head.outputs.chain-head }}
 
 runs:
   using: "composite"
@@ -50,12 +62,17 @@ runs:
       shell: bash
       env:
         LOOP_PATH: "${{ inputs.path }}"
+        LOOP_EXPECT_HEAD: "${{ inputs.expect-chain-head }}"
       run: |
         # -eo pipefail (GitHub's bash default) makes a doctor failure fail the step
         # despite the tee. Then assert the strict validation path actually ran, so a
         # future packaging regression that drops the extras fails loudly here. The
         # check reads one fixed field from doctor's own JSON — no fragile parsing.
-        loop doctor "$LOOP_PATH" | tee "${RUNNER_TEMP}/doctor.json"
+        if [ -n "$LOOP_EXPECT_HEAD" ]; then
+          loop doctor --expect-chain-head "$LOOP_EXPECT_HEAD" "$LOOP_PATH" | tee "${RUNNER_TEMP}/doctor.json"
+        else
+          loop doctor "$LOOP_PATH" | tee "${RUNNER_TEMP}/doctor.json"
+        fi
         python - "${RUNNER_TEMP}/doctor.json" <<'PY'
         import json, sys
         mode = json.load(open(sys.argv[1])).get("validation_mode")
@@ -63,6 +80,30 @@ runs:
             print(f"::error::loop doctor ran in {mode!r} mode, not 'jsonschema' — "
                   "the gate is installed without its [schemas] extra")
             raise SystemExit(1)
+        PY
+
+    - name: chain head (anchor surface)
+      id: chain-head
+      if: always()
+      shell: bash
+      run: |
+        # Runs even when doctor failed: an anchor MISMATCH is exactly the run whose
+        # observed head an operator needs recorded. Absent/empty doctor.json (doctor
+        # never got to write one) is a silent no-op, not an error.
+        [ -s "${RUNNER_TEMP}/doctor.json" ] || exit 0
+        python - "${RUNNER_TEMP}/doctor.json" "$GITHUB_STEP_SUMMARY" "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+        try:
+            doctor = json.load(open(sys.argv[1]))
+        except (OSError, json.JSONDecodeError):
+            doctor = {}
+        chain = (doctor.get("event_store") or {}).get("chain") or {}
+        head = chain.get("head") or {}
+        value = head.get("event_hash") or ""
+        line = (f"**loop-engineer chain head:** `{value}` (sequence {head.get('sequence')})"
+                if value else "**loop-engineer chain head:** none (no chained events)")
+        open(sys.argv[2], "a").write(line + "\n")
+        open(sys.argv[3], "a").write(f"chain-head={value}\n")
         PY
 
     - name: loop inspect (scorecard)

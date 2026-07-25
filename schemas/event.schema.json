@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/event@1",
   "title": "Loop Engineer Event @1",
-  "description": "One immutable, append-only fact in a run's event log (ADR 0001). SQLiteEventStore (loop/events.py) persists these; loop.reducer projects an ordered sequence into a deterministic state/runlog/receipts view. Cross-field domain semantics (FSM legality, G1 completion, terminal immutability) are enforced by the reducer at replay time, not by the store at write time. Not yet a loop-doctor-validated workspace artifact — see reference/repo-os-contract.md #16.",
+  "description": "One immutable, append-only fact in a run's event log (ADR 0001). SQLiteEventStore (loop/events.py) persists these; loop.reducer projects an ordered sequence into a deterministic state/runlog/receipts view. Cross-field domain semantics (FSM legality, G1 completion, terminal immutability) are enforced by the reducer at replay time, not by the store at write time. Not yet a loop-doctor-validated workspace artifact — see reference/repo-os-contract.md #16. prev_event_hash/event_hash (additive, optional) carry the per-run hash chain; loop/chain.py pins the canonical preimage.",
   "type": "object",
   "required": ["schema", "event_id", "run_id", "sequence", "type", "actor", "ts", "payload"],
   "properties": {
@@ -16,6 +16,8 @@
     "correlation_id": { "type": ["string", "null"] },
     "ts": { "type": "string", "minLength": 1 },
     "payload": { "type": "object" },
+    "prev_event_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "event_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
     "artifact_hashes": {
       "type": "array",
       "items": {
