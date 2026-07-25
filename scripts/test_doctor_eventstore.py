@@ -407,3 +407,14 @@ def test_read_verbs_leave_no_wal_sidecars_on_clean_store(tmp_path):
     doctor_report(ws)
     assert not (ws / ".loop" / "events.db-wal").exists()
     assert not (ws / ".loop" / "events.db-shm").exists()
+
+
+def test_doctor_event_store_reads_do_not_leave_wal_or_shm_sidecars(tmp_path):
+    target = _fresh_contract(tmp_path)
+    _sync_active_task(target)
+    _open(_store(target))
+    sidecars = (target / ".loop" / "events.db-wal", target / ".loop" / "events.db-shm")
+    assert all(not path.exists() for path in sidecars)
+    report = doctor_report(target)
+    assert report["event_store"]["present"] is True
+    assert all(not path.exists() for path in sidecars)

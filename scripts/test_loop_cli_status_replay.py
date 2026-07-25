@@ -148,11 +148,18 @@ def test_events_db_is_opened_strictly_read_only_no_write_side_effects(tmp_path):
     workspace, store = _workspace(tmp_path)
     _terminal(store)
     (workspace / ".loop" / "terminal_state.json").write_text('{"state":"Succeeded"}', encoding="utf-8")
-    files = sorted((workspace / ".loop").iterdir())
-    before = {p.name: (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()) for p in files if p.is_file()}
+    before = {
+        p.name: (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest())
+        for p in sorted((workspace / ".loop").iterdir())
+        if p.is_file()
+    }
     status_report(workspace)
     replay_report(workspace)
-    after = {p.name: (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()) for p in files if p.is_file()}
+    after = {
+        p.name: (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest())
+        for p in sorted((workspace / ".loop").iterdir())
+        if p.is_file()
+    }
     assert after == before
 
 
