@@ -1053,7 +1053,7 @@ which declare no policy at all — keeps the old bar forever
 
 The two workspace-bearing layers share **one predicate**
 (`loop.contract._strict_evidence_failure`); `emit.terminate` imports it rather
-than restating it, because two hand-written copies of a three-part check drift
+than restating it, because two hand-written copies of a four-part check drift
 and a drift here is a silent false completion. That predicate is a strict
 **superset** of the pure half: it applies the reducer's own
 `evidence_entry_is_record_shaped` to the cited entry first, so the writer can
@@ -1064,12 +1064,34 @@ check shape and nothing else because they hold no filesystem — making them
 **What the mode proves, exactly.** For every cited entry: (1) the entry resolves
 to a readable evidence@1 record that validates, and the artifact its `uri` names
 resolves inside the workspace and hashes to the digest the record declares;
-(2) **when an event store exists**, those record bytes are the bytes some event
-bound into the chain, at that digest; and (3) when the record names a task still
-in `TASKS.json`, its recorded `policy_digest` equals the live goalpost. A goalpost
-that cannot even be **computed** is a failure, not a skip — unestablished is not
-agreement. An event store that cannot be **read** is likewise a refusal, never a
-pass. The message names which of the three sub-checks failed.
+(2) that artifact is a **verify bundle whose verdict is a pass**; (3) **when an
+event store exists**, those record bytes are the bytes some event bound into the
+chain, at that digest, and at exactly **one** digest; and (4) when the record
+names a task still in `TASKS.json`, its recorded `policy_digest` equals the live
+goalpost. A goalpost that cannot even be **computed** is a failure, not a skip —
+unestablished is not agreement. An event store that cannot be **read** is likewise
+a refusal, never a pass. The message names which of the four sub-checks failed.
+
+**Check (2), the verdict, in full.** Authenticity is not success. A dispatch whose
+verifier FAILS still writes and binds a perfectly genuine record — of a failure —
+so the bar asks what the artifact SAYS as well as whether it is real. Green is the
+repo's one green-marker rule, `loop.evidence.verify_bundle_is_green`: `outcome ==
+"PASS"` **or** `passed is true`. A bundle carrying only a numeric `score` reads
+**red**, here and in `scripts/metrics.py`, which imports the same predicate — a
+bundle that reads red to the FCR gate can never read green to the completion gate.
+`kind` is an open vocabulary, and a record that is **not** a `verify-bundle` (a
+log, a diff, a screenshot) carries no verdict this layer can read: it is refused,
+because an artifact with no verdict cannot show that anything passed. An
+unreadable or unparseable verdict is a refusal, never a skip.
+
+**Check (3), and why ambiguity is refused.** The write-time view
+(`loop.runtime.bound_artifact_digests`) reports every **distinct** digest a path
+was bound at, not the last one. Collapsing repeat bindings would be a laundering
+channel rather than a summary: an append-only forge that re-binds a tampered path
+at its new digest would look bound to the writer while the per-event walk still
+reported `evidence_chain_mismatch` on the same tree. A path bound at two or more
+different digests is therefore refused outright, which is what keeps the writer
+from ever accepting a terminal its own replay would refuse.
 
 **What it does not prove, stated without hedging.** It does not prove that a
 human, a runner, or anything at all *produced* the record: a hand-written record
@@ -1095,7 +1117,10 @@ anchor, deleting the store silently disables this mode's chain-boundness check.
 
 **A deliberate asymmetry with doctor's general goalpost check.** Doctor compares
 the **latest record per task** (see the tier list below); the terminal check
-compares **every cited record**. Citing a record in a `Succeeded` terminal is a
+compares **every cited record**. "Latest" orders numbered
+`evidence-iter<N>.json` records by iteration and ranks every **unnumbered** record
+below all of them, ties broken by filename — unnumbered records are ranked in, not
+dropped, so a task whose only record carries no iteration id is still compared. Citing a record in a `Succeeded` terminal is a
 present-tense claim that *this* record backs completion now, so a stale goalpost
 in a cited record is a false completion, not an artifact of history.
 
@@ -1106,6 +1131,49 @@ it writes `{"mode": "all_required"}` with `evidence: ["RUNLOG.md"]` and says why
 in `reason` — either `tasks with no evidence record: …` or `evidence records do
 not meet the verified-evidence bar: <record> <sub-check>`. Downgrading silently
 would be a self-serving choice; both branches are pinned.
+
+### Upgrade notes — three behavioural changes, stated without hedging
+
+These are not opt-in, and two of them can turn a contract that was clean on the
+previous release red on this one. They are recorded here rather than left to be
+discovered.
+
+**1. `policy_digest_mismatch` is NOT opt-in, and its remedy is currently
+unsatisfying.** The verified-evidence *completion mode* is opt-in; this doctor
+check is not. A contract that was doctor-clean at v0.10.0 goes **red** on upgrade
+as soon as anyone makes an ordinary goalpost edit — changing a task's `verify`,
+`criterion_ref`, `depends_on` or `id` after a verification was recorded. The
+documented remedy is "re-verify to record the current goalpost", and in a
+loop whose done-ness comes from the event log the runner will not re-verify a task
+it already considers done, so re-verification does not generally help. Measured,
+the reliable route back to green is to **rename the task** — which is precisely the
+evasion the tier list below admits this check cannot catch (a record naming a task
+absent from `TASKS.json` is never compared). So the check is honest about a moved
+goalpost and weak against a determined one, and the operator's real options today
+are: edit goalposts *before* the verification that records them, re-run the
+dispatch so a fresh record is written, or accept the finding as the true statement
+that the declared goalpost moved after the work was verified. A first-class
+"re-baseline this task's goalpost" affordance does not exist yet.
+
+**2. The `completion_policy` enum widening is forward-INCOMPATIBLE as a hard
+error.** `all_required_verified_evidence` is a new enum member, so an **older**
+kernel reading a terminal that declares it reports `invalid_completion_policy`
+and `schema_violation` — it does not degrade to the old bar, it fails. This
+matters concretely for the README's pinned `@v0.10.0` action and for
+`uvx loop-engineer@0.10.0`: a gate pinned to the older release will reject a
+contract written by the newer one. Pin the gate and the writer to the same
+release, or keep writing `all_required` until the gate is upgraded.
+
+**3. `os.link` now runs once PER DISPATCH, not once per run.** The
+content-addressed object is placed with the same create-once hard link as the
+immutable terminal record, and every dispatch places one. On a filesystem without
+hard-link support (some network and container-overlay mounts, and any FAT-family
+volume) the link fails, so **every dispatch becomes a committed-then-failed
+iteration**: the durable event is already appended when the object write raises.
+Previously the same limitation existed but was hit once, at terminal write. There
+is no fallback copy path by design — a non-atomic create would reopen the
+overwrite race the hard link closes — so this is a known limitation of running a
+loop on such a filesystem, not a configuration option.
 
 ### The integrity boundary, in four honest tiers
 
