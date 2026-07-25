@@ -289,30 +289,69 @@ peeked" case OpenHands can't itself catch.
 
 ### 5.4 ruflo swarm → acceptance gate  *(alternate)*
 
+> **Corrected 2026-07-25.** The original §5.4 sketched `ruflo.orchestrate()`
+> returning `.visible` / `.holdout` / `.merged_diff` / `.agent_trails` /
+> `.converged` / `.rounds` / `.max_rounds` / `.criteria_met`. **No such API
+> exists** — ruflo is a Node CLI with no Python package, no `orchestrate()` entry
+> point and no result object with those fields (verified against `ruvnet/ruflo`
+> at 3.32.9). The original text also assumed a swarm-terminal hook to register
+> the gate on; the plugin `HookEvent` enum has no swarm-level terminal event
+> (`swarm:consensus-reached` occurs only in ruflo's documentation, never in its
+> implementation). Both are replaced below by the verified surfaces. Research
+> dossier: `review/recipes/2026-07-25-ruflo-api-research.md`.
+
 **Composes:** the ORCHESTRATE tier (multi-agent swarm). A swarm's terminal is
 "the coordinator decided the objective is met" — pure self-report across N agents.
 Loop Engineer adds a single acceptance gate the swarm must pass *as a whole*.
 
-Snippet outline: register the gate as the swarm's terminal hook (ruflo exposes
-hooks / an MCP coordination server), so no individual agent can declare the swarm
-done — the acceptance gate does:
+Seam: `ruflo hive-mind spawn "<objective>" --claude` spawns the Claude Code CLI as
+the swarm's execution body and **blocks** until that child exits, mapping `exit 0`
+to success. So the gate belongs in the **host-side supervisor** that launches the
+CLI and reads the run directory afterwards — no individual agent can declare the
+swarm done, because nothing inside the swarm writes the terminal. Optionally a
+second, independent gate runs inside the child via `hooks/stop_firewall.py`
+registered as a Claude Code `Stop` hook.
 
 ```python
-swarm_result = ruflo.orchestrate(objective=spec, agents=[...])
-gate = decide(visible=swarm_result.visible, holdout=swarm_result.holdout)
-ac   = anticheat_scan.scan(diff=swarm_result.merged_diff,
-                           trajectory=swarm_result.agent_trails)
+run = subprocess.run(["npx", "ruflo@3.32.9", "hive-mind", "spawn", objective,
+                      "--claude", "--non-interactive"], cwd=ws)      # blocks
+
+obs  = observe(ws)          # .swarm/{state.json,tasks/*,agents/*,coordination/*} + memory export
+gate = decide(visible=visible_checks(ws), holdout=holdout_checks(ws))
+ac   = anticheat_scan.scan(diff_text=host_git_diff(ws),   # ruflo exposes no merged diff
+                           trajectory=agent_trails(obs))  # agents' touchedPaths + consensus rows
 terminal = to_terminal_state(
-    outcome=EngineOutcome(reached_end=swarm_result.converged, external_error=None,
-                          budget_exhausted=swarm_result.rounds >= swarm_result.max_rounds,
-                          human_abort=False, artifacts=swarm_result.artifacts),
-    gate_verdict=gate, anticheat=ac, criteria_met=swarm_result.criteria_met,
+    outcome=EngineOutcome(
+        reached_end=run.returncode == 0
+                    and obs["state"]["status"] in {"ready", "initialized", "stopped"},
+        external_error=None if run.returncode == 0 or completed_tasks(obs) else "swarm blocked",
+        budget_exhausted=autopilot_capped(ws),   # `ruflo autopilot status --json`
+        human_abort=supervisor_was_interrupted(),  # NEVER from the exit code — see below
+        artifacts=evidence_paths(ws)),
+    gate_verdict=gate, anticheat=ac,
+    criteria_met={cid: proven.get(cid) for cid in declared_criteria(obs["export"])},
 )
 ```
 
-Mapping specialization: swarm non-convergence within max rounds → `FailedBudget`;
-a criterion no agent was assigned → `FailedSpecGap` (the swarm literally never
-worked on it — a failure mode a self-reporting coordinator hides).
+Criteria vocabulary comes from the memory export's `sparc-phases` `spec-*` entry
+(`acceptanceCriteria`); their **truth** comes from the withheld holdout checks.
+The `sparc-gates` namespace holds the swarm's own per-phase `pass` rows and
+`truthScore` — recorded as observation, never trusted as a verdict.
+
+Mapping specialization: autopilot `--max-iterations` / `--timeout` reached without
+a green gate → `FailedBudget`; a declared criterion no check covers →
+`FailedSpecGap` (the swarm literally never worked on it — a failure mode a
+self-reporting coordinator hides).
+
+Two traps the recipe must encode: ruflo's SIGINT path calls `process.exit(0)`, so
+`AbortedByHuman` must come from the supervisor's own signal handler and never from
+the exit code; and `ruflo verify` is **install-integrity** (SHA-256 + Ed25519 over
+the installed artifact), not a run verdict, so it must never be wired as the gate.
+
+Because a live run needs Node, the `claude` binary and credentials, the shipped
+example replays a committed `.swarm/` recording by default (`--live` opts in) —
+stated plainly, with the gate/projection/emit/doctor/metrics path executing for
+real.
 
 ---
 
