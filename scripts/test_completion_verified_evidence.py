@@ -15,8 +15,8 @@ import json
 import pytest
 
 from loop import emit, integrations
-from loop.completion import (VERIFIED_EVIDENCE_MODE, normalize_completion_policy,
-                             policy_requires_verified_evidence)
+from loop.completion import (VERIFIED_EVIDENCE_MODE, evidence_entry_is_record_shaped,
+                             normalize_completion_policy, policy_requires_verified_evidence)
 from loop.contract import doctor_report
 from loop.events import SQLiteEventStore
 from loop.reducer import EventReplayError, reduce_events
@@ -207,6 +207,26 @@ def test_doctor_reports_an_unbound_record_cited_by_a_strict_terminal(dispatched_
         "false_completion": False, "terminated_at": "2026-07-25T00:00:00+00:00",
         "reason": "hand-written"}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     assert "unverified_evidence_terminal" in _codes(doctor_report(dispatched_workspace))
+
+
+def test_the_write_layers_reject_an_entry_the_pure_layers_would_reject(tmp_path):
+    """The workspace-bearing bar must be a SUPERSET of the pure one.
+
+    A store-less contract skips chain-boundness by design, so without an entry-shape
+    check a Succeeded terminal could cite a record living outside the workspace: written
+    happily by ``emit.terminate``, then refused by the reducer replaying that same
+    terminal. Layers that disagree about what Succeeded means are the defect.
+    """
+    workspace = tmp_path / "storeless"
+    emit.open_contract(workspace)
+    outside = tmp_path / "elsewhere" / "rec.json"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text("{}", encoding="utf-8")
+    entry = "../elsewhere/rec.json"
+    assert evidence_entry_is_record_shaped(entry) is False
+    with pytest.raises(emit.EmitError, match="record path"):
+        emit.terminate(workspace, state="Succeeded", criteria_met={"C-1": True},
+                       evidence=[entry], completion_policy=VERIFIED_EVIDENCE_MODE)
 
 
 def _corrupt_store(workspace):

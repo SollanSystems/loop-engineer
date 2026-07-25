@@ -12,6 +12,7 @@ from .completion import (
     VERIFIED_EVIDENCE_MODE,
     CompletionPolicyError,
     criteria_satisfy_completion,
+    evidence_entry_is_record_shaped,
     normalize_completion_policy,
     policy_requires_verified_evidence,
     unmet_required_criteria,
@@ -815,6 +816,11 @@ def _strict_evidence_failure(entry: object, paths: LoopPaths,
 
     if not isinstance(entry, str) or not entry.strip():
         return "is not a workspace-relative evidence record path"
+    if not evidence_entry_is_record_shaped(entry):
+        # The pure layers reject this shape outright, so accepting it here would let a
+        # terminal through the writer that its own replay would refuse.
+        return ("is not verified evidence: not a workspace-relative "
+                ".loop/evidence/*.json record path")
     try:
         blob = (paths.workspace / entry).read_bytes()
     except (OSError, ValueError) as exc:
