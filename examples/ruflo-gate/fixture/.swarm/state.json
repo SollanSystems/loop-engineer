@@ -1,0 +1,9 @@
+{
+  "id": "swarm-2026-07-25-csv-dedupe",
+  "topology": "hierarchical-mesh",
+  "maxAgents": 8,
+  "strategy": "sparc",
+  "v3Mode": true,
+  "initializedAt": "2026-07-25T09:14:02Z",
+  "status": "stopped"
+}

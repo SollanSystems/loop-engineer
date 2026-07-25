@@ -1,0 +1,12 @@
+{
+  "id": "agent-reviewer-04",
+  "swarmId": "swarm-2026-07-25-csv-dedupe",
+  "role": "reviewer",
+  "status": "completed",
+  "spawnedAt": "2026-07-25T09:24:26Z",
+  "tasksCompleted": 1,
+  "touchedPaths": [
+    "dedupe-report.json",
+    "dedupe.log"
+  ]
+}

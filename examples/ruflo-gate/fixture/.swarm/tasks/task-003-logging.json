@@ -1,0 +1,9 @@
+{
+  "id": "task-003-logging",
+  "swarmId": "swarm-2026-07-25-csv-dedupe",
+  "description": "append every dropped duplicate and its source line to dedupe.log",
+  "assignedAgent": "agent-coder-03",
+  "status": "completed",
+  "createdAt": "2026-07-25T09:17:04Z",
+  "completedAt": "2026-07-25T09:26:55Z"
+}
