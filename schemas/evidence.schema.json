@@ -10,7 +10,7 @@
     "id": {"type": "string", "minLength": 1},
     "kind": {"type": "string", "minLength": 1, "description": "Open vocabulary; examples include verify-bundle, log, diff, screenshot, and report."},
     "uri": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.\\-]*://).+$", "description": "Workspace-relative POSIX path, never an absolute path or URI."},
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "maxLength": 64},
     "media_type": {"type": "string", "minLength": 1},
     "produced_by": {
       "type": "object",

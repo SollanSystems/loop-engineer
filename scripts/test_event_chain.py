@@ -271,6 +271,23 @@ def test_append_wraps_a_non_duplicate_integrity_failure_as_typed_error(tmp_path,
             "r1", "contract_opened", {"workspace": "ws"}, actor="operator")
 
 
+def test_append_wraps_a_non_operational_database_error_as_typed_error(tmp_path, monkeypatch):
+    """append, read, and latest_sequence agree on the whole sqlite3.Error family."""
+    real_connect = sqlite3.connect
+
+    class MalformedOnCommit(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if isinstance(sql, str) and sql.strip().upper() == "COMMIT":
+                raise sqlite3.DatabaseError("database disk image is malformed")
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect",
+                        lambda *args, **kwargs: real_connect(*args, factory=MalformedOnCommit, **kwargs))
+    with pytest.raises(EventStoreOperationalError, match="database disk image is malformed"):
+        SQLiteEventStore(tmp_path / "events.db").append(
+            "r1", "contract_opened", {"workspace": "ws"}, actor="operator")
+
+
 _STORE_VERBS = {
     "append": lambda store: store.append("r1", "contract_opened", {"workspace": "ws"}, actor="operator"),
     "read": lambda store: store.read("r1"),
@@ -405,13 +422,19 @@ def test_chain_fields_validate_in_both_modes(mode):
     assert validate_event(dict(good, prev_event_hash=17), mode=mode)["ok"] is False
 
 
+@pytest.mark.parametrize("mode", ["strict", "basic"])
 @pytest.mark.parametrize("field", ["prev_event_hash", "event_hash", "artifact_hashes"])
-def test_basic_validation_rejects_a_hash_with_a_trailing_newline(field):
+def test_validation_rejects_a_hash_with_a_trailing_newline_in_both_modes(mode, field):
+    # jsonschema `pattern` is re.search-semantics, so "$" alone admits a trailing
+    # newline; the schemas pair it with maxLength 64 to close the same hole the
+    # structural validator closes with fullmatch.
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
     clean = _chained(0, None, artifact_hashes=[{"path": "p", "sha256": "a" * 64}])
-    assert validate_event(clean, mode="basic")["ok"] is True
+    assert validate_event(clean, mode=mode)["ok"] is True
     dirty = ([{"path": "p", "sha256": "a" * 64 + "\n"}] if field == "artifact_hashes"
              else "a" * 64 + "\n")
-    assert validate_event(dict(clean, **{field: dirty}), mode="basic")["ok"] is False
+    assert validate_event(dict(clean, **{field: dirty}), mode=mode)["ok"] is False
 
 
 from loop.chain import verify_chain

@@ -369,7 +369,7 @@ class SQLiteEventStore:
                     raise DuplicateEventError(record["event_id"]) from exc
                 raise EventStoreOperationalError(f"event store refused the append: {exc}") from exc
             conn.execute("COMMIT")
-        except sqlite3.OperationalError as exc:
+        except sqlite3.Error as exc:
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:

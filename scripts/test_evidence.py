@@ -105,6 +105,17 @@ def test_nested_subkey_type_errors_are_rejected_with_field_identity_in_both_mode
         assert any(issue["message"].startswith(field_prefix) for issue in report["issues"])
 
 
+@pytest.mark.parametrize("mode", ["basic", "release"])
+def test_sha256_with_a_trailing_newline_is_rejected_in_both_modes(mode: str) -> None:
+    # jsonschema `pattern` is re.search-semantics, so "$" alone admits a trailing
+    # newline; the schema pairs it with maxLength 64 to match fullmatch strictness.
+    if mode == "release":
+        pytest.importorskip("jsonschema")
+    assert validate_evidence(evidence(), mode=mode)["ok"] is True
+    report = validate_evidence(evidence(sha256="a" * 64 + "\n"), mode=mode)
+    assert report["ok"] is False
+
+
 @pytest.mark.parametrize("mode", ["strict", "release"])
 def test_strict_and_release_require_jsonschema(mode: str, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "jsonschema", None)
