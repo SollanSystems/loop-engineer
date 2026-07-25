@@ -300,6 +300,51 @@ def test_cli_refuses_a_schema_drifted_store_without_a_traceback(tmp_path, comman
     assert proc.stderr.strip().startswith(f"{command}: ")
 
 
+from loop.migrate import migrate_store
+from loop.runtime import RuntimeStoreError
+
+
+def _workspace_with_legacy_store(tmp_path):
+    loop_dir = tmp_path / ".loop"
+    loop_dir.mkdir()
+    make_legacy_store(loop_dir / "events.db")
+    return tmp_path
+
+
+def test_migrate_adds_columns_sets_version_and_reports_unchained(tmp_path):
+    ws = _workspace_with_legacy_store(tmp_path)
+    report = migrate_store(ws)
+    assert report["ok"] and report["migrated"] is True
+    assert report["user_version"] == 2 and report["unchained_rows"] == 1
+    assert report["chained_from_sequence"] == 1
+    conn = sqlite3.connect(str(ws / ".loop" / "events.db"))
+    try:
+        assert has_chain_columns(conn) and store_user_version(conn) == 2
+    finally:
+        conn.close()
+
+
+def test_migrate_is_idempotent(tmp_path):
+    ws = _workspace_with_legacy_store(tmp_path)
+    migrate_store(ws)
+    assert migrate_store(ws)["migrated"] is False
+
+
+def test_migrate_missing_store_raises_typed(tmp_path):
+    (tmp_path / ".loop").mkdir()
+    with pytest.raises(RuntimeStoreError):
+        migrate_store(tmp_path)
+
+
+def test_post_migration_appends_chain_with_genesis_after_legacy_prefix(tmp_path):
+    ws = _workspace_with_legacy_store(tmp_path)
+    migrate_store(ws)
+    record = SQLiteEventStore(ws / ".loop" / "events.db").append(
+        "r1", "iteration_appended", {"iteration_id": 1, "outcome": "task_passed"}, actor="operator")
+    assert record["prev_event_hash"] is None            # genesis after unchained prefix
+    assert record["event_hash"] == _hash(record)
+
+
 from loop.events import validate_event
 
 

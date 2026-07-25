@@ -12,13 +12,13 @@ from .runcontrol import RunControlError
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "architect")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "migrate", "architect")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel")
+_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "migrate")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel|architect> <target>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel|migrate|architect> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
@@ -33,6 +33,7 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
        {_PROG} pause --reason REASON [--mode basic|strict|release] <workspace>
        {_PROG} resume [--note NOTE] [--mode basic|strict|release] <workspace>
        {_PROG} cancel [--reason REASON] [--mode basic|strict|release] <workspace>
+       {_PROG} migrate <workspace>
        {_PROG} plan-lint [--mode basic|strict|release] <plan-file>
 
 commands:
@@ -57,6 +58,7 @@ commands:
   pause      Pause a non-terminal run.
   resume     Resume a paused run.
   cancel     Terminate a non-terminal run as AbortedByHuman.
+  migrate    Add hash-chain columns to a legacy events.db (explicit, idempotent; the only store-upgrade path).
   architect  Not implemented by this CLI: architecture classification and ADR
              authorship require agentic judgment, not deterministic code. See
              the loop-architect skill.
@@ -318,6 +320,14 @@ def main(argv: list[str] | None = None) -> int:
             return _print_json(validate_plan(target, mode=mode))
         except ValidationModeError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
+            return 2
+
+    if command == "migrate":
+        from .migrate import migrate_store
+        try:
+            return _print_json(migrate_store(target))
+        except RuntimeStoreError as exc:
+            print(f"migrate: {exc}", file=sys.stderr)
             return 2
 
     if command in {"status", "replay", "simulate"}:
