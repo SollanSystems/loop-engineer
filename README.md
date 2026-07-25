@@ -33,7 +33,10 @@ ships, on disk and runnable today:
   named reason otherwise — e.g. `python3 -m pytest`), policy digest — and
   `loop doctor` fails when a record declares that its own
   producer verified it; identity is recorded, not proven: a worker can write a
-  false verifier name, and the records live outside the hash chain.
+  false verifier name. A verified dispatch **binds its evidence digests into the
+  hash chain**, and `loop doctor` re-hashes them — binding makes tampering
+  detectable against an anchor, not impossible: without `--expect-chain-head` a
+  worker who can rewrite `.loop/` can rewrite the chain too.
 
 ![The inspector scores a self-asserted DIY loop 0/weak, then the gate-backed example 90/strong — both runs live](docs/demo.gif)
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop-engineer/evidence@1",
   "title": "Loop Engineer Evidence @1",
-  "description": "A hashed evidence record with artifact provenance. loop doctor discovers and validates records from the declared location .loop/evidence/*.json; it does not yet hash-verify the artifacts they reference. See reference/repo-os-contract.md #17.",
+  "description": "A hashed evidence record with artifact provenance. loop doctor discovers records from the declared location .loop/evidence/*.json, validates them, hash-verifies the artifact each one references, and compares the latest record per task against the live TASKS.json goalpost; a verified dispatch also binds the record's bytes into the event hash chain. Hash verification proves the pointer, never the provenance, and code_digest is never re-hashed against the verifier file. See reference/repo-os-contract.md #17.",
   "type": "object",
   "required": ["schema", "id", "kind", "uri", "sha256", "media_type", "produced_by", "created_at"],
   "properties": {

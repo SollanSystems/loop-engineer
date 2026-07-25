@@ -622,9 +622,15 @@ exception. `VerifierExecutionError`, `VerifierNotImplementedError`, and
 attempted.
 
 **Event types:** `contract_opened | iteration_appended | receipt_appended |
-terminal_written` — one-to-one with `loop.emit`'s four writer operations
+terminal_written | terminal_superseded | approval_requested |
+approval_resolved | run_paused | run_resumed` — nine members, matching
+`loop.events.EVENT_TYPES` and the `type` enum of `schemas/event.schema.json`.
+The **first four** correspond to `loop.emit`'s writer operations
 (`open_contract`/`append_iteration`/`append_receipt`/`terminate`), so a
-future write-through migration targets an already-matching payload shape.
+future write-through migration targets an already-matching payload shape. The
+remaining five have no `emit` writer by design: `terminal_superseded` is the
+administrative correction of §18, and the four run-control types are §19's
+projection primitives.
 
 **Two-layer enforcement, deliberately split:** the store validates event@1
 envelope/payload *shape* only (`loop/events.py::validate_event`, both
@@ -751,6 +757,19 @@ appended after a chained prefix is reported as `event_chain_broken` and is
 unrepairable, because UPDATE is trigger-blocked. Pin your loop-engineer (and
 action) version per store.
 
+**Bound artifacts (v0.11.0+).** `artifact_hashes` is field eleven of the
+twelve-field preimage, so any `{path, sha256}` an appender places there is
+already covered by `event_hash` and therefore by `--expect-chain-head`. Binding
+evidence needs **no new event type and no second append**: since the
+evidence-wiring release a verified dispatch binds three entries on the one
+`iteration_appended` event it already writes — the verify bundle, its evidence@1
+record, and the bundle's content-addressed object (§17). The digests are
+computed **before** the append and the files are written **after** it. An event
+that binds nothing — every event written before that release, and every append
+by a foreign writer — is silent by construction, and stays silent: the
+append-only triggers forbid the UPDATE a retroactive binding would need, exactly
+as `loop migrate` refuses to backfill chain hashes (§22).
+
 ### Integrity boundary
 
 The chain is **tamper-evident relative to an anchored head**. That is a
@@ -785,7 +804,13 @@ trailing events leaves a shorter but internally valid chain.
   `deterministic` and `legal_sequence` stay `true`. A future standalone
   event-store cross-check — a new issue code appended directly to `issues`, as
   `chain_columns_missing` is — would not move any of those, so it must be added
-  to this pin's assertions when it is introduced.)
+  to this pin's assertions when it is introduced. The evidence-wiring release
+  introduced exactly two such codes, `evidence_chain_mismatch` and
+  `missing_bound_evidence`; this pin's assertions were **not** widened to name
+  them. The stronger statement lives in the binding suite instead:
+  `scripts/test_adversarial_evidence_binding.py::test_a_full_rewrite_of_artifacts_and_store_is_not_caught_without_an_anchor_pinned`
+  rewrites the artifacts, the object, the bound digests and the chain, and
+  asserts the whole report is `ok` with **zero** issues.)
 - **A chain-column downgrade.** Dropping `event_hash`/`prev_event_hash`, or
   rebuilding the store without them, silently downgrades a chained history to
   an unchained one. An unchained or legacy doctor report is *not* proof of
@@ -835,10 +860,15 @@ workspace, rejects traversal and symlink escapes, and verifies the file hash.
 `.loop/artifacts/objects/` without writing it.
 
 **Scope boundary:** `loop doctor` reads evidence@1 records from the declared
-location `.loop/evidence/*.json` and validates them; it does **not** yet
-hash-verify the artifacts they reference, does **not** compare any recorded
-digest against anything, and `Succeeded` still requires non-empty evidence
-*paths*, not verified hashes. Those tightenings are the next slice.
+location `.loop/evidence/*.json`, validates them, **hash-verifies the artifact
+each one references**, and compares the `policy_digest` of the **latest record
+per task** against the live `TASKS.json` entry. Under the default
+`all_required` completion policy `Succeeded` still requires non-empty evidence
+*paths*; under the opt-in `all_required_verified_evidence` policy it requires
+every entry to be a hash-verified evidence@1 record that — wherever an event
+store exists to bind against — some event bound into the hash chain, and whose
+recorded goalpost is the live one. `code_digest` is still never re-hashed
+against the verifier file, and no check here proves who produced a record.
 
 **Artifact provenance:** `kind` remains an open vocabulary (for example,
 `verify-bundle`, `log`, `diff`, `screenshot`, or `report`), while `produced_by`
@@ -889,8 +919,10 @@ make the digest noise; `id` binds *which* goalpost the digest names, and
 `depends_on` binds its declared ordering, so both are included.
 
 The digest binds the criterion **reference**, not the criterion **text** —
-editing `SPEC.md`'s acceptance wording leaves it unchanged. Binding criterion
-text is the evidence-wiring slice.
+editing `SPEC.md`'s acceptance wording leaves it unchanged. The evidence-wiring
+release did **not** change that: criterion text remains bound by nothing, pinned
+by `test_criterion_text_is_still_unbound_pinned`. Binding evidence bytes does
+not bind intent.
 
 **Conformance vector.** Over the task entry
 
@@ -923,14 +955,25 @@ to the bundle bytes via `sha256`). An evidence record MUST NOT be named
 bundle with no green marker, i.e. a phantom failing gate. `verifier.source` is
 `declared_command` only when the task's declared `verify` command was
 executed. A bundle whose source is `injected_callable` carries a
-caller-supplied verdict and is not gate evidence. `scripts/metrics.py` does not
-read `verifier.source` today, so an injected-callable bundle counts toward FCR
-exactly like a declared-command bundle — enforcing that distinction is Slice 3
-scope. Before this slice the runner wrote no bundles at all, so a
-runner-driven contract's FCR input set changes with this release. `loop
-simulate` predicts decisions, not writes: it reports `legacy_sync_would_write`
-because that write is conditional, but it does not enumerate the bundle and
-record a dispatch always writes.
+caller-supplied verdict and is not gate evidence. `scripts/metrics.py` enforces
+that distinction: a bundle whose `verifier.source` is **explicitly**
+`injected_callable` is excluded from the FCR input set before any metric is
+derived, and the excluded filenames are listed under
+`provenance.injected_verifier_bundles` so the exclusion is visible rather than a
+silent FCR shift. A bundle carrying no `verifier` block at all has an *unknown*
+source and still counts — grandfathering by absence, not by guess. `source` is a
+string the writer declares, not a fact metrics can check, so hand-writing
+`declared_command` restores gate-evidence status; that limitation is pinned by
+`test_metrics_still_counts_a_hand_written_declared_command_bundle_pinned`.
+Two input-set changes land together in this release and are stated rather than
+absorbed: before it the runner wrote no bundles at all, and injected-callable
+bundles counted — so a runner-driven contract's FCR input set moves on upgrade.
+`loop simulate` predicts decisions, not writes: it reports
+`legacy_sync_would_write` because that write is conditional, but it does not
+enumerate the bundle, record and content-addressed object a dispatch always
+writes, and it does not enumerate the object store. A boolean that is `True` on
+every dispatch carries no information, so `_empty_prediction` gains no field
+here (§20).
 
 **The partition.** `visible` defaults to the task's `criterion_ref`;
 `holdout` is empty unless the task declares `holdout_criteria`; both fields
@@ -948,40 +991,195 @@ fails. On the `loop run` path both identities are operator-supplied
 (`--executor`, `--verifier-identity`); their defaults (`unattributed`,
 `loop.run`) never collide, so a default run cannot manufacture the finding.
 
-**The integrity boundary, in four honest tiers** — not a single "surfaces /
-does not surface" pair:
+### Bound evidence (v0.11.0+)
+
+**The bound set, in the order the writer emits it.** A verified dispatch binds
+exactly three `{path, sha256}` entries into the `artifact_hashes` of the one
+`iteration_appended` event it already writes (§16), in this order:
+
+1. `.loop/artifacts/verify-iter<N>.json` — the verify bundle, at the bundle's
+   own sha256;
+2. `.loop/evidence/evidence-iter<N>.json` — the evidence@1 record, at the
+   record file's sha256;
+3. `.loop/artifacts/objects/<aa>/<sha256>` — the content-addressed **object**, a
+   byte-identical copy of the bundle, at the bundle's sha256 again.
+
+**The object's location is derived, never declared.** It is
+`artifact_object_path(workspace, record["sha256"])` —
+`.loop/artifacts/objects/<first two hex chars>/<sha256>` — a pure function of a
+digest evidence@1 already carries, so **evidence@1 gains no field** and a
+third-party reader locates the object from `record["sha256"]` alone. The object
+is the recovery source when the friendly-named bundle is swapped: the swap fails
+doctor as `evidence_chain_mismatch` *and* the original bytes are still on disk.
+Deleting the object first does not clear the path — the object is itself a bound
+artifact, so its removal is reported as `missing_bound_evidence`.
+
+**Objects are created once and never overwritten.** The write uses the same
+hard-link create-once primitive as the immutable terminal record. An existing
+object with identical bytes is idempotent success (a re-run of the same
+dispatch); an existing object with **different** bytes for the same digest is a
+typed `EmitError` naming the digest, because a corrupted or colliding object
+store must never be silently accepted.
+
+**Ordering: build (no I/O) → append (binds) → write (object, staged bundle,
+record, replace).** The builder is pure — it renders the exact bytes and their
+digests and touches nothing — so the event commits to digests that describe what
+is about to land. Two consequences, both deliberate: a **build failure commits
+nothing** (a non-canonicalizable task or an invalid record is refused before any
+file exists), and a **crash after the durable append** leaves an event naming
+artifacts that are absent — reported as `missing_bound_evidence` rather than
+passing as a silent gap. The crash window still exists; what changed is that it
+is no longer invisible.
+
+### The verified-evidence completion mode (v0.11.0+)
+
+`completion_policy.mode` accepts a second value,
+`all_required_verified_evidence`, alongside the default `all_required`. The
+criteria half is unchanged — every declared criterion must still be `True`; the
+mode raises the **evidence** bar only. It is **opt-in and never retroactive**:
+`normalize_completion_policy(None)` still returns `{"mode": "all_required"}`, so
+every record written before this release — including both shipped examples,
+which declare no policy at all — keeps the old bar forever
+(`test_the_verified_evidence_mode_is_opt_in_and_not_retroactive_pinned`).
+
+**Four enforcement layers, each as strong as it can honestly be.**
+
+| Layer | Reaches | Enforces |
+|---|---|---|
+| `emit.terminate` (write time) | workspace + event store | the full bar; failure is a typed `EmitError` |
+| `loop doctor` / `loop.contract` (read time) | workspace + event store | the same bar, reported as `unverified_evidence_terminal` |
+| `loop.reducer` (pure fold) | nothing — no I/O | shape only: every entry is a workspace-relative `.loop/evidence/*.json` path |
+| `loop.integrations.to_terminal_state` (pure projection) | nothing — no workspace | the same shape half, returning `FailedUnverifiable` rather than raising |
+
+The two workspace-bearing layers share **one predicate**
+(`loop.contract._strict_evidence_failure`); `emit.terminate` imports it rather
+than restating it, because two hand-written copies of a three-part check drift
+and a drift here is a silent false completion. That predicate is a strict
+**superset** of the pure half: it applies the reducer's own
+`evidence_entry_is_record_shaped` to the cited entry first, so the writer can
+never accept a terminal that its own replay would refuse. The two pure layers
+check shape and nothing else because they hold no filesystem — making them
+*appear* to enforce binding would be the pretending this contract refuses.
+
+**What the mode proves, exactly.** For every cited entry: (1) the entry resolves
+to a readable evidence@1 record that validates, and the artifact its `uri` names
+resolves inside the workspace and hashes to the digest the record declares;
+(2) **when an event store exists**, those record bytes are the bytes some event
+bound into the chain, at that digest; and (3) when the record names a task still
+in `TASKS.json`, its recorded `policy_digest` equals the live goalpost. A goalpost
+that cannot even be **computed** is a failure, not a skip — unestablished is not
+agreement. An event store that cannot be **read** is likewise a refusal, never a
+pass. The message names which of the three sub-checks failed.
+
+**What it does not prove, stated without hedging.** It does not prove that a
+human, a runner, or anything at all *produced* the record: a hand-written record
+whose pointer resolves and whose digests are self-consistent satisfies the mode
+in a **store-less** contract, because there is nothing there to bind against
+(`test_the_strict_mode_accepts_a_hand_written_record_in_a_store_less_contract_pinned`).
+It does not prove the chain itself was not rewritten: a worker who can rewrite
+`.loop/` can rewrite the store, so **without `--expect-chain-head` a full rewrite
+of artifacts *and* chain satisfies the strict mode**
+(`test_a_full_rewrite_satisfies_the_strict_mode_without_an_anchor_pinned`). The
+mode's strength is therefore **store-dependent and anchor-dependent**.
+
+**Deleting the store is not louder — it is quieter.** Measured, not assumed: a
+sidecar-free read (v0.10.0) leaves no `-wal`/`-shm` behind, and doctor's
+`missing_event_store` tripwire is gated on exactly that residue, so removing
+`.loop/events.db` after an ordinary run leaves plain `loop doctor` at `ok: true`
+with **zero issues**, and `emit.terminate` then accepts a hand-written record
+under the strict mode. `missing_event_store` catches only the sloppier deletion
+that leaves a sidecar. The control that does hold is the external anchor:
+`loop doctor --expect-chain-head <head>` reports `chain_anchor_mismatch` against
+the deleted store and stays quiet against an intact one. Without an external
+anchor, deleting the store silently disables this mode's chain-boundness check.
+
+**A deliberate asymmetry with doctor's general goalpost check.** Doctor compares
+the **latest record per task** (see the tier list below); the terminal check
+compares **every cited record**. Citing a record in a `Succeeded` terminal is a
+present-tense claim that *this* record backs completion now, so a stale goalpost
+in a cited record is a false completion, not an artifact of history.
+
+**`loop run`'s auto-terminal adopts the mode only when it can satisfy it**, and
+never on file existence: it evaluates the same shared predicate against the very
+records it would cite, **before** appending the terminal event. When it cannot,
+it writes `{"mode": "all_required"}` with `evidence: ["RUNLOG.md"]` and says why
+in `reason` — either `tasks with no evidence record: …` or `evidence records do
+not meet the verified-evidence bar: <record> <sub-check>`. Downgrading silently
+would be a self-serving choice; both branches are pinned.
+
+### The integrity boundary, in four honest tiers
+
+Not a single "surfaces / does not surface" pair:
 
 - **Fails `loop doctor`:** a record declaring self-verification
   (`self_verified_evidence`); a runner-written bundle whose record is absent
   (`missing_evidence_record`); a malformed or unparseable record
-  (`invalid_evidence` — an errored check fails, it never skips).
+  (`invalid_evidence` — an errored check fails, it never skips). Added by the
+  evidence-wiring release: a discovered record whose referenced artifact does
+  not match its `sha256` (`hash_mismatch`) or does not resolve at all
+  (`missing_evidence_path`, surfaced verbatim out of `verify_evidence`); the
+  **latest** record for a task whose recorded goalpost disagrees with — or
+  cannot be compared against — the live `TASKS.json` entry
+  (`policy_digest_mismatch`); a chain-bound artifact whose bytes changed
+  (`evidence_chain_mismatch`) or vanished (`missing_bound_evidence`); and a
+  `Succeeded` terminal under `all_required_verified_evidence` whose cited
+  evidence fails the bar (`unverified_evidence_terminal`).
 - **Recorded for later comparison, not checked by any shipped surface:**
-  `policy_digest` and `code_digest`. Nothing in v0.11.0 compares either
-  against the live TASKS.json entry or re-hashes the verifier file, so a moved
-  goalpost or a swapped verify script is *legible in a diff of two records*
-  and nothing more. Automated comparison is the evidence-wiring slice.
-- **Detectable only by explicitly calling `verify_evidence()`:** a swapped
-  bundle. `loop doctor` does not hash-verify referenced artifacts in this
-  release.
+  `code_digest`, and now only `code_digest`. Nothing re-hashes the verifier
+  file, and nothing will without a declared baseline: a verify script
+  legitimately changes between runs, so an unbaselined comparison would fire on
+  every honest edit. A swapped verify script therefore remains *legible in a
+  diff of two records* and nothing more
+  (`test_doctor_does_not_re_hash_the_verifier_file_pinned`). **`policy_digest`
+  has left this tier** — the evidence-wiring release compares it against the
+  live goalpost.
+- **Detectable only by explicitly calling `verify_evidence()`:** **this tier is
+  now empty.** The evidence-wiring release composes that call inside
+  `loop doctor` for every discovered record, so a swapped bundle — the one
+  member this tier ever had — now fails doctor as `hash_mismatch` in the first
+  tier above.
 - **Not surfaced at all:** a worker that writes a false `verified_by.by`; a
-  worker that omits its executor identity; a hand-written record whose
-  digests are invented (doctor validates their *shape*, never their truth); a
-  rewrite or deletion of the record **and** its bundle together. **Both
-  artifacts are plain files outside the hash chain: a worker with write
-  access to `.loop/` can rewrite or remove them and `loop doctor` will not
-  notice.** Binding the record digest into the chain requires a new event
-  type and is the evidence-wiring slice. A record whose referenced bundle is
-  absent also passes `loop doctor` clean: `missing_evidence_record` is
-  one-directional (it walks bundles looking for their record, never the
-  reverse), so doctor never checks that a record's `uri` resolves. And an
-  iteration committed to the event log with no evidence written at all — the
-  sanctioned crash window between the durable append and the evidence write —
-  is undetectable, because the tripwire needs a bundle to fire before it can
-  notice anything missing. Closing both gaps is Slice 3 scope.
+  worker that omits its executor identity; a hand-written record whose pointer
+  resolves and whose digests are self-consistent (verification proves the
+  *pointer*, never the *provenance* —
+  `test_a_hand_written_record_pointing_at_a_real_file_still_passes_pinned`); the
+  *text* of a criterion, which `policy_digest` never covered and still does not.
+  Plus the residuals this release's own binding leaves, each pinned by name:
+  - a record written through the **writer API** (`emit.write_verify_evidence`)
+    appends no event, so nothing binds it and a later rewrite is invisible
+    (`test_a_record_written_outside_a_dispatch_is_never_chain_bound_pinned`);
+  - a **legacy** event carries `artifact_hashes: []` and can never be bound
+    retroactively — the append-only triggers forbid the UPDATE a backfill would
+    need — so a pre-release iteration whose evidence was deleted stays
+    undetectable at this layer forever
+    (`test_a_legacy_iteration_event_can_never_be_bound_retroactively_pinned`);
+  - an **older** record for a task whose goalpost has since moved is not
+    compared, because comparing every record would make each honest
+    re-verification a permanent failure
+    (`test_an_older_record_for_a_moved_goalpost_is_not_compared_pinned`);
+  - a hand-written record **satisfies `all_required_verified_evidence` in a
+    contract that has no event store**, because there is nothing to bind
+    against — and deleting a store from a run that had one is *quieter*, not
+    louder: sidecar-free reads leave no residue for the `missing_event_store`
+    tripwire, so plain doctor reports `ok` with zero issues. The external
+    anchor is the compensating control
+    (`test_the_strict_mode_accepts_a_hand_written_record_in_a_store_less_contract_pinned`);
+  - deleting the artifacts, the records, the store **and** its sidecars leaves a
+    contract that never ran, and doctor is clean and correct to be — detection
+    needs something outside the tree
+    (`test_deleting_every_artifact_and_the_store_leaves_a_clean_doctor_pinned`,
+    whose own positive control is the anchor);
+  - and — the headline — **a worker who can rewrite `.loop/` can rewrite the
+    store, so without `--expect-chain-head` a full rewrite of artifacts *and*
+    chain verifies clean, including under the strict completion mode**
+    (`test_a_full_rewrite_of_artifacts_and_store_is_not_caught_without_an_anchor_pinned`,
+    `test_a_full_rewrite_satisfies_the_strict_mode_without_an_anchor_pinned`).
 
 This does not prove independence. It surfaces **declared** self-verification,
-and it records — honestly, with nulls where the process could not know —
-what verified the work.
+and it records — honestly, with nulls where the process could not know — what
+verified the work. This does not make evidence tamper-proof. It binds evidence
+bytes into a chain someone outside the worker's trust domain can anchor, and it
+fails closed when what is on disk is not what was verified.
 
 ---
 
@@ -995,12 +1193,11 @@ non-empty `justification`, and `{by, at}` `authority`, and its `causation_id`
 must identify the terminal event it corrects; chained corrections therefore
 remain auditable without replacing any record.
 
-**Scope boundary:** this is a fifth event type with no corresponding
-`loop.emit` writer operation — deliberately: unlike the other four,
-`terminal_superseded` is administrative and event-log-only; §16's
-“one-to-one with `loop.emit`'s four writer operations” describes the other four
-types and predates this addition. It is not file-based `terminal@1` replacement
-or an `emit`/`doctor` workflow.
+**Scope boundary:** this event type has no corresponding `loop.emit` writer
+operation — deliberately: unlike the first four types, `terminal_superseded` is
+administrative and event-log-only (§16's type list records which four types map
+to writer operations and which five do not). It is not file-based `terminal@1`
+replacement or an `emit`/`doctor` workflow.
 
 **Domain enforcement:** the EventStore validates envelope and payload shape
 only; the reducer alone admits this type after a terminal, verifies its
@@ -1105,9 +1302,12 @@ only finding is the anchor. A present, readable store adds
 `"event_store": {"present": true, "readable": true, "run_id", "event_count",
 "state_json_agrees", "deterministic", "legal_sequence", "chain"}`; any of
 `state_field_mismatch`, `desynced_terminal_window`, `terminal_state_mismatch`,
-`illegal_event_sequence`, `event_chain_broken`, `chain_columns_missing`, or
-`chain_anchor_mismatch` fails doctor (`ok: false`) with the identical issue
-code the `status`/`replay` verbs already use. A store that cannot be read at
+`illegal_event_sequence`, `event_chain_broken`, `chain_columns_missing`,
+`evidence_chain_mismatch`, `missing_bound_evidence`, or
+`chain_anchor_mismatch` fails doctor (`ok: false`). The findings that come from
+the composed verbs keep the identical issue code those verbs already use;
+`chain_columns_missing`, `evidence_chain_mismatch` and `missing_bound_evidence`
+are doctor's own store-gated checks, appended to the same list. A store that cannot be read at
 all — `corrupt_store`, `empty_store`, `invalid_event`, or `ambiguous_run_id` —
 also fails doctor rather than being silently skipped; `"event_store"` reports
 `{"present": true, "readable": false, "error_code": <code>}` in that case.
@@ -1139,13 +1339,35 @@ it is the honest statement of how much of the log the chain does not cover.
 | `missing_event_store` | `events.db` is absent but `-wal`/`-shm` sidecars remain — the store was deleted. Distinct from the pre-existing `missing_store`, which `status`/`replay`/`run`/`migrate` raise when a verb that *requires* a store is pointed at a workspace that has none; `missing_event_store` is a doctor finding about a store that evidently once existed. |
 | `self_verified_evidence` | A discovered evidence@1 record declares `produced_by.executor == verified_by.by` (strip+casefold) — the producer verified its own work. Enforces the independence rule of `reference/safety-and-approvals.md` §5, which was prose-only before v0.11.0. |
 | `missing_evidence_record` | A runner-written verify bundle `.loop/artifacts/verify-iter<N>.json` exists with no matching `.loop/evidence/evidence-iter<N>.json`. Residue of a removed provenance record, in the same family as `missing_event_store`. Fires only when a bundle is present, so an absent-everything contract stays byte-identical. |
+| `evidence_chain_mismatch` | An artifact whose digest an event bound into the hash chain no longer matches its bytes on disk. The message names the digest the chain committed and the digest found; the original bytes may still remain in the content-addressed object store at `.loop/artifacts/objects/<aa>/<sha256>`. |
+| `missing_bound_evidence` | An event bound an artifact path into the chain and that path is now absent or unreadable — a deleted bundle/record pair, a deleted object, or the sanctioned crash window between the durable append and the evidence write. Fires only for events that bound something: a legacy event binds nothing and is silent by construction. |
+| `policy_digest_mismatch` | The **latest** evidence record for a task records a `policy_digest` that is not the live `TASKS.json` goalpost — the declared `verify`/`criterion_ref`/`depends_on`/`id` changed after the verification. Also fires when the live entry cannot be canonicalized at all, because a comparison that cannot run has not passed. Re-verify to record the current goalpost. |
+| `unverified_evidence_terminal` | A `Succeeded` terminal declaring `completion_policy.mode: all_required_verified_evidence` has an evidence entry that fails one of the mode's three checks: it is not a hash-verified evidence@1 record; or (when an event store exists) no event bound those bytes into the chain; or the record's `policy_digest` is not the live `TASKS.json` goalpost for the task it names. The message names which. An unreadable store is also a failure. In a contract with **no** event store the middle check is skipped — the mode's strength is store-dependent by construction (§17). |
+
+**Do not confuse `missing_evidence_record` with `missing_evidence_path`.** They
+are opposite directions of the same pair. `missing_evidence_record` walks
+*bundles* looking for the record that should describe them.
+`missing_evidence_path` comes straight out of `verify_evidence()` and means a
+*record's* `uri` does not resolve. Both can be true at once and neither implies
+the other.
 
 **Evidence discovery (v0.11.0+).** `loop doctor` scans `.loop/evidence/*.json`
 when the directory exists; an absent directory with no runner bundle is a
 no-op that leaves every doctor key byte-identical (no new top-level key was
 added). A malformed or unparseable record **fails** doctor rather than being
 skipped, and `loop-engineer/evidence@1` joins `schemas_checked` when at least
-one record was read.
+one record was read. Since the evidence-wiring release each structurally-valid
+record is additionally passed to `verify_evidence()` — surfacing
+`hash_mismatch`, `missing_evidence_path`, `workspace_escape`, `not_a_file` and
+`invalid_uri` **verbatim**, per the rule that doctor composes a verb and reuses
+its issue codes rather than inventing parallel ones — and the latest record per
+task is compared against the live goalpost (`policy_digest_mismatch`). The
+`verify_evidence()` call is guarded on the record having no structural issues,
+so a malformed record is reported once, not twice. The chain-binding walk is a
+separate, store-gated check that lives beside `chain_columns_missing` in the
+event-store block above; it costs one extra read-only fold of the store, because
+it needs envelope-level `artifact_hashes` that no report returns and widening a
+report's dict would leak into the `loop status` / `loop replay` CLI JSON.
 
 **`loop migrate`.** `loop migrate <workspace>` is the only store-upgrade path:
 explicit, idempotent, and non-rewriting. It widens `events` with the two

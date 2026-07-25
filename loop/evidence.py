@@ -1,11 +1,21 @@
 """loop-engineer/evidence@1 — hashed evidence + artifact provenance.
 
 ``loop doctor`` discovers and validates records from the declared location
-``.loop/evidence/*.json`` (reference/repo-os-contract.md #17) and reports
-``self_verified_evidence`` / ``missing_evidence_record``. It does NOT yet
-hash-verify the artifacts those records reference, and it never compares a
-recorded digest against anything — ``verify_evidence()`` below is the explicit,
-caller-invoked check. That wiring is the evidence-wiring slice.
+``.loop/evidence/*.json`` (reference/repo-os-contract.md #17), reports
+``self_verified_evidence`` / ``missing_evidence_record``, and — since the
+evidence-wiring release — composes ``verify_evidence()`` below over every
+structurally-valid record, so a referenced artifact that does not hash to the
+digest its record declares fails doctor as ``hash_mismatch``. Doctor also
+compares the latest record per task against the live TASKS.json goalpost
+(``policy_digest_mismatch``), and re-hashes whatever an event bound into the
+chain (``evidence_chain_mismatch`` / ``missing_bound_evidence``).
+
+What is still NOT checked here: ``code_digest`` is never re-hashed against the
+verifier file (a verify script legitimately changes between runs, and an
+unbaselined comparison would fire on every honest edit), and none of this proves
+provenance — a hand-written record whose pointer resolves and whose digests are
+self-consistent is indistinguishable from one a dispatch produced. Verification
+proves the pointer, never the producer.
 """
 
 from __future__ import annotations
