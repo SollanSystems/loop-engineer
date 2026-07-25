@@ -1,8 +1,11 @@
 """loop-engineer/evidence@1 — hashed evidence + artifact provenance.
 
-Kernel-side validation and verification only: this module is standalone in v1
-and is not yet read by ``loop doctor`` (see reference/repo-os-contract.md #17).
-Writer and doctor wiring are deferred to the execution-runtime milestone.
+``loop doctor`` discovers and validates records from the declared location
+``.loop/evidence/*.json`` (reference/repo-os-contract.md #17) and reports
+``self_verified_evidence`` / ``missing_evidence_record``. It does NOT yet
+hash-verify the artifacts those records reference, and it never compares a
+recorded digest against anything — ``verify_evidence()`` below is the explicit,
+caller-invoked check. That wiring is the evidence-wiring slice.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .contract import ContractIssue, _resolve_requested_mode, _schemas_dir
+from .verifier import CODE_DIGEST_BASES
 
 
 EVIDENCE_SCHEMA_ID = "loop-engineer/evidence@1"
@@ -37,6 +41,10 @@ def _is_non_empty_string(value: Any) -> bool:
 
 def _is_valid_uri(value: Any) -> bool:
     return _is_non_empty_string(value) and _URI_PATTERN.fullmatch(value) is not None
+
+
+def _is_sha256_or_null(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and _SHA256_PATTERN.fullmatch(value) is not None)
 
 
 def _structural_validate_evidence(data: dict[str, Any]) -> list[ContractIssue]:
@@ -79,6 +87,19 @@ def _structural_validate_evidence(data: dict[str, Any]) -> list[ContractIssue]:
             for field in ("by", "at"):
                 if not _is_non_empty_string(verified_by.get(field)):
                     issues.append(ContractIssue("invalid_evidence", f"verified_by.{field} must be a non-empty string"))
+            command = verified_by.get("command")
+            if command is not None and not isinstance(command, str):
+                issues.append(ContractIssue("invalid_evidence", "verified_by.command must be a string or null"))
+            for field in ("code_digest", "policy_digest"):
+                if not _is_sha256_or_null(verified_by.get(field)):
+                    issues.append(ContractIssue(
+                        "invalid_evidence",
+                        f"verified_by.{field} must be a 64-character lowercase hexadecimal string or null"))
+            basis = verified_by.get("code_digest_basis")
+            if basis is not None and basis not in CODE_DIGEST_BASES:
+                issues.append(ContractIssue(
+                    "invalid_evidence",
+                    f"verified_by.code_digest_basis must be null or one of {CODE_DIGEST_BASES}"))
 
     policy_result = data.get("policy_result")
     if policy_result is not None:
@@ -101,15 +122,19 @@ def _jsonschema_validate_evidence(data: dict[str, Any]) -> list[ContractIssue]:
     return issues
 
 
+def evidence_issues(data: Any, *, resolved_mode: str) -> list[ContractIssue]:
+    """Mode-dispatched issue list for one record — the seam doctor discovery reuses."""
+    if not isinstance(data, dict):
+        return [ContractIssue("invalid_evidence", "evidence record must be an object")]
+    if resolved_mode == "jsonschema":
+        return _jsonschema_validate_evidence(data)
+    return _structural_validate_evidence(data)
+
+
 def validate_evidence(data: dict[str, Any], *, mode: str | None = None) -> dict[str, Any]:
     """Validate a standalone evidence@1 record in the requested validation mode."""
     requested_mode, resolved_mode = _resolve_requested_mode(mode)
-    if not isinstance(data, dict):
-        issues = [ContractIssue("invalid_evidence", "evidence record must be an object")]
-    elif resolved_mode == "jsonschema":
-        issues = _jsonschema_validate_evidence(data)
-    else:
-        issues = _structural_validate_evidence(data)
+    issues = evidence_issues(data, resolved_mode=resolved_mode)
     return {"ok": not issues, "validation_mode": resolved_mode, "requested_mode": requested_mode,
             "schemas_checked": [EVIDENCE_SCHEMA_ID], "issues": issues}
 

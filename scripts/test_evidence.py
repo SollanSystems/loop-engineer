@@ -11,7 +11,14 @@ from pathlib import Path
 import pytest
 
 from loop.contract import ValidationModeError
-from loop.evidence import EVIDENCE_SCHEMA_ID, EvidenceError, artifact_object_path, validate_evidence, verify_evidence
+from loop.evidence import (
+    EVIDENCE_SCHEMA_ID,
+    EvidenceError,
+    artifact_object_path,
+    evidence_issues,
+    validate_evidence,
+    verify_evidence,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -121,6 +128,90 @@ def test_strict_and_release_require_jsonschema(mode: str, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "jsonschema", None)
     with pytest.raises(ValidationModeError):
         validate_evidence(evidence(), mode=mode)
+
+
+_IDENTITY = {
+    "by": "ci", "at": "2026-07-25T00:00:00+00:00",
+    "command": "./scripts/verify-fast.sh",
+    "code_digest": "a" * 64, "code_digest_basis": "workspace_file",
+    "policy_digest": "b" * 64,
+}
+
+
+def _record(**verified_by_overrides):
+    verified_by = dict(_IDENTITY)
+    verified_by.update(verified_by_overrides)
+    return {
+        "schema": "loop-engineer/evidence@1", "id": "e1", "kind": "verify-bundle",
+        "uri": ".loop/artifacts/verify-iter5.json", "sha256": "c" * 64,
+        "media_type": "application/json", "created_at": "2026-07-25T00:00:00+00:00",
+        "produced_by": {"run_id": "run-1", "task_id": "T-1", "attempt": 1, "executor": "worker-a"},
+        "verified_by": verified_by,
+    }
+
+
+def _modes():
+    return ["basic", "strict"]
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_identity_fields_are_accepted(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    assert validate_evidence(_record(), mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_identity_fields_accept_explicit_nulls(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    record = _record(command=None, code_digest=None, code_digest_basis="injected_verifier",
+                     policy_digest=None)
+    assert validate_evidence(record, mode=mode)["ok"] is True
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_malformed_code_digest_is_rejected(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    assert validate_evidence(_record(code_digest="NOTHEX"), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_malformed_policy_digest_is_rejected(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    assert validate_evidence(_record(policy_digest="short"), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_unknown_code_digest_basis_is_rejected(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    assert validate_evidence(_record(code_digest_basis="vibes"), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_non_string_command_is_rejected(mode):
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    assert validate_evidence(_record(command=17), mode=mode)["ok"] is False
+
+
+@pytest.mark.parametrize("mode", _modes())
+def test_identity_digests_with_a_trailing_newline_are_rejected_in_both_modes(mode):
+    # Same re.search-semantics hole the sha256 field closes with maxLength 64:
+    # without it the identity digests would part company across the two modes.
+    if mode == "strict":
+        pytest.importorskip("jsonschema")
+    for field in ("code_digest", "policy_digest"):
+        dirty = _record(**{field: "a" * 64 + "\n"})
+        assert validate_evidence(dirty, mode=mode)["ok"] is False
+
+
+def test_evidence_issues_seam_dispatches_on_resolved_mode():
+    assert evidence_issues(_record(), resolved_mode="structural-fallback") == []
+    assert evidence_issues("not an object", resolved_mode="structural-fallback")[0]["code"] == "invalid_evidence"
 
 
 def test_verify_evidence_accepts_matching_file(tmp_path) -> None:
