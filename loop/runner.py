@@ -252,17 +252,30 @@ def dispatch_once(
         "task_id": task["id"],
         "summary": outcome.summary,
     }
+    # Rendered BEFORE the append and written AFTER it. Building first is what lets
+    # the event carry the digests of the very bytes that will land; the builder
+    # writes nothing, so a SIGKILL at the pre-commit COMMIT still leaves the tree
+    # byte-identical (test_crash_injection_before_iteration_event_commit_...).
+    try:
+        built = emit.build_verify_evidence(
+            target, run_id=run_id, iteration_id=iteration_id, task=task,
+            passed=outcome.passed, summary=outcome.summary, code_identity=code_identity,
+            executor=executor, verifier_identity=verifier_identity, attempt=attempt,
+        )
+    except emit.EmitError as exc:
+        raise RunnerError(
+            f"cannot build the verify evidence for iteration {iteration_id}: {exc}"
+        ) from exc
     store = SQLiteEventStore(paths.loop_dir / "events.db")
     _store_append(store, run_id, "iteration_appended", payload, actor="loop.run",
+                  artifact_hashes=list(built.artifact_hashes),
                   expected_sequence=projection["last_sequence"] + 1)
-    # Evidence is written AFTER the durable append: writing it first would leave a
-    # bundle behind a SIGKILL at the pre-commit COMMIT and break the zero-write
-    # crash pin (test_crash_injection_before_iteration_event_commit_...).
     try:
         written = emit.write_verify_evidence(
             target, run_id=run_id, iteration_id=iteration_id, task=task,
             passed=outcome.passed, summary=outcome.summary, code_identity=code_identity,
             executor=executor, verifier_identity=verifier_identity, attempt=attempt,
+            built=built,
         )
     except (OSError, emit.EmitError) as exc:
         raise RunnerError(
@@ -273,4 +286,4 @@ def dispatch_once(
                           task_id=payload["task_id"], notes=payload["summary"])
     return {"ok": True, "action": "dispatched", "task_id": task["id"],
             "outcome": payload["outcome"], "iteration_id": iteration_id, "run_id": run_id,
-            "evidence": str(written["evidence"])}
+            "evidence": str(written["evidence"]), "object": str(written["object"])}
