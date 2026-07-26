@@ -312,7 +312,13 @@ def hash_bound_artifact(
                                   f"bound-artifact read cap, so its digest was not computed")
         digest = hashlib.sha256()
         read = 0
-        with os.fdopen(os.dup(fd), "rb") as source:
+        duplicate = os.dup(fd)
+        try:
+            source = os.fdopen(duplicate, "rb")
+        except OSError:
+            os.close(duplicate)          # fdopen never took ownership
+            raise
+        with source:
             while chunk := source.read(64 * 1024):
                 read += len(chunk)
                 if read > max_bytes:

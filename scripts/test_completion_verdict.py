@@ -173,6 +173,27 @@ def test_a_score_only_bundle_reads_red_at_the_strict_bar(tmp_path):
                        evidence=[_RECORD], completion_policy=VERIFIED_EVIDENCE_MODE)
 
 
+def test_a_self_contradicting_verdict_reads_green_pinned(tmp_path):
+    """The OR rule's cost, pinned rather than discovered later.
+
+    ``verify_bundle_is_green`` is satisfied by EITHER token, so a bundle claiming
+    ``outcome: PASS`` while ``passed`` is false reads green and can back a strict
+    ``Succeeded``. That is the repo's canonical rule, shared object-for-object with
+    the FCR gate, so tightening it here alone would make one bundle green to the
+    completion bar and red to metrics — a worse defect than the one it fixes.
+    Changing it is a repo-wide decision about what a verdict means, not a patch.
+    """
+    workspace = _dispatched(tmp_path, "contradicting", exit_code=0)
+    record_path = _rewrite_bundle(
+        workspace, json.dumps({"outcome": "PASS", "passed": False}) + "\n")
+    _rebind(workspace, record_path)
+    path = emit.terminate(workspace, state="Succeeded", criteria_met={"T-1": True},
+                          evidence=[_RECORD], completion_policy=VERIFIED_EVIDENCE_MODE)
+    assert json.loads(path.read_text(encoding="utf-8"))["completion_policy"] == {
+        "mode": VERIFIED_EVIDENCE_MODE}                                    # accepted
+    assert evidence.verify_bundle_is_green({"outcome": "PASS", "passed": False}) is True
+
+
 # --- the non-verify-bundle kind, decided explicitly ---------------------------
 
 

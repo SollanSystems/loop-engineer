@@ -1090,8 +1090,15 @@ was bound at, not the last one. Collapsing repeat bindings would be a laundering
 channel rather than a summary: an append-only forge that re-binds a tampered path
 at its new digest would look bound to the writer while the per-event walk still
 reported `evidence_chain_mismatch` on the same tree. A path bound at two or more
-different digests is therefore refused outright, which is what keeps the writer
-from ever accepting a terminal its own replay would refuse.
+different digests is therefore refused outright.
+
+The scope of that refusal is the **cited** evidence, and no wider. The write-time
+bar examines each entry a `Succeeded` terminal cites and the artifact that entry's
+`uri` names; it does not walk the other paths those events happened to bind. So a
+tree can carry an ambiguously-bound artifact that no terminal cites, and the
+writer will not see it while `loop doctor`'s per-event walk still reports
+`evidence_chain_mismatch`. The two layers agree about every path a terminal
+rests on, which is the claim; they are not two spellings of the same sweep.
 
 **What it does not prove, stated without hedging.** It does not prove that a
 human, a runner, or anything at all *produced* the record: a hand-written record
@@ -1132,7 +1139,7 @@ in `reason` — either `tasks with no evidence record: …` or `evidence records
 not meet the verified-evidence bar: <record> <sub-check>`. Downgrading silently
 would be a self-serving choice; both branches are pinned.
 
-### Upgrade notes — three behavioural changes, stated without hedging
+### Upgrade notes — four behavioural changes, stated without hedging
 
 These are not opt-in, and two of them can turn a contract that was clean on the
 previous release red on this one. They are recorded here rather than left to be
@@ -1174,6 +1181,15 @@ Previously the same limitation existed but was hit once, at terminal write. Ther
 is no fallback copy path by design — a non-atomic create would reopen the
 overwrite race the hard link closes — so this is a known limitation of running a
 loop on such a filesystem, not a configuration option.
+
+**4. A bound artifact above the read cap fails doctor, and there is no knob.** The
+binding walk refuses to hash a bound path larger than `MAX_BOUND_ARTIFACT_BYTES`
+(64 MiB) and reports `missing_bound_evidence`, because a gate must not perform an
+unbounded read on a path an event names. A loop that legitimately binds an
+artifact above that size — a large log, a coverage dump — therefore goes red with
+no in-product remedy and no configuration option, the same un-satisfiable shape as
+note 1. Bind a digest of the large artifact rather than the artifact itself, or
+keep it out of `artifact_hashes`.
 
 ### The integrity boundary, in four honest tiers
 

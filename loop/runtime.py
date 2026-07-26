@@ -362,8 +362,8 @@ def _bound_evidence_issues(target: str | Path, mode: str | None) -> list[dict[st
                 issues.append(ContractIssue(
                     "bound_evidence_escape",
                     f"event {event['event_id']} (sequence {event['sequence']}) bound "
-                    f"{entry['path']!r}, which {detail} — a bound path outside the "
-                    f"workspace is a finding, not something to read"))
+                    f"{entry['path']!r}, which {detail} — a bound path that does not "
+                    f"resolve inside the workspace is a finding, not something to read"))
                 continue
             if code == "unreadable":
                 issues.append(ContractIssue(
