@@ -14,6 +14,53 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## 0.11.0 — 2026-07-26
+
+**Verifier identity, and evidence that is load-bearing.** Two slices of the
+tamper-evident-provenance program ship together, because neither was cut on its own.
+
+*Verifier identity and independence (PR #94).* evidence@1 records now carry
+`verified_by.code_digest` and `verified_by.policy_digest` — the runner hashes the
+verifier it actually executed and the goalpost it was held to. `loop doctor`
+reports `self_verified_evidence` when a record declares that its producer also
+verified it, making the independence rule of `reference/safety-and-approvals.md` §5
+a machine check rather than prose. Verify bundles record the visible/held-out
+criterion partition.
+
+*Evidence wiring (PR #102).* A verified dispatch binds its evidence digests into
+the hash chain at append time, using the existing `artifact_hashes` envelope field
+— no new event type and still one append per dispatch. The bundle is also written
+to a content-addressed object store whose location is derived from the digest, so
+a third-party reader finds the original bytes from `record["sha256"]` alone and a
+swapped bundle no longer destroys the evidence. `loop doctor` hash-verifies every
+discovered record, re-hashes what the chain bound, and compares a record's
+`policy_digest` against the live `TASKS.json` goalpost. Five new issue codes:
+`evidence_chain_mismatch`, `missing_bound_evidence`, `policy_digest_mismatch`,
+`unverified_evidence_terminal`, `bound_evidence_escape`.
+
+**Behavioural flag — `Succeeded` can now mean more.** The opt-in
+`completion_policy.mode: all_required_verified_evidence` requires every cited
+evidence entry to be a workspace-relative record that hash-verifies, **attests a
+pass**, is chain-bound wherever a store exists, and agrees with the live goalpost.
+The default `all_required` is unchanged and every record written before this
+release still validates. The canonical green-marker rule now lives in
+`loop.evidence.verify_bundle_is_green` and is shared object-for-object with
+`scripts/metrics.py`, so a bundle cannot read RED to the FCR gate and GREEN to the
+completion gate.
+
+**Known limitations, stated rather than discovered.** Binding makes tampering
+detectable against an anchor, not impossible: without `--expect-chain-head` a
+worker who can rewrite `.loop/` can rewrite the chain too, and a contract with no
+event store cannot chain-bind at all. Deleting `.loop/events.db` after a run leaves
+plain `loop doctor` quiet — the `missing_event_store` tripwire only fires on
+leftover `-wal`/`-shm` residue — so the external anchor is the control that holds.
+Four upgrade notes in `reference/repo-os-contract.md` §17 name the behaviour that
+can turn a previously-clean contract red: `policy_digest_mismatch` is not opt-in
+and has no first-class re-baseline affordance; the `completion_policy` enum
+widening is forward-incompatible as a hard error against an older kernel; `os.link`
+now runs once per dispatch; and a bound artifact above the 64 MiB read cap fails
+doctor with no configuration knob.
+
 ## 0.10.0 — 2026-07-25
 
 **The hash-linked event chain.** Every `loop-engineer/event@1` row now carries
