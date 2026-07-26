@@ -9,11 +9,17 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from loop import emit
 from loop.contract import doctor_report
+from loop.events import SQLiteEventStore
 from loop.evidence import verify_evidence
+from loop.runner import dispatch_once
 from loop.verifier import (executed_verifier_identity, injected_verifier_identity,
                            verification_policy_digest, verifier_code_digest)
+
+_RAMP = ("plan", "critique-plan", "queue-tasks", "execute-task")
 
 
 def _task(**overrides):
@@ -30,6 +36,37 @@ def _ws(tmp_path):
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     return workspace
+
+
+@pytest.fixture
+def bound_workspace(tmp_path):
+    """One real dispatch behind an event store: iteration 1's artifacts ARE chain-bound.
+
+    The store's ramp records the FSM walk to execute-task, not work — its events carry
+    iteration_id 0 — so the first dispatch is iteration 1 and both paths are literal.
+    """
+    workspace = tmp_path / "bound"
+    emit.open_contract(workspace)
+    (workspace / "TASKS.json").write_text(json.dumps({
+        "schema": "loop-engineer/tasks@1",
+        "tasks": [_task(criterion_ref="T-1", title="T-1")]}), encoding="utf-8")
+    script = workspace / "scripts" / "verify-fast.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    store = SQLiteEventStore(workspace / ".loop" / "events.db")
+    store.append("run-1", "contract_opened", {"workspace": "bound"}, actor="test")
+    for state in _RAMP:
+        store.append("run-1", "iteration_appended",
+                     {"iteration_id": 0, "outcome": "replanned", "state": state}, actor="test")
+    state_path = workspace / ".loop" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["state"] = _RAMP[-1]
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    dispatch_once(workspace)
+    return {"workspace": workspace,
+            "bundle": workspace / ".loop" / "artifacts" / "verify-iter1.json",
+            "record": workspace / ".loop" / "evidence" / "evidence-iter1.json"}
 
 
 def _write(workspace, *, iteration_id=1, task=None, passed=True, **kwargs):
@@ -64,10 +101,15 @@ def test_unattributed_executor_never_trips_the_finding_pinned(tmp_path):
     assert "self_verified_evidence" not in _codes(doctor_report(workspace))
 
 
-def test_deleting_both_bundle_and_record_leaves_doctor_clean_pinned(tmp_path):
-    """Deleting the RECORD alone is caught (missing_evidence_record). Deleting the
-    PAIR is not: nothing outside the event log remembers the dispatch happened.
-    Slice 3 closes this by making Succeeded require hash-verified evidence.
+def test_deleting_both_bundle_and_record_is_caught_only_when_the_chain_binds_them(tmp_path,
+                                                                                  bound_workspace):
+    """Was `test_deleting_both_bundle_and_record_leaves_doctor_clean_pinned`; the
+    detection half arrived with chain-bound evidence in the evidence-wiring release.
+
+    The RESIDUAL is unchanged and kept: written through the writer API with no event
+    store behind it, nothing outside the tree remembers the dispatch happened, so
+    deleting the pair is still invisible. Where a dispatch bound them, the committed
+    event names artifacts that are gone — `missing_bound_evidence`.
     """
     workspace = _ws(tmp_path)
     written = _write(workspace, executor="w", verifier_identity="w")
@@ -75,13 +117,21 @@ def test_deleting_both_bundle_and_record_leaves_doctor_clean_pinned(tmp_path):
     written["evidence"].unlink()
     assert "missing_evidence_record" in _codes(doctor_report(workspace))  # residue IS caught
     written["bundle"].unlink()
-    assert doctor_report(workspace)["ok"] is True                         # the pair is not
+    assert doctor_report(workspace)["ok"] is True                         # residual: the pair is not
+    bound_workspace["record"].unlink()
+    bound_workspace["bundle"].unlink()
+    assert "missing_bound_evidence" in _codes(doctor_report(bound_workspace["workspace"]))
 
 
-def test_rewriting_the_evidence_record_to_independent_identities_leaves_doctor_clean_pinned(tmp_path):
-    """The record is a plain file OUTSIDE the hash chain. A worker with write access
-    to .loop/ can rewrite it after the fact and doctor will not notice. Binding the
-    record digest into the chain is Slice 3.
+def test_rewriting_the_evidence_record_is_caught_only_when_the_chain_binds_it(tmp_path,
+                                                                              bound_workspace):
+    """Was `test_rewriting_the_evidence_record_to_independent_identities_leaves_doctor_clean_pinned`;
+    the detection half arrived with chain-bound evidence in the evidence-wiring release.
+
+    The RESIDUAL is unchanged and kept: a record written by the writer API with no event
+    store behind it is still a plain file, and a rewrite of it is still invisible. A
+    record a dispatch bound is not — its bytes are covered by `event_hash`, so the
+    rewrite surfaces as `evidence_chain_mismatch`.
     """
     workspace = _ws(tmp_path)
     written = _write(workspace, executor="solo", verifier_identity="solo")
@@ -89,12 +139,23 @@ def test_rewriting_the_evidence_record_to_independent_identities_leaves_doctor_c
     record = json.loads(written["evidence"].read_text(encoding="utf-8"))
     record["verified_by"]["by"] = "ci"
     written["evidence"].write_text(json.dumps(record), encoding="utf-8")
-    assert doctor_report(workspace)["ok"] is True
+    assert doctor_report(workspace)["ok"] is True                         # residual
+    bound = bound_workspace["record"]
+    data = json.loads(bound.read_text(encoding="utf-8"))
+    data["verified_by"]["by"] = "ci"
+    bound.write_text(json.dumps(data), encoding="utf-8")
+    assert "evidence_chain_mismatch" in _codes(doctor_report(bound_workspace["workspace"]))
 
 
 def test_hand_written_record_with_a_fabricated_code_digest_is_doctor_clean_pinned(tmp_path):
     """Digests are values the WRITER asserts. Doctor validates their shape, never
     their truth — a hand-written record is indistinguishable from a runner-written one.
+
+    Narrower since the evidence-wiring release, and deliberately still true: what IS
+    now checked is the bundle's BYTES (the record's `sha256` must hash the file its
+    `uri` names) and, for a task still declared in TASKS.json, the recorded
+    `policy_digest` against the live goalpost. `code_digest` remains unchecked, and
+    this record names a task the scaffold's TASKS.json does not declare.
     """
     workspace = _ws(tmp_path)
     written = _write(workspace)
@@ -108,29 +169,44 @@ def test_hand_written_record_with_a_fabricated_code_digest_is_doctor_clean_pinne
     assert doctor_report(workspace)["ok"] is True
 
 
-def test_no_automated_digest_comparison_exists_pinned(tmp_path):
-    """Two records for the same task with DIFFERENT policy digests: doctor is silent.
-    Nothing in this release compares a recorded digest against anything.
+def test_policy_digest_comparison_fires_only_against_a_live_task_entry(tmp_path):
+    """Was `test_no_automated_digest_comparison_exists_pinned`; the comparison arrived in
+    the evidence-wiring release.
+
+    The RESIDUAL is its two silences, both kept here: a record naming a task TASKS.json
+    no longer declares is never compared (a rename or removal is a replan, not a
+    forgery), and neither is any record that is not the latest for its task. Both
+    records below move the goalpost, and doctor stays quiet until the task is live.
     """
     workspace = _ws(tmp_path)
-    _write(workspace, iteration_id=1, task=_task())
+    _write(workspace, iteration_id=1, task=_task())                # T-1 is not in TASKS.json
     _write(workspace, iteration_id=2, task=_task(verify="true"))
     digests = {json.loads((workspace / ".loop" / "evidence" / f"evidence-iter{n}.json")
                           .read_text(encoding="utf-8"))["verified_by"]["policy_digest"]
                for n in (1, 2)}
-    assert len(digests) == 2                       # the goalpost demonstrably moved
-    assert doctor_report(workspace)["ok"] is True  # and nothing surfaced it
+    assert len(digests) == 2                                       # the goalpost demonstrably moved
+    assert "policy_digest_mismatch" not in _codes(doctor_report(workspace))       # residual
+    (workspace / "TASKS.json").write_text(json.dumps(
+        {"schema": "loop-engineer/tasks@1", "project": "p", "tasks": [_task(status="pending")]}),
+        encoding="utf-8")
+    assert "policy_digest_mismatch" in _codes(doctor_report(workspace))
 
 
-def test_doctor_does_not_hash_verify_the_referenced_bundle_pinned(tmp_path):
-    """Slice 2 checks structure, declared independence, and record presence only."""
+def test_doctor_hash_verifies_the_referenced_bundle(tmp_path):
+    """Was `test_doctor_does_not_hash_verify_the_referenced_bundle_pinned`; doctor gained
+    the composition in the evidence-wiring release.
+
+    Slice 2 checked structure, declared independence and record presence only, and the
+    hash check existed but nothing called it. Doctor now composes `verify_evidence` over
+    every discovered record and surfaces its `hash_mismatch` verbatim.
+    """
     workspace = _ws(tmp_path)
     written = _write(workspace, passed=False)
     written["bundle"].write_text(json.dumps({"outcome": "PASS", "passed": True}), encoding="utf-8")
     record = json.loads(written["evidence"].read_text(encoding="utf-8"))
-    # control: the hash check EXISTS and catches this swap — doctor just never calls it.
+    # the standalone verb and the doctor sweep now agree, and doctor says it in its issues
     assert verify_evidence(record, workspace_root=workspace)["ok"] is False
-    assert doctor_report(workspace)["ok"] is True
+    assert "hash_mismatch" in _codes(doctor_report(workspace))
 
 
 def test_code_digest_is_null_for_the_common_python_m_pytest_command_pinned(tmp_path):

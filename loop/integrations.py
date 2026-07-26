@@ -28,7 +28,9 @@ from typing import Sequence
 from .completion import (
     CompletionPolicyError,
     criteria_satisfy_completion,
+    evidence_entry_is_record_shaped,
     normalize_completion_policy,
+    policy_requires_verified_evidence,
     unmet_required_criteria,
 )
 
@@ -169,6 +171,12 @@ def to_terminal_state(
         )
     if evidence_error is not None:
         return body("FailedUnverifiable", "invalid evidence artifacts: " + evidence_error)
+    # Structural half only, fail-closed: a pure projection holds no workspace and must
+    # not pretend to hash-verify or chain-check what it cites.
+    if (policy_requires_verified_evidence(normalized_policy)
+            and not all(evidence_entry_is_record_shaped(item) for item in artifacts)):
+        return body("FailedUnverifiable",
+                    "green gate but an evidence artifact is not verified evidence — cannot certify")
     if not artifacts:
         return body("FailedUnverifiable", "green gate but no evidence artifacts — cannot certify")
     if not outcome.reached_end:

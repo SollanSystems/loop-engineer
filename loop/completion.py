@@ -11,9 +11,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Final, Literal, TypeAlias, cast
 
-CompletionMode: TypeAlias = Literal["all_required"]
+CompletionMode: TypeAlias = Literal["all_required", "all_required_verified_evidence"]
 DEFAULT_COMPLETION_MODE: Final[CompletionMode] = "all_required"
-SUPPORTED_COMPLETION_MODES: Final[tuple[CompletionMode, ...]] = (DEFAULT_COMPLETION_MODE,)
+VERIFIED_EVIDENCE_MODE: Final[CompletionMode] = "all_required_verified_evidence"
+SUPPORTED_COMPLETION_MODES: Final[tuple[CompletionMode, ...]] = (
+    DEFAULT_COMPLETION_MODE,
+    VERIFIED_EVIDENCE_MODE,
+)
+
+_RECORD_PREFIX = ".loop/evidence/"
 
 
 class CompletionPolicyError(ValueError):
@@ -63,9 +69,22 @@ def criteria_satisfy_completion(
     ``True``; truthy substitutes such as ``1`` are deliberately rejected.
     """
     normalized = normalize_completion_policy(policy)
-    if normalized["mode"] == "all_required":
+    if normalized["mode"] in SUPPORTED_COMPLETION_MODES:
+        # The criteria half is deliberately shared: the verified-evidence mode raises
+        # the EVIDENCE bar, never the criteria bar.
         return bool(criteria_met) and all(value is True for value in criteria_met.values())
     raise AssertionError(f"unhandled completion policy: {normalized!r}")
+
+
+def policy_requires_verified_evidence(policy: object | None = None) -> bool:
+    """True when this policy's evidence bar is hash-verified records, not path strings."""
+    return normalize_completion_policy(policy)["mode"] == VERIFIED_EVIDENCE_MODE
+
+
+def evidence_entry_is_record_shaped(entry: object) -> bool:
+    """The structural half of the bar — the most a pure, I/O-free layer can honestly check."""
+    return (isinstance(entry, str) and entry.startswith(_RECORD_PREFIX)
+            and entry.endswith(".json") and ".." not in entry)
 
 
 def unmet_required_criteria(criteria_met: Mapping[str, object]) -> tuple[str, ...]:

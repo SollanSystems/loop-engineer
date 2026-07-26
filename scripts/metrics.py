@@ -28,6 +28,13 @@ Two honesty invariants distinguish this from a self-report:
     red gate, and a same-iteration green never excuses its own task's red —
     within-iteration chronology is unknowable, so it fails closed.
 
+A verify bundle whose `verifier.source` is `injected_callable` is a caller's
+self-report, not an independently-executed gate, so it is excluded from every
+metric before FCR and RP are derived; the excluded filenames are listed under
+`provenance.injected_verifier_bundles` so the exclusion is visible rather than a
+silent FCR shift. A bundle carrying no `verifier` block at all has an unknown
+source and still counts — grandfathering by absence, not by guess.
+
 The `### Outcome` token contract: a claim counts toward the FCR denominator only
 when its outcome token is a recognized SUCCESS token — completion-class
 (`task_passed`, `terminal`, `succeeded`) or progress-class (`advanced`);
@@ -75,6 +82,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from loop.evidence import verify_bundle_is_green  # noqa: E402
 from loop.paths import LoopPaths, resolve_loop_paths  # noqa: E402
 
 import re  # noqa: E402
@@ -106,6 +114,11 @@ _GATE_TOKENS = ("holdout_gate", "anticheat_scan", "anti_cheat")
 # Gate script filenames (mirrors inspect_loop._GATE_SCRIPTS): the file a real
 # invocation runs. evidence_backed via a verify script requires one to exist.
 _GATE_SCRIPTS = ("holdout_gate.py", "anticheat_scan.py", "anti_cheat.py")
+
+# A verify bundle whose `verifier.source` is this ran a caller-supplied callable
+# (`loop/verifier.py:111`), so its verdict is a self-report rather than the output
+# of an independently-resolved command. It is never gate evidence.
+_INJECTED_VERIFIER_SOURCE = "injected_callable"
 
 _ITER_HEADER_RE = re.compile(r"(?m)^##\s+Iteration\s+(\S+)")
 # "outcome" declaration followed (within a little markup/whitespace) by its token.
@@ -235,10 +248,12 @@ def _load_verify_bundles(loop_dir: Path) -> list[dict]:
         data = _read_json_object(path)
         if not data:
             continue
-        outcome = str(data.get("outcome", "")).upper()
-        green = outcome == "PASS" or data.get("passed") is True
+        # One definition, shared with the kernel's strict-completion bar.
+        green = verify_bundle_is_green(data)
         it = data.get("iteration_id", data.get("iteration"))
         task = data.get("task")
+        verifier = data.get("verifier")
+        source = verifier.get("source") if isinstance(verifier, dict) else None
         bundles.append(
             {
                 "path": path,
@@ -247,6 +262,7 @@ def _load_verify_bundles(loop_dir: Path) -> list[dict]:
                 "iter": _norm_iter(it) if it is not None else None,
                 "task": str(task) if task is not None else None,
                 "score": _num(data.get("score")),
+                "source": source,
             }
         )
     return bundles
@@ -455,7 +471,16 @@ def compute_metrics(loop_dir: str | Path, loop_label: str | None = None) -> dict
     terminal = _read_json_object(paths.terminal)
     blocks = _runlog_blocks(runlog_text)
 
-    bundles = _load_verify_bundles(loop_dir_path)
+    # An injected-callable verdict is the caller's own self-report, not an
+    # independently-executed gate (`reference/repo-os-contract.md` §17), so it is
+    # partitioned out before any metric consumes it. Only an EXPLICIT
+    # `injected_callable` source is excluded: a bundle with no `verifier` block has
+    # an unknown source and keeps counting — grandfathering by absence, not by
+    # guess. The excluded names are reported under provenance so the exclusion is
+    # visible rather than a silent FCR shift.
+    all_bundles = _load_verify_bundles(loop_dir_path)
+    injected = sorted(b["name"] for b in all_bundles if b["source"] == _INJECTED_VERIFIER_SOURCE)
+    bundles = [b for b in all_bundles if b["source"] != _INJECTED_VERIFIER_SOURCE]
     verify_by_iter, unmatched_verify = _assign_bundles_to_iters(bundles, blocks)
 
     # Success claims: RUNLOG success-outcome iterations, plus the terminal claim.
@@ -600,6 +625,7 @@ def compute_metrics(loop_dir: str | Path, loop_label: str | None = None) -> dict
             "holdout_source": holdout_source,
             "holdout_verdicts": holdout_verdicts,
             "unmatched_verify": unmatched_verify,
+            "injected_verifier_bundles": injected,
         },
     }
 

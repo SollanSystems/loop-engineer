@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any, Mapping
 
 from . import fsm
+from .chain import ChainHashError
 from .completion import (
+    VERIFIED_EVIDENCE_MODE,
     CompletionPolicyError,
     criteria_satisfy_completion,
+    evidence_entry_is_record_shaped,
     normalize_completion_policy,
+    policy_requires_verified_evidence,
     unmet_required_criteria,
 )
 from .paths import ARTIFACTS_DIR_NAME, EVIDENCE_DIR_NAME, LoopPaths, resolve_loop_paths
@@ -635,6 +640,7 @@ def _validate_jsonl(path: Path, schema_key: str, mode: str, issues: list[dict]) 
 
 
 _RUNNER_BUNDLE_RE = re.compile(r"verify-iter([0-9]+)\.json")
+_EVIDENCE_RECORD_RE = re.compile(r"evidence-iter([0-9]+)\.json")
 
 
 def _self_verified(record: Mapping[str, Any]) -> bool:
@@ -681,34 +687,286 @@ def _orphan_bundle_issues(paths: LoopPaths, issues: list[dict]) -> None:
                 bundle_path))
 
 
+def _policy_digest_issues(
+    paths: LoopPaths,
+    records: list[tuple[int | None, Path, dict]],
+    issues: list[dict],
+) -> None:
+    """Compare the LATEST record per task against the live TASKS.json goalpost.
+
+    Only the latest record backs the task's current claim; older records describe
+    goalposts that were current when they were written, and comparing them would
+    make every honest re-verification a permanent failure (repo-os-contract.md §17).
+    "Latest" orders numbered ``evidence-iter<N>.json`` records by iteration and ranks
+    every unnumbered record below all of them (ties by filename), so a task whose only
+    record carries no iteration id is still compared — being unnumbered is not a way
+    out of the comparison.
+
+    A record naming a task that is no longer in TASKS.json is not compared at all —
+    a renamed or removed task is a replan, not a forgery. A task that is present but
+    cannot be canonicalized is reported rather than skipped: a comparison that cannot
+    run has not passed.
+    """
+    from .verifier import verification_policy_digest
+
+    tasks = _read_json(paths.tasks, [])   # already reported by the contract read
+    declared = tasks.get("tasks") if isinstance(tasks, dict) else None
+    entries = {t["id"]: t for t in (declared if isinstance(declared, list) else [])
+               if isinstance(t, dict) and isinstance(t.get("id"), str)}
+    latest: dict[str, tuple[tuple[int, int, str], Path, dict]] = {}
+    for iteration_id, record_path, data in records:
+        produced_by = data.get("produced_by")
+        task_id = produced_by.get("task_id") if isinstance(produced_by, dict) else None
+        if not isinstance(task_id, str) or task_id not in entries:
+            continue
+        # A record outside the runner's evidence-iter<N>.json name carries no position
+        # in the run's order, so it sorts BELOW every numbered record (ties by
+        # filename). Excluding it outright left a hole: the only record for a task is
+        # still that task's latest, and skipping it meant a moved goalpost went
+        # unreported for exactly the hand-written records most worth comparing.
+        rank = ((1, iteration_id, record_path.name) if isinstance(iteration_id, int)
+                else (0, 0, record_path.name))
+        if task_id not in latest or rank > latest[task_id][0]:
+            latest[task_id] = (rank, record_path, data)
+    for task_id, (_rank, record_path, data) in sorted(latest.items()):
+        verified_by = data.get("verified_by")
+        recorded = verified_by.get("policy_digest") if isinstance(verified_by, dict) else None
+        if not isinstance(recorded, str):
+            continue
+        try:
+            live = verification_policy_digest(entries[task_id])
+        except ChainHashError as exc:
+            # Fail closed. Structural-fallback mode carries no tasks@1 type-check, so
+            # skipping here would leave a stale goalpost reported by nothing at all.
+            issues.append(ContractIssue(
+                "policy_digest_mismatch",
+                f"{record_path.name}: the goalpost recorded for task {task_id!r} "
+                f"({recorded}) cannot be compared against the live TASKS.json entry, "
+                f"because that entry is not canonicalizable ({exc}) — agreement is "
+                f"unestablished, and unestablished is not agreement",
+                record_path))
+            continue
+        if live != recorded:
+            issues.append(ContractIssue(
+                "policy_digest_mismatch",
+                f"{record_path.name}: the goalpost recorded for task {task_id!r} "
+                f"({recorded}) is not the live TASKS.json goalpost ({live}) — "
+                f"the declared verify/criterion_ref/depends_on/id changed after this "
+                f"verification; re-verify to record the current goalpost",
+                record_path))
+
+
 def _validate_evidence_records(paths: LoopPaths, mode: str, issues: list[dict]) -> bool:
-    """Validate declared evidence@1 records and surface declared self-verification.
+    """Validate declared evidence@1 records, hash-verify what they reference, and
+    surface declared self-verification.
 
     Declared location: `.loop/evidence/*.json` (repo-os-contract.md §17). An absent
     directory is a no-op, so a contract with no evidence produces a byte-identical
     report — the same rule §22 pins for an absent event store.
     """
-    from .evidence import evidence_issues  # local: loop.evidence imports this module
+    from .evidence import evidence_issues, verify_evidence  # local: loop.evidence imports this module
 
     _orphan_bundle_issues(paths, issues)
     evidence_dir = paths.loop_dir / EVIDENCE_DIR_NAME
     if not evidence_dir.is_dir():
         return False
     checked = False
+    verifiable: list[tuple[int | None, Path, dict]] = []
     for record_path in sorted(evidence_dir.glob("*.json")):
         data = _read_json(record_path, issues)
         if data is None:
             continue
         checked = True
-        for issue in evidence_issues(data, resolved_mode=mode):
+        record_issues = evidence_issues(data, resolved_mode=mode)
+        for issue in record_issues:
             issues.append(ContractIssue(issue["code"], f"{record_path.name}: {issue['message']}", record_path))
+        if not record_issues:
+            # Guarded: verify_evidence() re-runs validate_evidence internally, so an
+            # unconditional call would report a malformed record twice.
+            result = verify_evidence(data, workspace_root=paths.workspace)
+            for issue in result["issues"]:
+                issues.append(ContractIssue(issue["code"], f"{record_path.name}: {issue['message']}", record_path))
+            match = _EVIDENCE_RECORD_RE.fullmatch(record_path.name)
+            verifiable.append((int(match.group(1)) if match else None, record_path, data))
         if _self_verified(data):
             issues.append(ContractIssue(
                 "self_verified_evidence",
                 f"{record_path.name}: produced_by.executor == verified_by.by "
                 f"({data['produced_by']['executor']!r}) — the producer declares it verified its own work",
                 record_path))
+    _policy_digest_issues(paths, verifiable, issues)
     return checked
+
+
+def _verdict_failure(record: Mapping[str, Any], paths: LoopPaths) -> str | None:
+    """Why the record's artifact does not attest a PASS, or ``None`` when it does.
+
+    Hash-verification proves the pointer resolves to the bytes the record committed
+    to; it says nothing about what those bytes SAY.  A record backing ``Succeeded``
+    must point at a green verdict, judged by the repo's one green-marker rule
+    (``loop.evidence.verify_bundle_is_green``) — the same rule ``scripts/metrics.py``
+    scores FCR with, so a bundle that reads RED to metrics can never read GREEN here.
+
+    A record whose ``kind`` is anything other than ``verify-bundle`` carries no
+    verdict this layer can read (evidence@1's ``kind`` is an open vocabulary — a log,
+    a diff, a screenshot).  Such a record is REFUSED rather than waved through: the
+    strict mode's claim is that completion is backed by a verification that passed,
+    and an artifact with no verdict cannot make that claim.  Unreadable or
+    unparseable is likewise a refusal, never a skip (R007).
+    """
+    from .evidence import VERIFY_BUNDLE_KIND, verify_bundle_is_green
+
+    kind = record.get("kind")
+    if kind != VERIFY_BUNDLE_KIND:
+        return (f"is a {kind!r} record, not a {VERIFY_BUNDLE_KIND}: it carries no verdict, "
+                f"so it cannot show that anything passed")
+    uri = record["uri"]
+    try:
+        blob = (paths.workspace / uri).read_bytes()
+    except (OSError, ValueError) as exc:
+        return f"cites a verify bundle that cannot be read ({exc})"
+    # Re-anchored to the digest the record declares, so the bytes judged here are the
+    # bytes hash-verification just accepted rather than whatever landed since.
+    if hashlib.sha256(blob).hexdigest() != record["sha256"]:
+        return (f"cites a verify bundle whose bytes changed between hash verification "
+                f"and the verdict read: {uri}")
+    try:
+        bundle = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"cites a verify bundle that is not UTF-8 JSON ({exc})"
+    if not isinstance(bundle, dict):
+        return "cites a verify bundle that is not a JSON object"
+    if not verify_bundle_is_green(bundle):
+        return (f"cites a verify bundle whose verdict is not a pass "
+                f"(outcome={bundle.get('outcome')!r}, passed={bundle.get('passed')!r}) — "
+                f"evidence of failure cannot back Succeeded")
+    return None
+
+
+def _strict_evidence_failure(entry: object, paths: LoopPaths,
+                             bound: Mapping[str, tuple[str, ...]] | None) -> str | None:
+    """The ONE definition of the verified-evidence bar (plan decision 14).
+
+    Returns ``None`` when the cited entry can back ``Succeeded``, otherwise a detail
+    string naming which of the four sub-checks failed:
+
+    1. self-consistency — the entry is a readable evidence@1 record whose ``uri``
+       resolves inside the workspace and hashes to the digest it declares;
+    2. verdict — the artifact it points at is a verify bundle that says PASS.  An
+       authentic record of a FAILING verification is still not proof of success;
+    3. chain-boundness — some event bound this record's path AT its current bytes,
+       and at exactly ONE digest.  A path bound at two or more different digests is
+       ambiguous, and ambiguous is not proof.  ``bound is None`` means there is no
+       event store at all, and the sub-check is skipped: the store-less writer-API
+       path is a DOCUMENTED degradation, not a pass;
+    4. goalpost agreement — when the record names a task still in TASKS.json, its
+       recorded ``policy_digest`` equals the live one.  A goalpost that cannot even be
+       computed is a FAILURE, not a skip: unestablished is not agreement (R007).
+
+    ``emit.terminate`` imports this function rather than restating it.  Two hand-written
+    copies of a three-part security check drift, and a drift here is a silent false
+    completion.
+    """
+    from .evidence import validate_evidence, verify_evidence  # local: loop.evidence imports this module
+    from .verifier import verification_policy_digest
+
+    if not isinstance(entry, str) or not entry.strip():
+        return "is not a workspace-relative evidence record path"
+    if not evidence_entry_is_record_shaped(entry):
+        # The pure layers reject this shape outright, so accepting it here would let a
+        # terminal through the writer that its own replay would refuse.
+        return ("is not verified evidence: not a workspace-relative "
+                ".loop/evidence/*.json record path")
+    try:
+        blob = (paths.workspace / entry).read_bytes()
+    except (OSError, ValueError) as exc:
+        return f"is not verified evidence: the record cannot be read ({exc})"
+    try:
+        record = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"is not verified evidence: the record is not UTF-8 JSON ({exc})"
+    if not isinstance(record, dict):
+        return "is not verified evidence: the record is not a JSON object"
+    validation = validate_evidence(record, mode="basic")
+    if not validation["ok"]:
+        return f"is not verified evidence: {[issue['message'] for issue in validation['issues']]}"
+    verified = verify_evidence(record, workspace_root=paths.workspace)
+    if not verified["ok"]:
+        return f"is not verified evidence: {[issue['message'] for issue in verified['issues']]}"
+
+    verdict = _verdict_failure(record, paths)
+    if verdict is not None:
+        return verdict
+
+    if bound is not None:
+        committed = bound.get(entry)
+        if not committed:
+            return ("is not bound into the event chain — no event committed this record's "
+                    "digest, so no dispatch produced it")
+        if len(committed) > 1:
+            # Append-only forgery: a later ordinary event re-binds a tampered path at its
+            # new digest. Collapsing the bindings would let the writer accept a tree the
+            # doctor walk still reports, so an ambiguous binding is refused outright.
+            return (f"is bound at {len(committed)} different digests "
+                    f"({', '.join(committed)}) — an ambiguous binding is not proof")
+        current = hashlib.sha256(blob).hexdigest()
+        if committed[0] != current:
+            return (f"is bound at a different digest: the chain committed {committed[0]}, "
+                    f"the record now hashes to {current}")
+
+    produced_by = record.get("produced_by")
+    task_id = produced_by.get("task_id") if isinstance(produced_by, dict) else None
+    if not isinstance(task_id, str):
+        return None
+    declared = _read_json(paths.tasks, [])   # already reported by the contract read
+    entries = declared.get("tasks") if isinstance(declared, dict) else None
+    live = next((task for task in (entries if isinstance(entries, list) else [])
+                 if isinstance(task, dict) and task.get("id") == task_id), None)
+    if live is None:
+        # A renamed or removed task is a replan, not a forgery (decision 5).
+        return None
+    verified_by = record.get("verified_by")
+    recorded = verified_by.get("policy_digest") if isinstance(verified_by, dict) else None
+    try:
+        current_goalpost = verification_policy_digest(live)
+    except ChainHashError as exc:
+        return (f"records a goalpost that cannot be compared against the live TASKS.json "
+                f"goalpost for task {task_id!r}: that entry is not canonicalizable ({exc}), "
+                f"so agreement is unestablished — and unestablished is not agreement")
+    if recorded != current_goalpost:
+        return (f"records a goalpost that is not the live TASKS.json goalpost for task "
+                f"{task_id!r}: recorded {recorded!r}, live {current_goalpost!r}")
+    return None
+
+
+def _check_verified_evidence_terminal(terminal: Any, paths: LoopPaths, issues: list[dict]) -> None:
+    """Read-time twin of emit.terminate's strict bar — one predicate, two callers."""
+    if not isinstance(terminal, dict) or terminal.get("state") != "Succeeded":
+        return
+    try:
+        if not policy_requires_verified_evidence(terminal.get("completion_policy")):
+            return
+    except CompletionPolicyError:
+        return   # already reported by _validate_terminal / the terminal@1 schema
+    from .runtime import RuntimeStoreError, bound_artifact_digests  # local: runtime imports this module
+
+    try:
+        bound = bound_artifact_digests(paths.workspace)
+    except RuntimeStoreError as exc:
+        issues.append(ContractIssue(
+            "unverified_evidence_terminal",
+            f"the terminal declares {VERIFIED_EVIDENCE_MODE} but the event store could not "
+            f"be read ({exc}) — chain-boundness is unestablished, and unestablished is not "
+            f"proof", paths.terminal))
+        return
+    evidence = terminal.get("evidence")
+    for entry in evidence if isinstance(evidence, list) else []:
+        detail = _strict_evidence_failure(entry, paths, bound)
+        if detail is not None:
+            issues.append(ContractIssue(
+                "unverified_evidence_terminal",
+                f"the terminal declares {VERIFIED_EVIDENCE_MODE} but {entry!r} {detail}",
+                paths.terminal))
 
 
 def _validate_optional_records(paths: LoopPaths, mode: str, issues: list[dict]) -> set[str]:
@@ -812,6 +1070,8 @@ def validate_contract(target: str | Path, *, mode: str | None = None) -> dict[st
     _check_stub_verify_scripts(paths, issues)
     _check_verify_surface(paths, tasks, issues)
     records_checked = _validate_optional_records(paths, mode, issues)
+    if terminal is not None:
+        _check_verified_evidence_terminal(terminal, paths, issues)
 
     schemas_checked = list(SCHEMA_IDS) + [
         schema_id for key, schema_id in _RECORD_SCHEMA_IDS if key in records_checked

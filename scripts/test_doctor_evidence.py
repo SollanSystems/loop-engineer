@@ -14,10 +14,17 @@ def _codes(report):
     return {issue["code"] for issue in report["issues"]}
 
 
+_BUNDLE_TEXT = json.dumps({"outcome": "PASS", "passed": True})
+_BUNDLE_SHA = hashlib.sha256(_BUNDLE_TEXT.encode("utf-8")).hexdigest()
+# A legacy bundle name: doctor now hash-verifies a record's uri, so the file must
+# exist, and a runner-shaped verify-iter<N>.json would need its own record.
+_RECORD_BUNDLE_NAME = "verify-T1.json"
+
+
 def _record(executor="worker-a", by="ci", **overrides):
     record = {
         "schema": "loop-engineer/evidence@1", "id": "e1", "kind": "verify-bundle",
-        "uri": ".loop/artifacts/verify-iter5.json", "sha256": "c" * 64,
+        "uri": f".loop/artifacts/{_RECORD_BUNDLE_NAME}", "sha256": _BUNDLE_SHA,
         "media_type": "application/json", "created_at": "2026-07-25T00:00:00+00:00",
         "produced_by": {"run_id": "run-1", "task_id": "T-1", "attempt": 1, "executor": executor},
         "verified_by": {"by": by, "at": "2026-07-25T00:00:00+00:00",
@@ -32,17 +39,20 @@ def _record(executor="worker-a", by="ci", **overrides):
 def _ws(tmp_path, records=(), bundles=(), name="workspace"):
     target = tmp_path / name
     scaffold(target)
+    artifacts = target / ".loop" / "artifacts"
     if records:
         directory = target / ".loop" / "evidence"
         directory.mkdir(parents=True, exist_ok=True)
         for index, record in enumerate(records):
             text = record if isinstance(record, str) else json.dumps(record)
             (directory / f"evidence-iter{index}.json").write_text(text, encoding="utf-8")
+        # Every _record() names this uri, so it must exist with exactly the bytes
+        # the record commits to.
+        artifacts.mkdir(parents=True, exist_ok=True)
+        (artifacts / _RECORD_BUNDLE_NAME).write_text(_BUNDLE_TEXT, encoding="utf-8")
     for bundle_name in bundles:
-        directory = target / ".loop" / "artifacts"
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / bundle_name).write_text(
-            json.dumps({"outcome": "PASS", "passed": True}), encoding="utf-8")
+        artifacts.mkdir(parents=True, exist_ok=True)
+        (artifacts / bundle_name).write_text(_BUNDLE_TEXT, encoding="utf-8")
     return target
 
 

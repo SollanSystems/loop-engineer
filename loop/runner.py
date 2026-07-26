@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import emit
+from .completion import DEFAULT_COMPLETION_MODE, VERIFIED_EVIDENCE_MODE
+from .contract import _strict_evidence_failure
 from .events import (EventRowDecodeError, EventStoreOperationalError, SQLiteEventStore,
                     read_event_rows, validate_event)
-from .paths import resolve_loop_paths
+from .paths import EVIDENCE_DIR_NAME, resolve_loop_paths
 from .reducer import ChainBreakError, reduce_events
-from .runtime import RuntimeStoreError, _read_store
+from .runtime import RuntimeStoreError, _read_store, bound_artifact_digests
 from .verifier import executed_verifier_identity, injected_verifier_identity
 
 
@@ -175,6 +177,70 @@ def _reconcile_legacy_iteration(target: str | Path, projection: dict[str, Any]) 
             current_id = iteration_id
 
 
+def _evidence_records_by_task(paths: Any, projection: dict[str, Any]) -> dict[str, list[str]]:
+    """Map each task id to the evidence records this run's passing iterations left on disk."""
+    records: dict[str, list[str]] = {}
+    for entry in projection.get("runlog_entries", []):
+        if entry.get("outcome") != "task_passed":
+            continue
+        task_id, iteration_id = entry.get("task_id"), entry.get("iteration_id")
+        if not isinstance(task_id, str) or not isinstance(iteration_id, int):
+            continue
+        record = paths.loop_dir / EVIDENCE_DIR_NAME / f"evidence-iter{iteration_id}.json"
+        if record.is_file():
+            records.setdefault(task_id, []).append(record.relative_to(paths.workspace).as_posix())
+    return records
+
+
+def _unmet_strict_bar(paths: Any, cited: list[str]) -> str | None:
+    """Why the cited records cannot back the strict mode, or ``None`` when they can.
+
+    The SAME predicate ``emit.terminate`` enforces, evaluated against the very records
+    the payload would cite.  Existence is not satisfaction: adopting the strict mode
+    because a file is present would overstate the bar (decision 7) and would re-open the
+    committed-then-refused seam this slice closes (decision 2), because the writer runs
+    the predicate afterwards and raises once the event is already durable.
+    """
+    try:
+        bound = bound_artifact_digests(paths.workspace)
+    except RuntimeStoreError as exc:
+        return (f"the event store could not be read ({exc}), so chain-boundness is "
+                f"unestablished — and unestablished is not proof")
+    for entry in cited:
+        detail = _strict_evidence_failure(entry, paths, bound)
+        if detail is not None:
+            return f"{entry} {detail}"
+    return None
+
+
+def _auto_terminal_payload(paths: Any, tasks: list[dict], projection: dict[str, Any]) -> dict[str, Any]:
+    """Adopt the verified-evidence mode only when this run can honestly satisfy it.
+
+    Choosing the weaker policy silently would be a self-serving downgrade, so the
+    all_required branch always says WHY — distinguishing a task that produced no record
+    at all from a record that is present but fails the bar.
+    """
+    payload: dict[str, Any] = {
+        "state": "Succeeded", "criteria_met": {task["id"]: True for task in tasks},
+        "evidence": ["RUNLOG.md"], "false_completion": False,
+        "completion_policy": {"mode": DEFAULT_COMPLETION_MODE},
+        "iteration_id": projection["iteration_id"],
+    }
+    records = _evidence_records_by_task(paths, projection)
+    missing = sorted(str(task.get("id")) for task in tasks if task.get("id") not in records)
+    if missing:
+        payload["reason"] = "tasks with no evidence record: " + ", ".join(missing)
+        return payload
+    cited = sorted({record for task in tasks for record in records[task["id"]]})
+    unmet = _unmet_strict_bar(paths, cited)
+    if unmet is not None:
+        payload["reason"] = "evidence records do not meet the verified-evidence bar: " + unmet
+        return payload
+    payload["evidence"] = cited
+    payload["completion_policy"] = {"mode": VERIFIED_EVIDENCE_MODE}
+    return payload
+
+
 def _reconcile_legacy_terminal(target: str | Path, projection: dict[str, Any]) -> None:
     """Replay the terminal's already-recorded payload into existing emit APIs."""
     terminal = projection.get("terminal")
@@ -182,11 +248,13 @@ def _reconcile_legacy_terminal(target: str | Path, projection: dict[str, Any]) -
         return
     paths = resolve_loop_paths(target)
     if not paths.terminal.exists():
+        reason = terminal.get("reason")
         emit.terminate(
             target,
             state=terminal["state"],
             criteria_met=terminal["criteria_met"],
             evidence=terminal["evidence"],
+            reason=reason if isinstance(reason, str) else "",
             false_completion=terminal["false_completion"],
             iteration_id=terminal.get("iteration_id"),
             completion_policy=terminal.get("completion_policy"),
@@ -220,11 +288,7 @@ def dispatch_once(
         done = done_task_ids(tasks, projection)
         if all(task.get("id") in done for task in tasks):
             iteration_id = projection["iteration_id"]
-            payload = {
-                "state": "Succeeded", "criteria_met": {task["id"]: True for task in tasks},
-                "evidence": ["RUNLOG.md"], "false_completion": False,
-                "completion_policy": {"mode": "all_required"}, "iteration_id": iteration_id,
-            }
+            payload = _auto_terminal_payload(paths, tasks, projection)
             store = SQLiteEventStore(paths.loop_dir / "events.db")
             _store_append(store, run_id, "terminal_written", payload, actor="loop.run",
                           expected_sequence=projection["last_sequence"] + 1)
@@ -252,17 +316,30 @@ def dispatch_once(
         "task_id": task["id"],
         "summary": outcome.summary,
     }
+    # Rendered BEFORE the append and written AFTER it. Building first is what lets
+    # the event carry the digests of the very bytes that will land; the builder
+    # writes nothing, so a SIGKILL at the pre-commit COMMIT still leaves the tree
+    # byte-identical (test_crash_injection_before_iteration_event_commit_...).
+    try:
+        built = emit.build_verify_evidence(
+            target, run_id=run_id, iteration_id=iteration_id, task=task,
+            passed=outcome.passed, summary=outcome.summary, code_identity=code_identity,
+            executor=executor, verifier_identity=verifier_identity, attempt=attempt,
+        )
+    except emit.EmitError as exc:
+        raise RunnerError(
+            f"cannot build the verify evidence for iteration {iteration_id}: {exc}"
+        ) from exc
     store = SQLiteEventStore(paths.loop_dir / "events.db")
     _store_append(store, run_id, "iteration_appended", payload, actor="loop.run",
+                  artifact_hashes=list(built.artifact_hashes),
                   expected_sequence=projection["last_sequence"] + 1)
-    # Evidence is written AFTER the durable append: writing it first would leave a
-    # bundle behind a SIGKILL at the pre-commit COMMIT and break the zero-write
-    # crash pin (test_crash_injection_before_iteration_event_commit_...).
     try:
         written = emit.write_verify_evidence(
             target, run_id=run_id, iteration_id=iteration_id, task=task,
             passed=outcome.passed, summary=outcome.summary, code_identity=code_identity,
             executor=executor, verifier_identity=verifier_identity, attempt=attempt,
+            built=built,
         )
     except (OSError, emit.EmitError) as exc:
         raise RunnerError(
@@ -273,4 +350,4 @@ def dispatch_once(
                           task_id=payload["task_id"], notes=payload["summary"])
     return {"ok": True, "action": "dispatched", "task_id": task["id"],
             "outcome": payload["outcome"], "iteration_id": iteration_id, "run_id": run_id,
-            "evidence": str(written["evidence"])}
+            "evidence": str(written["evidence"]), "object": str(written["object"])}

@@ -1,11 +1,21 @@
 """loop-engineer/evidence@1 — hashed evidence + artifact provenance.
 
 ``loop doctor`` discovers and validates records from the declared location
-``.loop/evidence/*.json`` (reference/repo-os-contract.md #17) and reports
-``self_verified_evidence`` / ``missing_evidence_record``. It does NOT yet
-hash-verify the artifacts those records reference, and it never compares a
-recorded digest against anything — ``verify_evidence()`` below is the explicit,
-caller-invoked check. That wiring is the evidence-wiring slice.
+``.loop/evidence/*.json`` (reference/repo-os-contract.md #17), reports
+``self_verified_evidence`` / ``missing_evidence_record``, and — since the
+evidence-wiring release — composes ``verify_evidence()`` below over every
+structurally-valid record, so a referenced artifact that does not hash to the
+digest its record declares fails doctor as ``hash_mismatch``. Doctor also
+compares the latest record per task against the live TASKS.json goalpost
+(``policy_digest_mismatch``), and re-hashes whatever an event bound into the
+chain (``evidence_chain_mismatch`` / ``missing_bound_evidence``).
+
+What is still NOT checked here: ``code_digest`` is never re-hashed against the
+verifier file (a verify script legitimately changes between runs, and an
+unbaselined comparison would fire on every honest edit), and none of this proves
+provenance — a hand-written record whose pointer resolves and whose digests are
+self-consistent is indistinguishable from one a dispatch produced. Verification
+proves the pointer, never the producer.
 """
 
 from __future__ import annotations
@@ -15,7 +25,7 @@ import json
 import os
 import re
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from .contract import ContractIssue, _resolve_requested_mode, _schemas_dir
@@ -23,8 +33,23 @@ from .verifier import CODE_DIGEST_BASES
 
 
 EVIDENCE_SCHEMA_ID = "loop-engineer/evidence@1"
+VERIFY_BUNDLE_KIND = "verify-bundle"
 _URI_PATTERN = re.compile(r"^(?!/)(?![A-Za-z][A-Za-z0-9+.\-]*://).+$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+def verify_bundle_is_green(bundle: Mapping[str, Any]) -> bool:
+    """The repo's ONE green-marker rule for a verify bundle.
+
+    A bundle is green when it says so explicitly — ``outcome == "PASS"`` or
+    ``passed is True``. A bundle carrying only a numeric ``score`` reads RED: a
+    score is not a verdict, and treating one as a pass is exactly the false
+    completion this kernel exists to refuse (the rule originated in
+    ``scripts/metrics.py``, which now imports it rather than restating it).
+    """
+    if not isinstance(bundle, Mapping):
+        return False
+    return str(bundle.get("outcome", "")).upper() == "PASS" or bundle.get("passed") is True
 
 
 class EvidenceError(ValueError):
@@ -217,3 +242,91 @@ def verify_evidence(evidence: Mapping[str, Any], *, workspace_root: str | Path) 
 def artifact_object_path(workspace_root: str | Path, sha256: str) -> Path:
     """Return evidence@1's content-addressed artifact location without I/O."""
     return Path(workspace_root) / ".loop" / "artifacts" / "objects" / sha256[:2] / sha256
+
+
+#: A chain-bound path is attacker-nameable — any event may declare any string. A gate
+#: must therefore never perform an unbounded read on one. 64 MiB is far above any
+#: artifact this kernel writes and far below "read whatever is at the other end".
+MAX_BOUND_ARTIFACT_BYTES = 64 * 1024 * 1024
+
+_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+
+
+def _lexical_escape(rel: object) -> str | None:
+    """Why this declared path is not workspace-relative — decided with ZERO I/O.
+
+    Runs before anything is opened, so an escaping path is reported rather than read.
+    """
+    if not isinstance(rel, str) or not rel.strip():
+        return "is not a non-empty path"
+    if "\\" in rel:
+        return "contains a backslash, which is not a workspace-relative POSIX path"
+    if _DRIVE_PREFIX.match(rel):
+        return "names a drive letter"
+    pure = PurePosixPath(rel)
+    if pure.is_absolute():
+        return "is an absolute path"
+    if ".." in pure.parts:
+        return "traverses out of the workspace with '..'"
+    return None
+
+
+def hash_bound_artifact(
+    workspace_root: str | Path, rel: object, *, max_bytes: int = MAX_BOUND_ARTIFACT_BYTES,
+) -> tuple[str, str]:
+    """Containment-check a chain-bound path, then stream-hash it under a cap.
+
+    Returns ``(code, detail)``:
+
+    * ``("ok", <hex digest>)``;
+    * ``("escape", <why>)`` — the path is not inside the workspace. For a lexical
+      escape NOTHING on disk was touched; a symlinked escape is caught after
+      resolution, exactly as ``verify_evidence`` catches it;
+    * ``("unreadable", <why>)`` — contained, but its bytes could not be hashed:
+      absent, not a regular file (so ``/dev/zero`` and friends are refused rather
+      than read forever), or larger than ``max_bytes``.
+    """
+    escape = _lexical_escape(rel)
+    if escape is not None:
+        return "escape", escape
+    root = Path(workspace_root)
+    try:
+        resolved = (root / str(rel)).resolve(strict=True)
+    except (OSError, ValueError, RuntimeError):
+        return "unreadable", "is absent or cannot be resolved"
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError:
+        return "escape", "resolves outside the workspace (a symlinked component)"
+    try:
+        fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return "unreadable", "is absent or cannot be opened"
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            return "unreadable", "is not a regular file"
+        if file_stat.st_size > max_bytes:
+            return "unreadable", (f"is {file_stat.st_size} bytes, above the {max_bytes}-byte "
+                                  f"bound-artifact read cap, so its digest was not computed")
+        digest = hashlib.sha256()
+        read = 0
+        duplicate = os.dup(fd)
+        try:
+            source = os.fdopen(duplicate, "rb")
+        except OSError:
+            os.close(duplicate)          # fdopen never took ownership
+            raise
+        with source:
+            while chunk := source.read(64 * 1024):
+                read += len(chunk)
+                if read > max_bytes:
+                    return "unreadable", (f"grew past the {max_bytes}-byte bound-artifact "
+                                          f"read cap while being hashed")
+                digest.update(chunk)
+    except OSError:
+        return "unreadable", "is absent or cannot be read"
+    finally:
+        os.close(fd)
+    return "ok", digest.hexdigest()

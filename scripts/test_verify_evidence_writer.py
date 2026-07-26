@@ -146,7 +146,10 @@ def test_rewrite_of_the_same_iteration_is_idempotent_in_path(tmp_path):
     first, second = _write(workspace), _write(workspace)
     assert first["bundle"] == second["bundle"] and first["evidence"] == second["evidence"]
     assert first["sha256"] == second["sha256"]
-    assert [p.name for p in sorted((workspace / ".loop" / "artifacts").iterdir())] == ["verify-iter5.json"]
+    # Files only: the content-addressed object store is a declared subtree under
+    # artifacts/, not litter. A duplicate bundle or an orphan .staged still fails.
+    assert [p.name for p in sorted((workspace / ".loop" / "artifacts").iterdir())
+            if p.is_file()] == ["verify-iter5.json"]
 
 
 def test_writer_refuses_a_workspace_with_no_contract(tmp_path):
