@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/verdict@1",
+  "title": "Loop Engineer Verdict @1",
+  "description": "A CI-attestable projection of a loop run's doctor verdict, chain head, terminal record, and verified-evidence digests. Emitted as an in-toto predicate body; the signer constructs the Statement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_id", "tool", "doctor", "chain", "terminal", "evidence"],
+  "properties": {
+    "schema": { "const": "loop-engineer/verdict@1" },
+    "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "loop-engineer" },
+        "version": { "type": ["string", "null"], "maxLength": 64 }
+      }
+    },
+    "doctor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "validation_mode", "issue_codes", "schemas_checked"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "validation_mode": { "type": "string", "maxLength": 64 },
+        "issue_codes": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9_]{1,64}$", "maxLength": 64 }
+        },
+        "schemas_checked": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 128 }
+        }
+      }
+    },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "sequence", "unchained_prefix"],
+      "properties": {
+        "head": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "maxLength": 64 },
+        "sequence": { "type": ["integer", "null"], "minimum": 0 },
+        "unchained_prefix": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "completion_policy", "false_completion"],
+      "properties": {
+        "state": {
+          "enum": ["Succeeded", "FailedUnverifiable", "FailedBlocked", "FailedBudget",
+                   "FailedSafety", "FailedSpecGap", "AbortedByHuman"]
+        },
+        "completion_policy": { "type": ["string", "null"], "maxLength": 64 },
+        "false_completion": { "type": "boolean" }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["digest", "code_digest", "policy_digest"],
+        "properties": {
+          "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "maxLength": 64 },
+          "code_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "maxLength": 64 },
+          "policy_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "maxLength": 64 }
+        }
+      }
+    }
+  }
+}
