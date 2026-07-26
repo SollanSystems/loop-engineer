@@ -7,7 +7,9 @@
 > pinned to the harness commit named in its row. No version-general claims
 > about any project are made or implied: every statement is checkable against
 > one directory and one SHA.
-> **Date:** 2026-07-09.
+> **Date:** 2026-07-09; corrected 2026-07-25 (Spec Kit workflow-engine fairness
+> note, refreshed star counts, PRPs repository rename). Corrections are made in
+> place and dated, never silently.
 > **Reproduce any row:** `python3 -m loop inspect examples/<fixture>`
 
 ## What this measures — and what it does not
@@ -73,18 +75,19 @@ answer to the question this scoreboard asks.†
 | Harness | Stars· | Pinned | Fixture | Score | Verdict | Terminals |
 |---|---:|---|---|---:|---|---:|
 | *(calibration)* loop-engineer contract | — | this repo | [`flaky-test-triage`](../../examples/flaky-test-triage/) | **90** | strong | 7/7 |
-| Superpowers ([obra/superpowers](https://github.com/obra/superpowers)) | 251k | fixture× | [`superpowers-run`](../../examples/superpowers-run/) | **12** | weak | 0/7 |
-| Spec Kit ([github/spec-kit](https://github.com/github/spec-kit)) | 119k | `3f7392a` | [`spec-kit-run`](../../examples/spec-kit-run/) | **12** | weak | 0/7 |
+| Superpowers ([obra/superpowers](https://github.com/obra/superpowers)) | 261k | fixture× | [`superpowers-run`](../../examples/superpowers-run/) | **12** | weak | 0/7 |
+| Spec Kit ([github/spec-kit](https://github.com/github/spec-kit)) | 124k | `3f7392a` | [`spec-kit-run`](../../examples/spec-kit-run/) | **12** | weak | 0/7 |
 | CCPM ([automazeio/ccpm](https://github.com/automazeio/ccpm)) | 8.3k | `7d7e462` | [`ccpm-run`](../../examples/ccpm-run/) | **12** | weak | 0/7 |
-| BMAD-METHOD ([bmad-code-org/BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD)) | 50k | `49069b8` | [`bmad-run`](../../examples/bmad-run/) | **0** | weak | 0/7 |
+| BMAD-METHOD ([bmad-code-org/BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD)) | 51k | `49069b8` | [`bmad-run`](../../examples/bmad-run/) | **0** | weak | 0/7 |
 | Task Master ([eyaltoledano/claude-task-master](https://github.com/eyaltoledano/claude-task-master)) | 28k | `c0c98d3` | [`task-master-run`](../../examples/task-master-run/) | **0** | weak | 0/7 |
-| OpenSpec ([Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec)) | 60k | `93e27a7` | [`openspec-run`](../../examples/openspec-run/) | **0** | weak | 0/7 |
-| ruflo ([ruvnet/ruflo](https://github.com/ruvnet/ruflo), né claude-flow) | 64k | `7ef4d4e` | [`ruflo-run`](../../examples/ruflo-run/) | **0** | weak | 0/7 |
-| Agent OS ([buildermethods/agent-os](https://github.com/buildermethods/agent-os)) | 5.0k | `cae8e66` | [`agent-os-run`](../../examples/agent-os-run/) | **0** | weak | 0/7 |
-| PRPs ([Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)) | 2.2k | `ada2f5b` | [`prp-run`](../../examples/prp-run/) | **0** | weak | 0/7 |
+| OpenSpec ([Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec)) | 63k | `93e27a7` | [`openspec-run`](../../examples/openspec-run/) | **0** | weak | 0/7 |
+| ruflo ([ruvnet/ruflo](https://github.com/ruvnet/ruflo), né claude-flow) | 66k | `7ef4d4e` | [`ruflo-run`](../../examples/ruflo-run/) | **0** | weak | 0/7 |
+| Agent OS ([buildermethods/agent-os](https://github.com/buildermethods/agent-os)) | 5.1k | `cae8e66` | [`agent-os-run`](../../examples/agent-os-run/) | **0** | weak | 0/7 |
+| PRPs ([Wirasm/prp](https://github.com/Wirasm/prp), formerly PRPs-agentic-eng) | 2.2k | `ada2f5b` | [`prp-run`](../../examples/prp-run/) | **0** | weak | 0/7 |
 | *(calibration)* an unstructured agent loop | — | this repo | [`naive-loop`](../../examples/naive-loop/) | **0** | weak | 0/7 |
 
-·Stars as reported by the GitHub API on 2026-07-09, for scale only.
+·Stars as reported by the GitHub API on 2026-07-25 (608,137 combined), for
+scale only.
 ×The Superpowers row predates this scoreboard's SHA-pinning: its fixture was
 built from the layout documented in [`superpowers.md`](superpowers.md)
 (evaluated 2026-07-08) and carries no pinned commit.
@@ -132,8 +135,34 @@ Spec-driven discipline: a numbered `specs/NNN-slug/` folder with a
 constitution, requirements checklist, and phased tasks. It proves the front of
 the loop well — verifiable Success Criteria, a Constitution Check, a
 requirements-quality checklist — the surface the contract layer composes with.
-What it structurally cannot prove is how the work ended: no typed terminal, no
-held-out gate, no machine-readable done flag.
+What the *fixture's* layout cannot prove is how the work ended: no typed
+terminal, no held-out gate, no evidence a third party can re-check.
+
+> **Correction (2026-07-25) — the strongest fairness note on this board.**
+> Spec Kit ships a first-party workflow engine that our fixture does not model,
+> and it *does* persist a typed run status. At the pinned commit `3f7392a`,
+> `src/specify_cli/workflows/base.py:28` defines
+> `class RunStatus(str, Enum)` with `created / running / paused / completed /
+> failed / aborted`, and `workflows/engine.py` atomically writes it to
+> `.specify/workflows/runs/<run_id>/state.json` (line 484) alongside an
+> append-only `log.jsonl` (line 560), transitioning to `FAILED` on step failure
+> and `PAUSED` on interruption. **A machine reading that file can tell a failed
+> run from a completed one.** That is more than eight of the nine layouts here
+> offer, and the row's 0/7 should be read with it in view.
+>
+> The fixture models Spec Kit's documented slash-command flow, which is the
+> surface most users drive, so the score stands for what it measures — but the
+> generalization this scoreboard drew from it does not. What `state.json` gives
+> you is a status a run writes *about itself*. What it does not give you is
+> evidence a third party can re-check: nothing in it lets a reader verify the
+> `completed` was earned. That narrower gap is the real finding; the broader
+> one was wrong.
+>
+> This is also a live demonstration of the method's own limit. A fixture built
+> from documentation cannot see machinery the documentation does not surface.
+> If another row has a comparable first-party mechanism we missed, name the file
+> and the pinned commit and it gets the same treatment: re-run, corrected in
+> place, in public.
 
 Fairness notes: `/speckit.implement` runs a real checkbox PASS/FAIL gate and
 halts on FAIL — but it is a natural-language instruction that writes no file.
@@ -272,12 +301,16 @@ success-criteria signal reads.
 
 ## What the whole field is missing
 
-Across nine popular harnesses — ~590k stars of them — the same three
+Across nine popular harnesses — ~610k stars of them — the same three
 structural gaps repeat, independent of methodology, maturity, or how much
 verification machinery each ships:
 
 1. **No typed terminal taxonomy (0/7, every row).** "Done" is always
-   expressible; *"failed, and here is the machine-readable reason"* never is.
+   expressible. A machine-readable *failure* almost never is — the one
+   exception on this board is Spec Kit's workflow engine, which persists a
+   typed `failed`/`aborted` status (see the correction in its row). Even there
+   the status is self-written: no row on this board pairs a terminal with
+   evidence a third party can re-check.
 2. **No held-out gate.** Every verification surface that exists is run by the
    same agent that claims success, and most persist nothing. Nothing prevents
    the claim from being wrong — and nothing measures how often it is (no row
