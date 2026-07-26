@@ -63,10 +63,16 @@ def build_verdict(target: str | Path, *, mode: str | None = None) -> dict[str, A
     """
     try:
         paths = resolve_loop_paths(target)
-        report = doctor_report(paths.workspace, mode=mode)
     except (OSError, ValueError, RuntimeError) as exc:
         # RuntimeError is pathlib's symlink-loop signal on Python <= 3.12.
         raise VerdictError(f"cannot resolve a loop workspace at {target}: {exc}") from exc
+
+    # Separate from resolution so an invalid mode= is not reported as a path failure;
+    # ValidationModeError is a RuntimeError subclass and would otherwise land above.
+    try:
+        report = doctor_report(paths.workspace, mode=mode)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise VerdictError(f"cannot read the contract at {paths.workspace}: {exc}") from exc
 
     terminal = _terminal_record(paths)
     store = report.get("event_store") or {}

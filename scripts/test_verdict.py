@@ -31,6 +31,18 @@ def test_schema_id_and_predicate_type_are_pinned():
     assert PREDICATE_TYPE == "urn:loop-engineer:verdict:1"
 
 
+def test_predicate_type_is_derived_from_the_schema_id():
+    """The two constants are one identity in two encodings, not two names.
+
+    ADR 0002 chose a URN matching the schema $id. A URN cannot idiomatically
+    carry '/' or '@', so the mapping is a transliteration -- which means
+    nothing stops the two from silently drifting apart unless it is asserted.
+    """
+    from loop.verdict import PREDICATE_TYPE, VERDICT_SCHEMA_ID
+
+    assert PREDICATE_TYPE == "urn:" + VERDICT_SCHEMA_ID.replace("/", ":").replace("@", ":")
+
+
 def test_schema_file_declares_the_matching_id():
     from loop._resources import schemas_dir
     from loop.verdict import VERDICT_SCHEMA_ID
@@ -154,7 +166,11 @@ def test_build_verdict_rejects_terminal_without_false_completion(tmp_path):
         build_verdict(target)
 
 
-@pytest.mark.parametrize("value", ["false", 1])
+# None is the original defect value: bool(None) is False, so the fail-open
+# projection this guard replaced would have claimed "not a false completion"
+# for a null flag. JSON null round-trips to None, so the key IS present and
+# only the isinstance check stands between it and a signed false claim.
+@pytest.mark.parametrize("value", ["false", 1, None])
 def test_build_verdict_rejects_non_boolean_false_completion(tmp_path, value):
     from loop.verdict import VerdictError, build_verdict
 
@@ -166,6 +182,21 @@ def test_build_verdict_rejects_non_boolean_false_completion(tmp_path, value):
 
     with pytest.raises(VerdictError, match="false_completion"):
         build_verdict(target)
+
+
+def test_build_verdict_reports_an_invalid_mode_as_a_contract_read_failure(tmp_path):
+    """An invalid mode= is a contract-read failure, not a path-resolution one.
+
+    ValidationModeError subclasses RuntimeError, so a single guard around both
+    resolution and doctor_report would label it "cannot resolve a loop
+    workspace" -- a misleading frame for an argument error.
+    """
+    from loop.verdict import VerdictError, build_verdict
+
+    target = _workspace_with_terminal(tmp_path)
+
+    with pytest.raises(VerdictError, match="cannot read the contract"):
+        build_verdict(target, mode="not-a-validation-mode")
 
 
 def test_build_verdict_rejects_non_object_terminal_record(tmp_path):
