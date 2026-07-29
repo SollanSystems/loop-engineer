@@ -47,7 +47,9 @@ def _terminal_record(paths: LoopPaths) -> dict[str, Any]:
         )
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        # UnicodeDecodeError became reachable here once doctor_report stopped
+        # raising it (#107); the site-agnostic typed-contract test depends on it.
         raise VerdictError(f"terminal record is unreadable: {exc}") from exc
     if not isinstance(data, dict):
         raise VerdictError("terminal record is not an object")
