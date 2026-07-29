@@ -2,20 +2,22 @@
 
 This module builds a document. It NEVER signs one, never verifies a signature,
 never constructs an in-toto Statement, and never reads an environment variable.
-The signer lane (action.yml -> actions/attest) owns the envelope, the subject,
-and every cryptographic operation. See docs/adr/0002-ci-attested-verdict.md.
+The signer lane (action.yml -> actions/attest) owns the envelope claims and every
+cryptographic operation. See docs/adr/0002-ci-attested-verdict.md.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 from ._resources import schemas_dir
-from .contract import doctor_report
+from .contract import _strict_evidence_failure, doctor_report
 from .paths import LoopPaths, resolve_loop_paths
+from .runtime import RuntimeStoreError, bound_artifact_digests
 
 VERDICT_SCHEMA_ID = "loop-engineer/verdict@1"
 PREDICATE_TYPE = "urn:loop-engineer:verdict:1"
@@ -56,6 +58,51 @@ def _terminal_record(paths: LoopPaths) -> dict[str, Any]:
     return data
 
 
+def _evidence_digests(entry: object, paths: LoopPaths) -> dict[str, str | None] | None:
+    """Return the chain-committed record digest and verifier digests for an entry."""
+    if not isinstance(entry, str):
+        return None
+    try:
+        record_bytes = (paths.workspace / entry).read_bytes()
+        record = json.loads(record_bytes.decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    verified_by = record.get("verified_by")
+    return {
+        "digest": hashlib.sha256(record_bytes).hexdigest(),
+        "code_digest": verified_by.get("code_digest") if isinstance(verified_by, dict) else None,
+        "policy_digest": verified_by.get("policy_digest") if isinstance(verified_by, dict) else None,
+    }
+
+
+def _bound_evidence(paths: LoopPaths) -> dict[str, tuple[str, ...]] | None:
+    """Read evidence record digests committed by the event chain."""
+    return bound_artifact_digests(paths.workspace)
+
+
+def _verified_evidence(
+    terminal: dict[str, Any], paths: LoopPaths, bound: dict[str, tuple[str, ...]] | None
+) -> list[dict[str, str | None]]:
+    """Project only terminal evidence that clears the shared strict bar."""
+    entries = terminal.get("evidence")
+    if not isinstance(entries, list):
+        return []
+    projected = {
+        (digest["digest"], digest["code_digest"], digest["policy_digest"])
+        for entry in entries
+        if _strict_evidence_failure(entry, paths, bound) is None
+        if (digest := _evidence_digests(entry, paths)) is not None
+    }
+    return [
+        {"digest": digest, "code_digest": code_digest, "policy_digest": policy_digest}
+        for digest, code_digest, policy_digest in sorted(
+            projected, key=lambda item: (item[0], item[1] or "", item[2] or "")
+        )
+    ]
+
+
 def build_verdict(target: str | Path, *, mode: str | None = None) -> dict[str, Any]:
     """Project local run state into a ``verdict@1`` predicate body.
 
@@ -75,6 +122,12 @@ def build_verdict(target: str | Path, *, mode: str | None = None) -> dict[str, A
         raise VerdictError(f"cannot read the contract at {paths.workspace}: {exc}") from exc
 
     terminal = _terminal_record(paths)
+    try:
+        bound = _bound_evidence(paths)
+    except RuntimeStoreError:
+        evidence = []
+    else:
+        evidence = _verified_evidence(terminal, paths, bound)
     store = report.get("event_store") or {}
     chain = store.get("chain") or {}
     head = chain.get("head") or {}
@@ -107,5 +160,5 @@ def build_verdict(target: str | Path, *, mode: str | None = None) -> dict[str, A
             "completion_policy": policy_mode,
             "false_completion": terminal["false_completion"],
         },
-        "evidence": [],
+        "evidence": evidence,
     }

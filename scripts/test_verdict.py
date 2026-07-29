@@ -1,9 +1,13 @@
+import hashlib
 import json
 import re
 
 import pytest
 
+from loop import emit
+from loop.completion import VERIFIED_EVIDENCE_MODE
 from loop.events import SQLiteEventStore
+from loop.runner import dispatch_once
 from loop.scaffold import scaffold
 
 
@@ -22,6 +26,65 @@ def _workspace_with_terminal(tmp_path, name="workspace", *, completion_policy=No
         encoding="utf-8",
     )
     return target
+
+
+def _ready(tmp_path):
+    """A real task workspace positioned for its first dispatched iteration."""
+    workspace = tmp_path / "dispatched"
+    emit.open_contract(workspace)
+    task = {
+        "id": "T-1", "title": "T-1", "status": "pending", "criterion_ref": "T-1",
+        "verify": "./scripts/verify-fast.sh", "depends_on": [], "attempts": 0,
+        "evidence": None,
+    }
+    (workspace / "TASKS.json").write_text(
+        json.dumps({"schema": "loop-engineer/tasks@1", "tasks": [task]}), encoding="utf-8"
+    )
+    verifier = workspace / "scripts" / "verify-fast.sh"
+    verifier.parent.mkdir(parents=True, exist_ok=True)
+    verifier.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    verifier.chmod(0o755)
+    store = SQLiteEventStore(workspace / ".loop" / "events.db")
+    store.append("run-1", "contract_opened", {"workspace": workspace.name}, actor="test")
+    for state in ("plan", "critique-plan", "queue-tasks", "execute-task"):
+        store.append("run-1", "iteration_appended", {
+            "iteration_id": 0, "outcome": "replanned", "state": state,
+        }, actor="test")
+    return workspace
+
+
+def _dispatched_workspace(tmp_path):
+    workspace = _ready(tmp_path)
+    dispatch_once(workspace)
+    return workspace
+
+
+def _handwritten_record(workspace, *, name="evidence-handwritten.json"):
+    """Create self-consistent evidence that is only chain-bound in storeless workspaces."""
+    bundle = workspace / ".loop" / "artifacts" / "verify-handwritten.json"
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    bundle_bytes = b'{"outcome": "PASS", "passed": true}'
+    bundle.write_bytes(bundle_bytes)
+    record = {
+        "schema": "loop-engineer/evidence@1", "id": "hand:1:verify",
+        "kind": "verify-bundle", "uri": ".loop/artifacts/verify-handwritten.json",
+        "sha256": hashlib.sha256(bundle_bytes).hexdigest(), "media_type": "application/json",
+        "produced_by": {"run_id": "run-1", "task_id": None, "attempt": 1,
+                        "executor": "worker-a"},
+        "created_at": "2026-07-25T00:00:00+00:00",
+        "verified_by": {"by": "ci", "at": "2026-07-25T00:00:00+00:00"},
+    }
+    path = workspace / ".loop" / "evidence" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+    return f".loop/evidence/{name}"
+
+
+def _rewrite_terminal_evidence(workspace, evidence):
+    path = workspace / ".loop" / "terminal_state.json"
+    terminal = json.loads(path.read_text(encoding="utf-8"))
+    terminal["evidence"] = evidence
+    path.write_text(json.dumps(terminal, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def test_schema_id_and_predicate_type_are_pinned():
@@ -236,3 +299,123 @@ def test_build_verdict_validates_against_its_loaded_schema(tmp_path):
     jsonschema.validate(verdict, schema)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(invalid_verdict, schema)
+
+
+def test_evidence_carries_only_entries_that_pass_the_strict_bar(tmp_path, monkeypatch):
+    import loop.verdict as verdict
+
+    monkeypatch.setattr(verdict, "_strict_evidence_failure",
+                        lambda entry, _paths, _bound: None if entry == "good" else "bad")
+    monkeypatch.setattr(verdict, "_evidence_digests", lambda entry, _paths: {
+        "digest": "a" * 64, "code_digest": None, "policy_digest": None,
+    } if entry == "good" else {"digest": "b" * 64, "code_digest": None,
+                             "policy_digest": None})
+    target = _workspace_with_terminal(tmp_path)
+    _rewrite_terminal_evidence(target, ["good", "bad"])
+
+    assert verdict.build_verdict(target)["evidence"] == [
+        {"digest": "a" * 64, "code_digest": None, "policy_digest": None}
+    ]
+
+
+def test_evidence_entries_carry_digests_only(tmp_path):
+    from loop.verdict import build_verdict
+
+    workspace = _dispatched_workspace(tmp_path)
+    emit.terminate(workspace, state="Succeeded", criteria_met={"C-1": True},
+                   evidence=[".loop/evidence/evidence-iter1.json"],
+                   completion_policy=VERIFIED_EVIDENCE_MODE)
+
+    evidence = build_verdict(workspace)["evidence"]
+    assert evidence
+    assert all(set(entry) == {"digest", "code_digest", "policy_digest"} for entry in evidence)
+
+
+def test_evidence_is_sorted_by_digest(tmp_path, monkeypatch):
+    import loop.verdict as verdict
+
+    digests = {
+        "later": {"digest": "f" * 64, "code_digest": None, "policy_digest": None},
+        "first": {"digest": "0" * 64, "code_digest": None, "policy_digest": None},
+    }
+    monkeypatch.setattr(verdict, "_strict_evidence_failure", lambda *_args: None)
+    monkeypatch.setattr(verdict, "_evidence_digests", lambda entry, _paths: digests[entry])
+    target = _workspace_with_terminal(tmp_path)
+    _rewrite_terminal_evidence(target, ["later", "first"])
+
+    assert [entry["digest"] for entry in verdict.build_verdict(target)["evidence"]] == [
+        "0" * 64, "f" * 64,
+    ]
+
+
+def test_evidence_digest_is_the_chain_committed_record_digest(tmp_path):
+    from loop.runtime import bound_artifact_digests
+    from loop.verdict import build_verdict
+
+    workspace = _dispatched_workspace(tmp_path)
+    entry = ".loop/evidence/evidence-iter1.json"
+    emit.terminate(workspace, state="Succeeded", criteria_met={"C-1": True}, evidence=[entry],
+                   completion_policy=VERIFIED_EVIDENCE_MODE)
+    record_path = workspace / entry
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+
+    projected = build_verdict(workspace)["evidence"]
+    expected = hashlib.sha256(record_path.read_bytes()).hexdigest()
+    assert projected == [{"digest": expected,
+                          "code_digest": record["verified_by"]["code_digest"],
+                          "policy_digest": record["verified_by"]["policy_digest"]}]
+    assert expected == bound_artifact_digests(workspace)[entry][0]
+    assert expected != record["sha256"]
+
+
+def test_unbound_record_is_excluded_when_a_store_exists(tmp_path):
+    from loop.verdict import build_verdict
+
+    workspace = _dispatched_workspace(tmp_path)
+    bound_entry = ".loop/evidence/evidence-iter1.json"
+    emit.terminate(workspace, state="Succeeded", criteria_met={"C-1": True},
+                   evidence=[bound_entry], completion_policy=VERIFIED_EVIDENCE_MODE)
+    unbound_entry = _handwritten_record(workspace)
+    _rewrite_terminal_evidence(workspace, [bound_entry, unbound_entry])
+
+    evidence = build_verdict(workspace)["evidence"]
+    assert [entry["digest"] for entry in evidence] == [
+        hashlib.sha256((workspace / bound_entry).read_bytes()).hexdigest()
+    ]
+
+
+def test_absent_store_projects_evidence_under_the_documented_degradation(tmp_path):
+    from loop.verdict import build_verdict
+
+    workspace = _workspace_with_terminal(tmp_path)
+    entry = _handwritten_record(workspace)
+    _rewrite_terminal_evidence(workspace, [entry])
+
+    assert build_verdict(workspace)["evidence"] == [{
+        "digest": hashlib.sha256((workspace / entry).read_bytes()).hexdigest(),
+        "code_digest": None, "policy_digest": None,
+    }]
+
+
+def test_unreadable_store_projects_no_evidence_and_does_not_raise(tmp_path):
+    from loop.verdict import build_verdict
+
+    workspace = _workspace_with_terminal(tmp_path)
+    entry = _handwritten_record(workspace)
+    _rewrite_terminal_evidence(workspace, [entry])
+    (workspace / ".loop" / "events.db").write_bytes(b"not a SQLite database")
+
+    assert build_verdict(workspace)["evidence"] == []
+
+
+def test_identical_evidence_entries_project_once(tmp_path):
+    from loop.verdict import build_verdict
+
+    workspace = _workspace_with_terminal(tmp_path)
+    entry = _handwritten_record(workspace)
+    _rewrite_terminal_evidence(workspace, [entry, entry])
+
+    assert build_verdict(workspace)["evidence"] == [{
+        "digest": hashlib.sha256((workspace / entry).read_bytes()).hexdigest(),
+        "code_digest": None, "policy_digest": None,
+    }]
