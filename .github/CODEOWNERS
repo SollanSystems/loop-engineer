@@ -1,0 +1,6 @@
+# Changes to what the gate checks require human review (ADR 0002, decision 6).
+# Everything else in this repo stays autonomous.
+/loop/                  @SollanSystems
+/action.yml             @SollanSystems
+/.github/workflows/     @SollanSystems
+/.github/CODEOWNERS     @SollanSystems
