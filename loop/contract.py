@@ -56,6 +56,11 @@ def _read_json(path: Path, issues: list[dict]) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        # Same rule as _validate_jsonl: undecodable bytes fail the file closed
+        # with a typed finding, never a traceback out of doctor_report (#107).
+        issues.append(ContractIssue("invalid_encoding", f"{path.name}: not valid UTF-8: {exc}", path))
+        return None
     except json.JSONDecodeError as exc:
         issues.append(ContractIssue("invalid_json", f"{path.name}: {exc}", path))
         return None
@@ -139,7 +144,12 @@ def _fallback_yaml(text: str) -> dict[str, Any]:
 def read_manifest(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        # Undecodable bytes are malformed content: fail safe to {} exactly like
+        # the malformed-YAML branch below, never propagate a traceback (#107).
+        return {}
     try:
         import yaml  # type: ignore
     except Exception:

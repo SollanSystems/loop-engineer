@@ -180,3 +180,28 @@ def test_repo_own_contract_still_validates_clean():
         pytest.skip("no live .loop contract in this checkout (gitignored run-state)")
     report = validate_contract(ROOT / ".loop")
     assert report["ok"] is True, report["issues"]
+
+
+def test_doctor_reports_invalid_encoding_for_an_undecodable_contract_object(tmp_path):
+    # #107: a terminal_state.json holding invalid UTF-8 bytes is a typed doctor
+    # finding, never a raw UnicodeDecodeError traceback out of doctor_report.
+    from loop.contract import doctor_report
+    from loop.scaffold import scaffold
+
+    workspace = tmp_path / "ws"
+    scaffold(workspace)
+    (workspace / ".loop" / "terminal_state.json").write_bytes(b"\xff\xfe{}")
+
+    report = doctor_report(workspace)
+    assert report["ok"] is False
+    assert any(i["code"] == "invalid_encoding" for i in report["issues"]), report["issues"]
+
+
+def test_read_manifest_fails_safe_on_undecodable_bytes(tmp_path):
+    # Mirrors the malformed-YAML rule stated inline in read_manifest: a manifest
+    # that cannot be decoded fails safe to {} rather than propagating a traceback.
+    from loop.contract import read_manifest
+
+    path = tmp_path / "manifest.yaml"
+    path.write_bytes(b"\xff\xfename: x")
+    assert read_manifest(path) == {}
