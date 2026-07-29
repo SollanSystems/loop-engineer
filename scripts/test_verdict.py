@@ -419,3 +419,34 @@ def test_identical_evidence_entries_project_once(tmp_path):
         "digest": hashlib.sha256((workspace / entry).read_bytes()).hexdigest(),
         "code_digest": None, "policy_digest": None,
     }]
+
+
+def test_projection_digest_must_match_the_chain_committed_digest(tmp_path, monkeypatch):
+    """The bar validates its own read of the record; the projection read must
+    re-match the chain-committed digest, or the entry is dropped (TOCTOU)."""
+    import loop.verdict as verdict
+
+    workspace = _dispatched_workspace(tmp_path)
+    entry = ".loop/evidence/evidence-iter1.json"
+    emit.terminate(workspace, state="Succeeded", criteria_met={"C-1": True}, evidence=[entry],
+                   completion_policy=VERIFIED_EVIDENCE_MODE)
+    monkeypatch.setattr(verdict, "_evidence_digests", lambda _entry, _paths: {
+        "digest": "f" * 64, "code_digest": None, "policy_digest": None,
+    })
+
+    assert verdict.build_verdict(workspace)["evidence"] == []
+
+
+def test_populated_evidence_validates_against_the_schema(tmp_path):
+    """A verdict carrying a non-empty evidence list satisfies verdict.schema.json."""
+    jsonschema = pytest.importorskip("jsonschema")
+    from loop.verdict import _load_verdict_schema, build_verdict
+
+    workspace = _dispatched_workspace(tmp_path)
+    emit.terminate(workspace, state="Succeeded", criteria_met={"C-1": True},
+                   evidence=[".loop/evidence/evidence-iter1.json"],
+                   completion_policy=VERIFIED_EVIDENCE_MODE)
+
+    verdict = build_verdict(workspace)
+    assert verdict["evidence"]
+    jsonschema.validate(verdict, _load_verdict_schema())

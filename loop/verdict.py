@@ -89,12 +89,19 @@ def _verified_evidence(
     entries = terminal.get("evidence")
     if not isinstance(entries, list):
         return []
-    projected = {
-        (digest["digest"], digest["code_digest"], digest["policy_digest"])
-        for entry in entries
-        if _strict_evidence_failure(entry, paths, bound) is None
-        if (digest := _evidence_digests(entry, paths)) is not None
-    }
+    projected = set()
+    for entry in entries:
+        if _strict_evidence_failure(entry, paths, bound) is not None:
+            continue
+        digests = _evidence_digests(entry, paths)
+        if digests is None:
+            continue
+        if bound is not None and (digests["digest"],) != bound.get(entry):
+            # The bar validated its own read of the record; this projection read
+            # hashed differently, so the bytes moved between the two reads. A
+            # digest the chain never committed must not enter a signed document.
+            continue
+        projected.add((digests["digest"], digests["code_digest"], digests["policy_digest"]))
     return [
         {"digest": digest, "code_digest": code_digest, "policy_digest": policy_digest}
         for digest, code_digest, policy_digest in sorted(
