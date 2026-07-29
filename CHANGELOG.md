@@ -40,10 +40,10 @@ attestation URL is produced or the observed head differs from the seeded one.
 What this does not buy: the signature attests context — repo, workflow,
 trigger, time — never correctness, so a signed verdict over a weakened gate is
 just a signed weakened gate. An agent with ordinary merge rights can loosen
-`loop/**`/`action.yml`/the workflow and then mint a perfectly genuine
-attestation for the result (the control is CODEOWNERS review on those paths,
-not signing), and an unattested chain rewrite is detected at best one run
-late. Verification (`--compare`, anchor auto-resolution, signer-trust policy)
+`loop/**`/`schemas/**`/`action.yml`/the workflow and then mint a perfectly
+genuine attestation for the result — the control is code-owner review on those
+paths, which is in force only once the repository ruleset requires it — and an
+unattested chain rewrite is detected at best one run late. Verification (`--compare`, anchor auto-resolution, signer-trust policy)
 is slice 4b and does not ship here.
 
 ## 0.11.0 — 2026-07-26

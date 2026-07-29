@@ -1629,9 +1629,12 @@ and neither implies the other.
 which repository, which workflow, which trigger, at what time. It never
 attests correctness — a signed verdict over a weak gate is a signed weak
 gate. A worker with ordinary merge rights can loosen the gate
-(`loop/**`, `action.yml`, the workflow) and then mint a perfectly genuine
-attestation for the loosened gate; the control is human review on those paths
-(ADR 0002 decision 6), not signing. The chain proves order and non-tampering
+(`loop/**`, `schemas/**` — the contract schemas define what doctor accepts —
+`action.yml`, or the workflow) and then mint a perfectly genuine attestation
+for the loosened gate; the control is human review on those paths (ADR 0002
+decision 6), not signing — and CODEOWNERS is that control **only while the
+repository's ruleset requires code-owner review**. A CODEOWNERS file the
+ruleset does not enforce is documentation, not a control. The chain proves order and non-tampering
 relative to an anchor, not that the events happened when claimed — a history
 fabricated wholesale at authoring time is byte-valid. Detection of an
 unattested rewrite is at best one run late. And an attestation nothing

@@ -1,5 +1,5 @@
 name: "loop-engineer gate"
-description: "Proof-of-done gate for agent-loop contracts: hard-fails on doctor, scores with inspect (warn-only by default)."
+description: "Proof-of-done gate for agent-loop contracts: hard-fails on doctor, scores with inspect (warn-only by default), and can keylessly attest the run's verdict@1 predicate (opt-in)."
 branding:
   icon: "check-circle"
   color: "green"
