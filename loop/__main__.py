@@ -12,13 +12,13 @@ from .runcontrol import RunControlError
 
 _PROG = "python3 -m loop"
 
-_COMMANDS = ("scaffold", "doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "migrate", "architect")
+_COMMANDS = ("scaffold", "doctor", "validate", "verify", "verdict", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "migrate", "architect")
 
 # Read commands operate on an EXISTING contract dir; scaffold CREATES one, so it
 # is exempt from the "target must exist" guard.
-_READ_COMMANDS = ("doctor", "validate", "verify", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "migrate")
+_READ_COMMANDS = ("doctor", "validate", "verify", "verdict", "inspect", "metrics", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel", "migrate")
 
-_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel|migrate|architect> <target>"
+_USAGE = f"usage: {_PROG} <scaffold|doctor|validate|verify|verdict|inspect|metrics|plan-lint|status|replay|simulate|run|approve|pause|resume|cancel|migrate|architect> <target>"
 
 _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop contract.
 
@@ -26,6 +26,7 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
        {_PROG} metrics [--baseline] <workspace-or-.loop>
        {_PROG} doctor|validate|verify [--mode basic|strict|release]
               [--expect-chain-head SHA256] <workspace-or-.loop>
+       {_PROG} verdict [--mode basic|strict|release] <workspace>
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
        {_PROG} simulate [--mode basic|strict|release] <workspace>
@@ -42,6 +43,9 @@ commands:
   doctor     Validate the contract objects; --mode selects validation strength.
   validate   Alias for doctor.
   verify     Alias for doctor — check the contract's state.
+  verdict    Emit the predicate body only; the signer (actions/attest) constructs
+             the in-toto Statement. Never signs and never verifies a signature.
+             (schema loop-engineer/verdict@1: doctor status, chain head, terminal outcome, verified-evidence digests)
   inspect    Score an existing loop against the prime-directive checklist
              (emits a weak/strong verdict and a gap report).
   metrics    Derive false-completion-rate + repair-productivity from the loop's
@@ -70,7 +74,7 @@ arguments:
 
 options:
   --mode {{basic,strict,release}}
-                (doctor/validate/verify/plan-lint/status/replay/simulate/run) basic forces structural
+                (doctor/validate/verify/verdict/plan-lint/status/replay/simulate/run) basic forces structural
                 checks; strict/release require jsonschema. Default: auto-detect.
   --expect-chain-head SHA256
                 (doctor/validate/verify) fail unless the event store's chain head
@@ -241,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     mode = None
-    if command in {"doctor", "validate", "verify", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel"}:
+    if command in {"doctor", "validate", "verify", "verdict", "plan-lint", "status", "replay", "simulate", "run", "approve", "pause", "resume", "cancel"}:
         try:
             mode, argv = _extract_mode_flag(argv)
         except ValueError as exc:
@@ -365,6 +369,17 @@ def main(argv: list[str] | None = None) -> int:
             return _print_json(doctor_report(target, mode=mode, expect_chain_head=expect_chain_head))
         except ValidationModeError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
+            return 2
+
+    if command == "verdict":
+        from .verdict import VerdictError, build_verdict
+        from .chain import ChainHashError, canonical_json
+
+        try:
+            print(canonical_json(build_verdict(target, mode=mode)))
+            return 0
+        except (VerdictError, ChainHashError) as exc:
+            print(f"verdict: {exc}", file=sys.stderr)
             return 2
 
     if command == "plan-lint":

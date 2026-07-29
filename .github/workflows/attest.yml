@@ -1,0 +1,109 @@
+name: attest
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verdict:
+    # Push-to-default-branch only, by ADR 0002 decision 5: attesting on a PR
+    # would mint a signed verdict under the repository's identity before review.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install seed dependencies
+        run: python -m pip install --upgrade pip pyyaml jsonschema
+
+      - name: Seed a terminated, chained workspace
+        id: seed
+        # Through the REAL writer path — the runner's dispatch + auto-terminal —
+        # never a hand-written terminal (doctor flags those as desynced) and
+        # never a tracked example (no examples/* contract ships an events.db, so
+        # the attest step would skip and this job would pass having attested
+        # nothing: unfalsifiable, the exact false-completion shape this project
+        # refuses). Two dispatches: the first executes the one task and binds
+        # its evidence into the chain, the second fires the auto-terminal.
+        run: |
+          workspace="${RUNNER_TEMP}/verdict-ws"
+          head="$(python -B - "$workspace" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          sys.path.insert(0, ".")
+          from loop import emit
+          from loop.contract import doctor_report
+          from loop.events import SQLiteEventStore
+          from loop.runner import dispatch_once
+
+          ws = pathlib.Path(sys.argv[1])
+          emit.open_contract(ws)
+          task = {"id": "T-1", "title": "T-1", "status": "pending",
+                  "criterion_ref": "T-1", "verify": "./scripts/verify-fast.sh",
+                  "depends_on": [], "attempts": 0, "evidence": None}
+          (ws / "TASKS.json").write_text(
+              json.dumps({"schema": "loop-engineer/tasks@1", "tasks": [task]}),
+              encoding="utf-8")
+          script = ws / "scripts" / "verify-fast.sh"
+          script.parent.mkdir(parents=True, exist_ok=True)
+          script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+          script.chmod(0o755)
+          store = SQLiteEventStore(ws / ".loop" / "events.db")
+          store.append("run-1", "contract_opened", {"workspace": ws.name}, actor="ci")
+          for state in ("plan", "critique-plan", "queue-tasks", "execute-task"):
+              store.append("run-1", "iteration_appended",
+                           {"iteration_id": 0, "outcome": "replanned", "state": state},
+                           actor="ci")
+          dispatch_once(ws)
+          dispatch_once(ws)
+          report = doctor_report(ws)
+          if not report["ok"]:
+              raise SystemExit(
+                  f"seeded workspace is not doctor-clean: "
+                  f"{[issue['code'] for issue in report['issues']]}")
+          head = (((report["event_store"].get("chain") or {}).get("head") or {})
+                  .get("event_hash")) or ""
+          if not head:
+              raise SystemExit("seeded workspace has no chain head")
+          print(head)
+          PY
+          )"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+
+      - id: gate
+        uses: ./
+        with:
+          path: ${{ steps.seed.outputs.workspace }}
+          attest: "true"
+
+      - name: assert an attestation was actually created
+        # Without this the job passes when the attest step skips, which is the
+        # failure mode this whole task exists to avoid.
+        env:
+          SEEDED_HEAD: ${{ steps.seed.outputs.head }}
+          OBSERVED_HEAD: ${{ steps.gate.outputs.chain-head }}
+          ATTESTATION: ${{ steps.gate.outputs.attestation-url }}
+        run: |
+          if [ -z "$ATTESTATION" ]; then
+            echo "::error::attest was requested but no attestation URL was produced"
+            exit 1
+          fi
+          if [ "$OBSERVED_HEAD" != "$SEEDED_HEAD" ]; then
+            echo "::error::gate observed head '$OBSERVED_HEAD', seed produced '$SEEDED_HEAD'"
+            exit 1
+          fi
+          echo "chain head: $OBSERVED_HEAD" >> "$GITHUB_STEP_SUMMARY"
+          echo "attestation: $ATTESTATION" >> "$GITHUB_STEP_SUMMARY"

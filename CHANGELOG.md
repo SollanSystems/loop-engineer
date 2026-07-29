@@ -14,6 +14,38 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
+## Unreleased
+
+**A verdict you can hand to a signer (slice 4a of tamper-evident provenance).**
+The kernel gains `loop verdict <workspace>`: a pure projection of a finished
+run — doctor verdict, chain head, terminal outcome, and the chain-bound
+evidence digests that pass the strict verified-evidence bar — into one
+canonical `loop-engineer/verdict@1` predicate body (`schemas/verdict.schema.json`,
+normative in `reference/repo-os-contract.md` §23). Digests, enums, and issue
+codes only; `run_id` is the single operator-controlled string; the field set is
+an allowlist held by test. The kernel never signs, never builds an in-toto
+Statement, and never reads an environment variable — `scripts/test_verdict_purity.py`
+makes each boundary mechanical.
+
+The composite action gains an opt-in `attest` input (default false): it writes
+the predicate to the runner temp dir and hands it to `actions/attest` with
+`subject-name: loop-chain-head` / `subject-digest: sha256:<chain-head>`,
+exposing `attestation-url`/`attestation-id` outputs; a legible permission
+precheck replaces the raw OIDC 403, and an empty chain head skips with a
+warning rather than shipping a malformed subject. `.github/workflows/attest.yml`
+mints a real attestation on every push to main over a workspace seeded through
+the runner's own dispatch + auto-terminal path, and fails loud if no
+attestation URL is produced or the observed head differs from the seeded one.
+
+What this does not buy: the signature attests context — repo, workflow,
+trigger, time — never correctness, so a signed verdict over a weakened gate is
+just a signed weakened gate. An agent with ordinary merge rights can loosen
+`loop/**`/`schemas/**`/`action.yml`/the workflow and then mint a perfectly
+genuine attestation for the result — the control is code-owner review on those
+paths, which is in force only once the repository ruleset requires it — and an
+unattested chain rewrite is detected at best one run late. Verification (`--compare`, anchor auto-resolution, signer-trust policy)
+is slice 4b and does not ship here.
+
 ## 0.11.0 — 2026-07-26
 
 **Verifier identity, and evidence that is load-bearing.** Two slices of the

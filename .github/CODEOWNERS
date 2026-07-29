@@ -1,0 +1,9 @@
+# Changes to what the gate checks require human review (ADR 0002, decision 6).
+# schemas/ is included beyond the ADR's literal list: the contract schemas
+# define what doctor accepts, so they are the same enforcement surface.
+# Everything else in this repo stays autonomous.
+/loop/                  @SollanSystems
+/schemas/               @SollanSystems
+/action.yml             @SollanSystems
+/.github/workflows/     @SollanSystems
+/.github/CODEOWNERS     @SollanSystems

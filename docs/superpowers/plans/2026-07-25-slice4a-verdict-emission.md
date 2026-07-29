@@ -311,10 +311,10 @@ import pytest
 
 def _scaffold_terminal(tmp_path, name, state="Succeeded", policy="all_required"):
     """A doctor-clean scaffold advanced to a terminal record."""
-    from loop.contract import scaffold_contract  # existing scaffold entry point
+    from loop.scaffold import scaffold
 
     target = tmp_path / name
-    scaffold_contract(target)
+    scaffold(target)
     terminal = {
         "schema": "loop-engineer/terminal@1",
         "state": state,
@@ -357,11 +357,11 @@ def test_issue_codes_are_sorted_deduplicated_and_carry_no_detail(tmp_path):
 
 
 def test_build_verdict_refuses_a_workspace_with_no_terminal_record(tmp_path):
-    from loop.contract import scaffold_contract
+    from loop.scaffold import scaffold
     from loop.verdict import VerdictError, build_verdict
 
     target = tmp_path / "no-terminal"
-    scaffold_contract(target)
+    scaffold(target)
 
     with pytest.raises(VerdictError, match="no terminal record"):
         build_verdict(target)
@@ -379,7 +379,7 @@ def test_build_verdict_refuses_a_nonexistent_target(tmp_path):
 Run: `uv run --with pyyaml --with jsonschema --with pytest python3 -B -m pytest -q -p no:cacheprovider scripts/test_verdict.py -v`
 Expected: FAIL with `ImportError: cannot import name 'build_verdict'`
 
-> If `scaffold_contract` is not the exported scaffold name at HEAD, run `uv run --with pyyaml python3 -B -c "import loop.contract as c; print([n for n in dir(c) if 'scaffold' in n])"` and use the real one in the helper. Do not invent an API.
+> Verified at HEAD: the scaffold entry point is `loop.scaffold.scaffold(target)` (`loop/scaffold.py:104`). There is no `scaffold_contract`. `LoopPaths` also exposes `.terminal` directly (`loop/paths.py:24`), so prefer `paths.terminal` over `paths.loop_dir / "terminal_state.json"`.
 
 - [ ] **Step 3: Implement the projection**
 
@@ -1033,10 +1033,19 @@ git commit -m "feat(action): opt-in keyless attestation of the verdict predicate
 - Create: `.github/workflows/attest.yml`
 
 **Interfaces:**
-- Consumes: the composite action from Task 6.
-- Produces: a real attestation on every push to the default branch, over a **tracked** `examples/*` contract.
+- Consumes: the composite action from Task 6; the existing `scripts/ci_anchor_probe.py`.
+- Produces: a real attestation on every push to the default branch, over a **seeded chained workspace**.
 
-Never point this at the live gitignored `.loop/` — CI runs on a fresh checkout where it does not exist.
+**Pre-flight correction.** An earlier draft pointed this job at `examples/flaky-test-triage`. That is
+wrong: **no tracked `examples/*` contract ships an `events.db`** (verified — event stores are runtime
+artifacts and `.loop/` is gitignored). With no store the chain head is empty, Task 6 Step 4's guard
+skips the attest step, and the job goes green having attested nothing — an unfalsifiable CI job, which
+is the exact false-completion shape this project exists to refuse.
+
+Reuse the pattern the repo already proved. `ci.yml`'s `chain anchor (live end-to-end)` job seeds a
+chained workspace via `python -B scripts/ci_anchor_probe.py "$workspace"`, which prints the resulting
+head; its own comment states the rationale verbatim — *"action-dogfood gates a store-free example, so
+the anchor surface has no live cover there."* Never point this at the live gitignored `.loop/`.
 
 - [ ] **Step 1: Write the workflow**
 
@@ -1060,25 +1069,59 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install probe dependencies
+        run: python -m pip install --upgrade pip pyyaml jsonschema
+
+      - name: Seed a chained workspace
+        id: seed
+        # Same probe the chain-anchor job uses. A store-free example would make
+        # the attest step skip and this job unfalsifiable.
+        run: |
+          workspace="${RUNNER_TEMP}/verdict-ws"
+          head="$(python -B scripts/ci_anchor_probe.py "$workspace")"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+
       - id: gate
         uses: ./
         with:
-          path: examples/flaky-test-triage
+          path: ${{ steps.seed.outputs.workspace }}
           attest: "true"
-      - name: record
+
+      - name: assert an attestation was actually created
+        # Without this the job passes when the attest step skips, which is the
+        # failure mode this whole task exists to avoid.
+        env:
+          SEEDED_HEAD: ${{ steps.seed.outputs.head }}
+          OBSERVED_HEAD: ${{ steps.gate.outputs.chain-head }}
+          ATTESTATION: ${{ steps.gate.outputs.attestation-url }}
         run: |
-          echo "chain head: ${{ steps.gate.outputs.chain-head }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "attestation: ${{ steps.gate.outputs.attestation-url }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$ATTESTATION" ]; then
+            echo "::error::attest was requested but no attestation URL was produced"
+            exit 1
+          fi
+          if [ "$OBSERVED_HEAD" != "$SEEDED_HEAD" ]; then
+            echo "::error::gate observed head '$OBSERVED_HEAD', seed produced '$SEEDED_HEAD'"
+            exit 1
+          fi
+          echo "chain head: $OBSERVED_HEAD" >> "$GITHUB_STEP_SUMMARY"
+          echo "attestation: $ATTESTATION" >> "$GITHUB_STEP_SUMMARY"
 ```
 
-- [ ] **Step 2: Confirm the checkout action major matches the repo's other workflows**
+- [ ] **Step 2: Confirm the action majors match the repo's other workflows**
 
 ```bash
-grep -rn "actions/checkout@" .github/workflows/
+grep -rn "actions/checkout@\|actions/setup-python@" .github/workflows/
 ```
 
-Use whatever major `ci.yml` uses. A mismatched pin is a dependabot PR waiting to happen.
+Pre-flight observed `actions/checkout@v7` and `actions/setup-python@v7` in `ci.yml`; confirm before
+committing. A mismatched pin is a dependabot PR waiting to happen.
 
 - [ ] **Step 3: Commit**
 
@@ -1227,6 +1270,6 @@ Carried from ADR 0002. None blocks starting; each blocks the task that touches i
 
 1. **Subject digest algorithm** (Task 6). The chain head is not a hash of retrievable bytes, so the `sha256` DigestSet key licenses a false inference. A namespaced key is correct in in-toto terms but `actions/attest`'s `subject-digest` may accept only `sha256:`. Resolve by experiment. If the input constrains us, §23 must carry the disambiguation instead.
 2. **`create-storage-record` / `push-to-registry` defaults** (Task 6). Pass both explicitly so the two-permission claim is true by construction.
-3. **`scaffold_contract` name** (Task 2 Step 2). Confirm the real scaffold entry point before writing the test helper.
-4. **`event_store` key names** (Task 2 Step 5). Confirm `run_id`, `chain.head.event_hash`, `chain.head.sequence`, `chain.unchained_prefix` against real doctor output.
+3. ~~`scaffold_contract` name~~ — **RESOLVED in pre-flight.** The entry point is `loop.scaffold.scaffold`; the plan now uses it.
+4. **`event_store` key names** (Task 2 Step 5). Pre-flight confirmed the store-absent shape is exactly `{"present": false}` and that `doctor_report` also returns `paths` (absolute filesystem paths — deliberately excluded from the predicate) and `requested_mode`. `validation_mode` is the single token `"jsonschema"`, so Task 5's no-whitespace assertion is safe. The populated `chain.head.*` key names still need confirming against a seeded store.
 5. **The chain-bound evidence map producer** (Task 3 Step 4). Reuse `loop/contract.py`'s, never re-derive.
