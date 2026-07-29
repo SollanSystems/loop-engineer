@@ -188,8 +188,9 @@ gate, and should be described that way.
 ### Limits that become tests
 
 Following the project's habit of shipping defeat conditions as passing tests:
-`loop verdict` refuses, typed, on a workspace with no event store or terminal
-record; `--compare` reports `signature_checked: false` across every branch;
+`loop verdict` refuses, typed, on a workspace with no terminal record (a
+store-less workspace projects honestly, with a null chain head — the shipped
+semantics `reference/repo-os-contract.md` §23 documents); `--compare` reports `signature_checked: false` across every branch;
 head disagreement fails with a typed code and agreement passes as the negative
 control; predicate conformance is machine-pinned; the field allowlist holds;
 import purity and the no-signing / no-environment assertions hold repo-wide; and
