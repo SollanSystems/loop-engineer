@@ -32,11 +32,26 @@ inputs:
       detection — the gate then only records the head for a later comparison.
     required: false
     default: ""
+  attest:
+    description: >-
+      Emit a loop-engineer/verdict@1 predicate and attest it keylessly via
+      GitHub OIDC. Requires the CALLING JOB to declare `id-token: write` and
+      `attestations: write` — a composite action cannot declare its own
+      permissions. Default false. The predicate is PUBLIC and permanent for
+      public repositories.
+    required: false
+    default: "false"
 
 outputs:
   chain-head:
     description: "Chain head event_hash observed by this gate run ('' when the store has no chained events)."
     value: ${{ steps.chain-head.outputs.chain-head }}
+  attestation-url:
+    description: "URL of the attestation created by this run ('' when attest is false)."
+    value: ${{ steps.attest.outputs.attestation-url }}
+  attestation-id:
+    description: "ID of the attestation created by this run ('' when attest is false)."
+    value: ${{ steps.attest.outputs.attestation-id }}
 
 runs:
   using: "composite"
@@ -105,6 +120,45 @@ runs:
         open(sys.argv[2], "a").write(line + "\n")
         open(sys.argv[3], "a").write(f"chain-head={value}\n")
         PY
+
+    - name: verdict predicate
+      id: verdict
+      if: ${{ inputs.attest == 'true' }}
+      shell: bash
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+      run: |
+        # Fail with a legible message rather than a raw OIDC 403 from the attest
+        # step: a composite action cannot declare permissions, so the CALLING
+        # job must. ACTIONS_ID_TOKEN_REQUEST_URL is present only when the job
+        # declared id-token: write.
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::attest: true requires the calling job to declare" \
+               "'permissions: { id-token: write, attestations: write }'." \
+               "A composite action cannot declare its own permissions."
+          exit 1
+        fi
+        loop verdict "$LOOP_PATH" > "${RUNNER_TEMP}/verdict.json"
+        echo "predicate-path=${RUNNER_TEMP}/verdict.json" >> "$GITHUB_OUTPUT"
+
+    - name: attest verdict
+      id: attest
+      if: ${{ inputs.attest == 'true' && steps.chain-head.outputs.chain-head != '' }}
+      uses: actions/attest@v4
+      with:
+        subject-name: loop-chain-head
+        subject-digest: sha256:${{ steps.chain-head.outputs.chain-head }}
+        predicate-type: urn:loop-engineer:verdict:1
+        predicate-path: ${{ steps.verdict.outputs.predicate-path }}
+        push-to-registry: false
+        # Only effective when push-to-registry is true, but pinned false
+        # explicitly per ADR 0002 open item 5: no storage record, ever.
+        create-storage-record: false
+
+    - name: attest skipped (no chained events)
+      if: ${{ inputs.attest == 'true' && steps.chain-head.outputs.chain-head == '' }}
+      shell: bash
+      run: echo "::warning::attest requested but the store has no chained events; nothing to attest."
 
     - name: loop inspect (scorecard)
       shell: bash
