@@ -1507,3 +1507,133 @@ match, the mismatch itself surfaces in doctor's issue list as
 Always pass an anchor in CI. A bare `loop doctor` treats a fully deleted
 store — no database, no sidecars — as a valid never-ran contract, so
 "delete the evidence" is a passing run without one.
+
+
+## 23. `loop-engineer/verdict@1` — the CI-attested verdict predicate
+
+`loop verdict <workspace>` projects a **finished** run into one canonical JSON
+document: the doctor verdict, the chain head, the terminal outcome, and the
+chain-bound evidence digests that pass §17's strict verified-evidence bar. The
+kernel emits the **predicate body only**. It never signs, never verifies a
+signature, never constructs an in-toto Statement (`_type`, `subject`,
+`predicateType`, and `predicate` keys are forbidden in its output), and never
+reads an environment variable — every one of those boundaries is a mechanical
+test, not an intention. The signer lane (`action.yml`'s opt-in `attest` input
+→ `actions/attest`) owns the envelope, the subject, and all cryptography:
+**the kernel disposes on contents; the CI lane notarizes context; neither is
+the other.**
+
+Serialization is §16's canonical JSON — sorted keys, compact separators,
+`ensure_ascii: false`, `allow_nan: false` — so the same run always projects
+the same bytes, and a value canonical JSON cannot carry (a NaN smuggled into a
+terminal record) is a typed refusal at the CLI, never a crash.
+
+**Conformance vector (machine-pinned).** `null` is legal for `chain.head`,
+`chain.sequence`, `tool.version`, and `terminal.completion_policy`; every
+other key is always present. The field set is an allowlist enforced by test —
+everything in this document is public, append-only, and permanent, so adding a
+field is a one-way door.
+
+```json
+{
+  "schema": "loop-engineer/verdict@1",
+  "run_id": "coverage-repair",
+  "tool": { "name": "loop-engineer", "version": "0.11.0" },
+  "doctor": {
+    "ok": true,
+    "validation_mode": "jsonschema",
+    "issue_codes": [],
+    "schemas_checked": ["loop-engineer/manifest@1", "loop-engineer/state@1"]
+  },
+  "chain": {
+    "head": "9f2c…64hex",
+    "sequence": 41,
+    "unchained_prefix": 0
+  },
+  "terminal": {
+    "state": "Succeeded",
+    "completion_policy": "all_required_verified_evidence",
+    "false_completion": false
+  },
+  "evidence": [
+    {
+      "digest": "a1b2…64hex",
+      "code_digest": "c3d4…64hex",
+      "policy_digest": "e5f6…64hex"
+    }
+  ]
+}
+```
+
+Field semantics:
+
+- `run_id` — the **one operator-controlled string** in the document,
+  allowlisted deliberately so a verdict can be correlated to a run. It lands
+  in a permanent public log: run ids must not embed sensitive text. Every
+  other string is a digest, an enum, a snake_case issue code, or a schema id —
+  a whitespace-bearing value anywhere else is a conformance failure.
+- `doctor.issue_codes` — **codes only, sorted, de-duplicated.** Never
+  `message`, never `path`. Free-text detail strings and workspace paths do
+  not leave the machine.
+- `doctor.validation_mode` — which strength the contract was validated at
+  (`jsonschema` or `structural-fallback`); without it, `ok: true` from a
+  fallback environment would read as the stronger claim.
+- `chain.head` / `chain.sequence` — the store's chained head (§22's `chain`
+  block). `null` for a store-less workspace **and** for a store whose chain
+  never established a head; `unchained_prefix` carries §16's honest count of
+  events the chain does not cover.
+- `terminal.completion_policy` — the policy `mode` string, or `null` for a
+  legacy record that never declared one. Without it a reader cannot tell what
+  `Succeeded` meant (`all_required` vs `all_required_verified_evidence`).
+- `evidence[]` — one entry per **chain-bound** terminal-evidence record that
+  passes §17's strict bar, digests only. `digest` is the SHA-256 of the
+  evidence@1 **record file bytes** — the exact digest the event chain
+  committed — never the record's own `sha256` field, which hashes the cited
+  artifact instead. `code_digest`/`policy_digest` lift from the record's
+  `verified_by`. Entries are de-duplicated and sorted by
+  `(digest, code_digest, policy_digest)` with `null` ordered as the empty
+  string. No URIs: a URI is a workspace path, and this document is public.
+
+**Refusals and degradations.** A workspace with no terminal record refuses,
+typed — a verdict projects a finished run. A terminal record whose
+`false_completion` is absent or non-boolean refuses: projecting `false` for an
+unknown safety flag would trade an alarming truth for a reassuring lie. A
+store-less workspace **projects** (`chain.head: null`, evidence under §17's
+documented store-dependent degradation) — the projection is honest about what
+it cannot prove rather than refusing to say anything. An **unreadable** store
+is not that degradation: chain-boundness is then unestablished, so `evidence`
+projects empty — an errored check fails, it never skips — while the store
+failure itself surfaces in `doctor.issue_codes`.
+
+**Predicate identity.** `predicateType` is
+`urn:loop-engineer:verdict:1` — the schema `$id` transliterated
+(`/` and `@` → `:`), an equality asserted by test so the two names cannot
+drift. It names no vendor host, no organization, and no repository: a
+predicateType is written immutably into a public log, and a rename must not be
+able to orphan it.
+
+**The subject seam — read this before verifying anything.** The signer binds
+`subject-name: loop-chain-head` with
+`subject-digest: sha256:<chain.head>`. That `sha256:` key satisfies the
+signer's required `algorithm:hex_digest` form, but the chain head is a SHA-256
+over a **synthesized event preimage** (§16), not over any retrievable
+artifact's bytes. A consumer must never conclude "fetch the bytes, re-hash,
+compare" — there are no bytes to fetch. The only meaningful comparison is
+equality against a chain head recomputed locally from the store (`loop
+doctor`'s `chain` block, or the anchor check via `--expect-chain-head`).
+Attested-vs-local agreement is a 4b (`--compare`) concern; authenticity
+(`gh attestation verify`) and agreement are separate checks, in that order,
+and neither implies the other.
+
+**What an attestation buys — and does not.** The signature attests *context*:
+which repository, which workflow, which trigger, at what time. It never
+attests correctness — a signed verdict over a weak gate is a signed weak
+gate. A worker with ordinary merge rights can loosen the gate
+(`loop/**`, `action.yml`, the workflow) and then mint a perfectly genuine
+attestation for the loosened gate; the control is human review on those paths
+(ADR 0002 decision 6), not signing. The chain proves order and non-tampering
+relative to an anchor, not that the events happened when claimed — a history
+fabricated wholesale at authoring time is byte-valid. Detection of an
+unattested rewrite is at best one run late. And an attestation nothing
+verifies is decoration: until a consumer checks it, this section describes a
+publication surface, not a gate.
