@@ -450,3 +450,18 @@ def test_populated_evidence_validates_against_the_schema(tmp_path):
     verdict = build_verdict(workspace)
     assert verdict["evidence"]
     jsonschema.validate(verdict, _load_verdict_schema())
+
+
+def test_terminal_record_with_invalid_utf8_raises_verdict_error(tmp_path):
+    """An undecodable terminal file must surface as VerdictError, never a raw
+    UnicodeDecodeError. Today the doctor_report wrapper converts it (doctor
+    raises UnicodeDecodeError, a ValueError); if projection order ever changes,
+    _terminal_record's own guard becomes the conversion site - either way the
+    typed contract holds, so no message is pinned."""
+    from loop.verdict import VerdictError, build_verdict
+
+    target = _workspace_with_terminal(tmp_path)
+    (target / ".loop" / "terminal_state.json").write_bytes(b"\xff\xfe{}")
+
+    with pytest.raises(VerdictError):
+        build_verdict(target)
