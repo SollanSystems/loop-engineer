@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from .contract import VALIDATION_MODES, ValidationModeError, doctor_report
+from .contract import VALIDATION_MODES, ContractIssue, ValidationModeError, doctor_report
 from .plan import validate_plan
 from .runtime import RuntimeStoreError, replay_report, status_report
 from .runcontrol import RunControlError
@@ -25,7 +25,8 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
 {_USAGE}
        {_PROG} metrics [--baseline] <workspace-or-.loop>
        {_PROG} doctor|validate|verify [--mode basic|strict|release]
-              [--expect-chain-head SHA256] <workspace-or-.loop>
+              [--expect-chain-head SHA256]
+              [--expect-chain-ancestor SHA256 | --anchor PATH] <workspace-or-.loop>
        {_PROG} verdict [--mode basic|strict|release] <workspace>
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
@@ -80,6 +81,17 @@ options:
                 (doctor/validate/verify) fail unless the event store's chain head
                 is exactly this 64-character lowercase hex hash. A missing,
                 unreadable, unchained, or diverged store fails the gate.
+  --expect-chain-ancestor SHA256
+                (doctor/validate/verify) fail unless this digest WAS the chain head
+                at some sequence, established by replaying and recomputing every
+                hash — never by trusting the stored event_hash column. Use this
+                across runs: exact head equality fails by construction once the
+                store grows. Composes with --expect-chain-head.
+  --anchor PATH (doctor/validate/verify) resolve --expect-chain-ancestor from a
+                tracked loop-engineer/anchor@1 file (conventionally
+                loop-anchor.json, and never under .loop/). Mutually exclusive with
+                --expect-chain-ancestor. An unreadable or non-conformant anchor is
+                a typed issue in the report with ok=false, never a skip.
   --executor ID           (run) record this identity as produced_by.executor on the
                           run's evidence records; unset records "unattributed".
   --verifier-identity ID  (run) record this identity as verified_by.by; unset records
@@ -273,6 +285,37 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE, file=sys.stderr)
         return 2
 
+    expect_chain_ancestor = anchor = None
+    if command in {"doctor", "validate", "verify"}:
+        try:
+            expect_chain_ancestor, argv = _extract_value_flag(argv, "--expect-chain-ancestor")
+            anchor, argv = _extract_value_flag(argv, "--anchor")
+        except ValueError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if (expect_chain_ancestor is not None
+                and re.fullmatch(r"[0-9a-f]{64}", expect_chain_ancestor) is None):
+            print(f"{command}: --expect-chain-ancestor must be a 64-character lowercase hex sha256",
+                  file=sys.stderr)
+            return 2
+        if anchor is not None and expect_chain_ancestor is not None:
+            # Silent precedence between an explicit digest and a resolved one is how a
+            # gate becomes a suggestion. The action layer, where the inputs are the
+            # surface, is where ADR 0002 decision 5's precedence is honored.
+            print(f"{command}: --anchor and --expect-chain-ancestor are mutually exclusive",
+                  file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+    else:
+        # Same reason as the --expect-chain-head guard above.
+        for flag in ("--expect-chain-ancestor", "--anchor"):
+            if any(a == flag or a.startswith(f"{flag}=") for a in argv):
+                print(f"{command}: {flag} is only valid for doctor/validate/verify",
+                      file=sys.stderr)
+                print(_USAGE, file=sys.stderr)
+                return 2
+
     executor = verifier_identity = None
     if command == "run":
         for flag, slot in (("--executor", "executor"), ("--verifier-identity", "verifier_identity")):
@@ -365,11 +408,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command in {"doctor", "validate", "verify"}:
+        resolved_ancestor = expect_chain_ancestor
+        anchor_issue = None
+        if anchor is not None:
+            from .anchor import AnchorError, read_anchor
+
+            try:
+                resolved_ancestor = read_anchor(anchor)["chain_head"]
+            except AnchorError as exc:
+                # A report, never a bare stderr line: the operator's CI reads the JSON,
+                # and a stderr line loses the code. resolved_ancestor stays None so the
+                # ancestry gate is not ALSO asked a question it has no digest for —
+                # one failure, one code.
+                resolved_ancestor = None
+                anchor_issue = ContractIssue(exc.code, str(exc), Path(anchor))
         try:
-            return _print_json(doctor_report(target, mode=mode, expect_chain_head=expect_chain_head))
+            report = doctor_report(target, mode=mode, expect_chain_head=expect_chain_head,
+                                   expect_chain_ancestor=resolved_ancestor)
         except ValidationModeError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
             return 2
+        if anchor_issue is not None:
+            report = {**report, "issues": [*report["issues"], anchor_issue], "ok": False}
+        return _print_json(report)
 
     if command == "verdict":
         from .verdict import VerdictError, build_verdict

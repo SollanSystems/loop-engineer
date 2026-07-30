@@ -22,6 +22,9 @@ from ._resources import schemas_dir
 ANCHOR_SCHEMA_ID = "loop-engineer/anchor@1"
 DEFAULT_ANCHOR_FILENAME = "loop-anchor.json"
 
+UNREADABLE_CODE = "anchor_file_unreadable"
+INVALID_CODE = "anchor_file_invalid"
+
 _HEAD_PATTERN = re.compile(r"[0-9a-f]{64}")
 _LOOP_DIR_NAME = ".loop"
 
@@ -34,7 +37,17 @@ _KNOWN_KEYS = {"schema", "chain_head", "sequence", *_OPTIONAL_STRINGS}
 
 
 class AnchorError(ValueError):
-    """The anchor file is absent, unreadable, or not a conformant ``anchor@1``."""
+    """The anchor file is absent, unreadable, or not a conformant ``anchor@1``.
+
+    Carries the failure class as ``.code`` (the ``RuntimeStoreError`` precedent) so a
+    caller can pick the right doctor issue code without regexing the message:
+    ``anchor_file_unreadable`` when the document could not be read or parsed at all,
+    ``anchor_file_invalid`` when it parsed but is not a conformant ``anchor@1``.
+    """
+
+    def __init__(self, message: str, *, code: str = UNREADABLE_CODE) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _load_anchor_schema() -> dict[str, Any]:
@@ -117,8 +130,9 @@ def read_anchor(path: str | Path) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise AnchorError(f"anchor file is not valid JSON: {path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise AnchorError(f"anchor document must be an object: {path}")
+        raise AnchorError(f"anchor document must be an object: {path}", code=INVALID_CODE)
     violation = _structural_violation(data) or _schema_violation(data)
     if violation is not None:
-        raise AnchorError(f"anchor is not a conformant {ANCHOR_SCHEMA_ID}: {path}: {violation}")
+        raise AnchorError(f"anchor is not a conformant {ANCHOR_SCHEMA_ID}: {path}: {violation}",
+                          code=INVALID_CODE)
     return data
