@@ -22,7 +22,9 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "action_anchor_resolve.py"
-FIXTURE_404 = ROOT / "scripts" / "fixtures" / "gh_attestation_verify" / "no_attestation_404.txt"
+_FIXTURES = ROOT / "scripts" / "fixtures" / "gh_attestation_verify"
+FIXTURE_404 = _FIXTURES / "no_attestation_404.txt"
+FIXTURE_DENIED = _FIXTURES / "signer_denied.txt"
 
 _HEAD = "a1" * 32
 _REPO = "SollanSystems/loop-engineer"
@@ -148,6 +150,24 @@ def test_resolve_classifies_the_real_captured_404_stderr(tmp_path):
     proc, outputs, _temp = _resolve(tmp_path, bin_dir=bin_dir)
     assert proc.returncode == 1
     assert outputs["anchor-outcome"] == "unavailable"
+
+
+def test_resolve_classifies_the_real_captured_denial_stderr(tmp_path):
+    """M2's second half, capturable only AFTER a verifiable attestation existed.
+
+    Captured from live gh against this repo's first verifiable verdict@1 attestation with
+    a deliberately wrong --signer-workflow. It is the reason the marker set was corrected:
+    the pre-merge guess did not contain gh's real denial shape, so "it said no" was being
+    reported as "I could not look".
+    """
+    assert FIXTURE_DENIED.is_file()
+    captured = FIXTURE_DENIED.read_text(encoding="utf-8")
+    assert "verifying with issuer" in captured
+    bin_dir, _log = _shim(tmp_path, stderr=captured, exit_code=1)
+    proc, outputs, _temp = _resolve(tmp_path, bin_dir=bin_dir)
+    assert proc.returncode == 1
+    assert outputs["anchor-outcome"] == "contradicted"
+    assert "anchor_attestation_contradicted" in proc.stdout
 
 
 def test_resolve_maps_an_unclassifiable_failure_to_unavailable(tmp_path):
