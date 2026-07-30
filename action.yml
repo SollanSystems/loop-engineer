@@ -32,6 +32,25 @@ inputs:
       detection — the gate then only records the head for a later comparison.
     required: false
     default: ""
+  anchor:
+    description: >-
+      Path to a tracked loop-engineer/anchor@1 file carrying a previously
+      attested chain head. The gate corroborates the carried head against the
+      attestation index and then checks it is still an ANCESTOR of this run's
+      chain. An attestation can only corroborate a head, never discover one —
+      GitHub exposes no endpoint that lists attestations without a subject
+      digest. Requires signer-workflow. Empty performs no anchor resolution.
+      Anchor trust is exactly ordinary write access to the anchor file.
+    required: false
+    default: ""
+  signer-workflow:
+    description: >-
+      Mandatory pin when anchor is set, in the form
+      [host/]<owner>/<repo>/<path>/<to>/<workflow>. Without it a corroboration
+      means nothing, so the resolve step fails closed rather than resolving
+      unpinned.
+    required: false
+    default: ""
   attest:
     description: >-
       Emit a loop-engineer/verdict@1 predicate and attest it keylessly via
@@ -52,6 +71,14 @@ outputs:
   attestation-id:
     description: "ID of the attestation created by this run ('' when attest is false)."
     value: ${{ steps.attest.outputs.attestation-id }}
+  anchor-outcome:
+    description: >-
+      corroborated | contradicted | unavailable ('' when anchor is empty).
+      Distinct for OBSERVABILITY only: anything short of a verified 200 plus a
+      successful gh attestation verify is non-promoting, and transport-class
+      failures are separately reportable but exactly as non-promoting as a
+      clean denial.
+    value: ${{ steps.anchor.outputs.anchor-outcome }}
 
 runs:
   using: "composite"
@@ -141,13 +168,33 @@ runs:
         loop verdict "$LOOP_PATH" > "${RUNNER_TEMP}/verdict.json"
         echo "predicate-path=${RUNNER_TEMP}/verdict.json" >> "$GITHUB_OUTPUT"
 
+    - name: chain-head subject file
+      id: subject
+      if: ${{ inputs.attest == 'true' && steps.chain-head.outputs.chain-head != '' }}
+      shell: bash
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+      run: |
+        # Exactly 64 bytes, lowercase hex, NO trailing newline (reference §24). The one
+        # writer is loop.verdict.subject_bytes, reached via --emit-subject, so the attest
+        # side and the resolve side cannot disagree on the byte form.
+        #
+        # This file is what makes verification runnable at all: the chain head is a
+        # SHA-256 over a synthesized event preimage, so no retrievable bytes hash TO it,
+        # and `gh attestation verify` accepts only a path and hashes that file's CONTENT.
+        loop verdict --emit-subject "$LOOP_PATH" > "${RUNNER_TEMP}/loop-chain-head"
+        echo "path=${RUNNER_TEMP}/loop-chain-head" >> "$GITHUB_OUTPUT"
+
     - name: attest verdict
       id: attest
       if: ${{ inputs.attest == 'true' && steps.chain-head.outputs.chain-head != '' }}
       uses: actions/attest@v4
       with:
-        subject-name: loop-chain-head
-        subject-digest: sha256:${{ steps.chain-head.outputs.chain-head }}
+        # subject-path ONLY, with no subject-name: upstream requires subject-name only
+        # when the subject is identified by a raw digest input, and with a path the
+        # derived name equals the file's basename (loop-chain-head) — which is exactly
+        # the pinned SUBJECT_NAME.
+        subject-path: ${{ steps.subject.outputs.path }}
         predicate-type: urn:loop-engineer:verdict:1
         predicate-path: ${{ steps.verdict.outputs.predicate-path }}
         push-to-registry: false
@@ -159,6 +206,51 @@ runs:
       if: ${{ inputs.attest == 'true' && steps.chain-head.outputs.chain-head == '' }}
       shell: bash
       run: echo "::warning::attest requested but the store has no chained events; nothing to attest."
+
+    - name: resolve the anchor attestation
+      id: anchor
+      # This step carries no error-tolerance key and no run-anyway guard: either would
+      # decouple its exit code from the job's outcome, which IS the gate.
+      # Precedence (ADR 0002 decision 5):
+      # a non-empty expect-chain-head input wins over anchor resolution, and the skip is
+      # announced in the step summary below — a silently dropped anchor is worse than a
+      # refused one.
+      if: ${{ inputs.anchor != '' && inputs.expect-chain-head == '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        LOOP_ANCHOR: "${{ inputs.anchor }}"
+        LOOP_SIGNER_WORKFLOW: "${{ inputs.signer-workflow }}"
+      run: |
+        # No shell-level error suppression around a gating call. The scorecard step below
+        # suppresses errors deliberately because inspect is ADVISORY — this step is not
+        # advisory, and its exit code is the finding. The script itself fails closed when
+        # --signer-workflow is empty.
+        python "${{ github.action_path }}/scripts/action_anchor_resolve.py" \
+          --anchor "$LOOP_ANCHOR" \
+          --repo "$GITHUB_REPOSITORY" \
+          --signer-workflow "$LOOP_SIGNER_WORKFLOW" \
+          --runner-temp "$RUNNER_TEMP" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - name: compare the attested verdict
+      if: ${{ steps.anchor.outputs.anchor-outcome == 'corroborated' }}
+      shell: bash
+      env:
+        LOOP_PATH: "${{ inputs.path }}"
+      run: |
+        # Authenticity first (gh attestation verify, inside the resolve step above), then
+        # agreement, then ancestry. Neither implies the other. No error suppression:
+        # both calls are gating.
+        loop verdict --compare "${{ steps.anchor.outputs.predicate-path }}" "$LOOP_PATH"
+        loop doctor --expect-chain-ancestor "${{ steps.anchor.outputs.anchor-head }}" "$LOOP_PATH"
+
+    - name: anchor resolution skipped (explicit head wins)
+      if: ${{ inputs.anchor != '' && inputs.expect-chain-head != '' }}
+      shell: bash
+      run: |
+        echo "**loop-engineer anchor:** not resolved — the explicit expect-chain-head input wins (ADR 0002 decision 5)." \
+          >> "$GITHUB_STEP_SUMMARY"
 
     - name: loop inspect (scorecard)
       shell: bash
