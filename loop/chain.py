@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Iterable, Mapping
+
+_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 _PREIMAGE_FIELDS = (
     "schema", "run_id", "sequence", "event_id", "type", "actor", "ts",
@@ -60,6 +63,37 @@ def link_issue(record: Mapping[str, Any], prev_head: Mapping[str, Any] | None) -
         return f"unhashable record at sequence {sequence!r}: {exc}"
     if recomputed != stored:
         return f"event_hash mismatch at sequence {sequence!r}"
+    return None
+
+
+def head_sequence(events: Iterable[Mapping[str, Any]], digest: str) -> int | None:
+    """Sequence at which `digest` WAS the chain head, or None if it never was.
+
+    Established by REPLAY: every link is re-checked and every hash recomputed via
+    link_issue/compute_event_hash. The stored event_hash column is never trusted —
+    an adversary who can rewrite the store can also insert a row bearing the
+    anchored digest, and only recomputation refuses that row.
+
+    This is the cross-run check: --expect-chain-head is exact current-head equality,
+    so it fails by construction on a store that legitimately grew. Sequence 0 is a
+    legitimate answer, so callers must compare against None, never truthiness.
+
+    Raises ValueError (deliberately NOT ChainHashError, which is scoped to
+    canonicalization failures) when `digest` is not 64 lowercase hex characters: a
+    silent None on a typo would read as "rewrite detected".
+    """
+    if not isinstance(digest, str) or _DIGEST_PATTERN.fullmatch(digest) is None:
+        raise ValueError(f"digest must be 64 lowercase hex characters, got {digest!r}")
+    head: dict[str, Any] | None = None
+    for record in events:
+        if link_issue(record, head) is not None:
+            break
+        stored = record.get("event_hash")
+        if stored is None:
+            continue
+        if stored == digest:
+            return record.get("sequence")
+        head = {"sequence": record.get("sequence"), "event_hash": stored}
     return None
 
 
