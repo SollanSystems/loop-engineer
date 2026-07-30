@@ -7,3 +7,7 @@
 /action.yml             @SollanSystems
 /.github/workflows/     @SollanSystems
 /.github/CODEOWNERS     @SollanSystems
+# The anchor carries the head a gate corroborates, so an actor who can edit it
+# re-points the anchor at a head they had attested — a gate-defining path in
+# exactly the sense /loop/ and /action.yml are (ADR 0002 amendment, 2026-07-29).
+loop-anchor.json         @SollanSystems

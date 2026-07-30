@@ -269,3 +269,76 @@ the decisions above.
 5. **`create-storage-record` and `push-to-registry` defaults.** Pass both
    explicitly as false so the two-permission claim is true by construction rather
    than by assumed default.
+
+## Amendment (2026-07-29, Slice 4b)
+
+A new dated section rather than an in-place edit of the decision text: the
+2026-07-28 erratum is the precedent for a *correction*, and this is a **decision
+change**, which earns its own record. Where this amendment and the decisions above
+disagree, the amendment governs. Normative detail lives in
+`reference/repo-os-contract.md` §24.
+
+**Decision 2 — mechanism change.** The subject is now a head-bearing **file**
+(`subject-path`), not `subject-digest: sha256:<head>`. Decision 2's sentence *"The
+subject is the chain head alone"* **survives in spirit** — the subject still commits
+to nothing but the head — and changes in **mechanism** only. The predicate bytes were
+the obvious alternative subject and are **rejected**: `doctor.validation_mode` and
+`tool.version` live inside the predicate, so the same run projects `873dfc87…` with
+jsonschema and `8de3d88c…` in structural-fallback, and a consumer on another tool
+version could never reproduce them. The head is version-independent.
+
+**Decision 4 — its first half was not executable as shipped.** `gh attestation
+verify` accepts only `[<file-path> | oci://<image-uri>]` and hashes the file's
+**content**; there is no digest-only input, and `--digest-alg` selects only which
+algorithm to hash the artifact with. A synthesized chain head has no preimage, so no
+artifact could ever be presented for a subject identified by that digest — the
+decisive probe was a file *named* after the digest but empty, which made `gh` look up
+the SHA-256 of the empty string and return 404. Decision 2's mechanism change makes
+the authenticity step executable for the first time.
+
+**Decision 5 — two corrections.**
+
+1. *"Fetch the most recent matching attestation"* is **not implementable from the
+   index.** `GET /repos/{owner}/{repo}/attestations/{subject_digest}` is the only list
+   operation, the no-digest route 404s, there is no `gh attestation list`, GraphQL's
+   `Repository` type exposes no attestation fields, and no ordering guarantee is
+   documented. So the head is **carried** in a tracked `loop-engineer/anchor@1` file and
+   the attestation *corroborates* it: an attestation can never *discover* a head. Anchor
+   trust is exactly ordinary write access to the anchor file — the same class of limit as
+   "the worker can edit the verifier".
+2. The cross-run check is **ancestry**, not head equality. Appending one event moves the
+   head (measured `9d388ae5…` seq 4 → `c336ecdc…` seq 5), so the ADR's resolve target was
+   incoherent: feeding run N's head to `--expect-chain-head` at run N+1 fails by
+   construction. `loop doctor --expect-chain-ancestor` asks the answerable question, and
+   answers it by **replay**, recomputing every hash rather than trusting the stored
+   `event_hash` column.
+
+**Open verification item 2 — settled.** No retention window is documented anywhere for
+the attestation index (the familiar 90-day/400-day figures are workflow artifacts and
+logs). Attestations are **deletable** through permission-gated endpoints, and GitHub's
+own guidance recommends deleting ones no longer needed. The REST attestations route is
+additionally **deprecated**, route-level, with `Sunset: Fri, 10 Mar 2028`. An absent
+anchor attestation is therefore a **typed failure, never a skip** — otherwise an
+availability attack on the index becomes a gate bypass.
+
+**Open verification item 3 — settled.** `--signer-digest` pins the signer-digest
+certificate extension, populated from the `job_workflow_sha` claim, which for a
+non-reusable top-level workflow **equals the triggering commit SHA**. It invalidates on
+**every push**, not merely on a workflow edit — observed across all three attestations
+this repository had minted, none of whose commits touched `attest.yml` or `action.yml`.
+It is therefore **not** a mandatory pin. `--signer-workflow`, byte-identical across all
+three certificates, is.
+
+**Decision 6 — the path list grew** by the anchor path (`loop-anchor.json` at any
+depth), which is a gate-defining path in exactly the sense `loop/**` and `action.yml`
+are: an actor who can edit it re-points the anchor at a head they had attested.
+Decision 6 itself remains **documented but not in force** — the live repository ruleset
+requires 0 approvals — so slice 4b landed autonomously and CODEOWNERS must not be
+described as an operative control until the ruleset requires it.
+
+**What 4b deliberately does not add.** No in-kernel signature verification (permanently
+rejected: it needs a trust root, X.509 chain validation and log inclusion proofs, which
+is the dependency constraint this ADR exists to hold). No `verdict@1` field carrying an
+anchor — adding a field to a permanent public log is a one-way door, and ancestry is a
+doctor concern. No schema for the comparison report: it is a report, like
+`doctor_report`'s, not an interchange artifact.

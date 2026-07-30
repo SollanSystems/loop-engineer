@@ -1613,17 +1613,31 @@ predicateType is written immutably into a public log, and a rename must not be
 able to orphan it.
 
 **The subject seam — read this before verifying anything.** The signer binds
-`subject-name: loop-chain-head` with
-`subject-digest: sha256:<chain.head>`. That `sha256:` key satisfies the
-signer's required `algorithm:hex_digest` form, but the chain head is a SHA-256
-over a **synthesized event preimage** (§16), not over any retrievable
-artifact's bytes. A consumer must never conclude "fetch the bytes, re-hash,
-compare" — there are no bytes to fetch. The only meaningful comparison is
-equality against a chain head recomputed locally from the store (`loop
-doctor`'s `chain` block, or the anchor check via `--expect-chain-head`).
-Attested-vs-local agreement is a 4b (`--compare`) concern; authenticity
-(`gh attestation verify`) and agreement are separate checks, in that order,
-and neither implies the other.
+`subject-path`: a file whose **entire content is the chain head**, exactly 64
+lowercase hex bytes with no trailing newline, written by the single definition
+`loop.verdict.subject_bytes` and reachable as `loop verdict --emit-subject`. A
+consumer therefore **can** regenerate the subject's bytes from the head alone,
+and `gh attestation verify` **does** succeed against them. That is the whole
+point of the byte form: `gh attestation verify` accepts only a file path (or an
+OCI URI) and hashes that file's **content**, so a subject identified by a bare
+digest can never be presented an artifact at all.
+
+Two things a reader must not confuse with that. First, the chain head *itself*
+is still a SHA-256 over a **synthesized event preimage** (§16): no retrievable
+artifact's bytes hash **to** the head, and a consumer must not go looking for
+one. The subject file *carries* the head; it is not a preimage of it, and its
+own digest is `sha256(<the 64 head bytes>)`, which is necessarily **not** the
+head. Second, the predicate bytes are **not** the subject, deliberately:
+`doctor.validation_mode` and `tool.version` live inside the predicate, so the
+same run projects different bytes in different environments (measured:
+`873dfc87…` with jsonschema, `8de3d88c…` in structural-fallback), and a
+consumer on another tool version could never reproduce them. The head is
+version-independent; the predicate bytes are not.
+
+Authenticity (`gh attestation verify`) and agreement (`loop verdict --compare`)
+are separate checks, in that order, and **neither implies the other**. §24
+specifies both, together with the anchor carry-channel and the signer-trust
+policy.
 
 **What an attestation buys — and does not.** The signature attests *context*:
 which repository, which workflow, which trigger, at what time. It never
@@ -1640,3 +1654,203 @@ fabricated wholesale at authoring time is byte-valid. Detection of an
 unattested rewrite is at best one run late. And an attestation nothing
 verifies is decoration: until a consumer checks it, this section describes a
 publication surface, not a gate.
+
+## 24. Consuming an attested verdict — agreement, ancestry, and signer trust
+
+§23 specifies how a verdict is *published*. This section specifies how one is
+*consumed*, and it is deliberately explicit about what consumption does **not**
+establish. A reader who assumes otherwise has a false sense of a gate.
+
+**The comparison report.** `loop verdict --compare <file|-> <workspace>` loads an
+attested `verdict@1` predicate, projects the workspace locally, and reports
+agreement over exactly **four** facets: `run_id`, `chain.head`, the whole
+`terminal` object (`state`, `completion_policy`, `false_completion`), and the
+`evidence` digest set (set equality over the `digest`/`code_digest`/`policy_digest`
+triple). Exit **0** on agreement, **1** on disagreement, **2** on refusal. The
+report's field set is `{ok, signature_checked, compared, issues}`, and the
+`compared` block carries digests, enums and `run_id` only — no free text.
+`issues[].message` is the one exempt surface: a local report may explain itself; a
+predicate may not.
+
+`doctor` and `tool` are **deliberately not compared.** Both live inside the
+predicate and are environment-coupled — the same run projects `873dfc87…` with
+jsonschema and `8de3d88c…` in structural-fallback — so comparing them would make an
+honest environment difference read as tampering. Whether an attested `doctor.ok`
+should *gate* is a policy question, not an agreement question, and it is out of
+scope here.
+
+**`signature_checked` is the literal `false` on every path, and there is no flag to
+flip it.** The kernel establishes agreement; `gh attestation verify` establishes
+authenticity; it runs first; neither implies the other. `verdict` rejects
+`--verify-signature`, `--signature`, `--signer-workflow` and `--signer-digest`
+outright, so the absence is a contract rather than an omission.
+
+**Typed refusals: a bare predicate only.** An in-toto Statement (any of `_type`,
+`subject`, `predicateType`, `predicate`) and a `gh --format json` envelope (a
+top-level array, or `verificationResult` / `attestation`) are refused by name, with
+the documented unwrapping path `.[0].verificationResult.statement.predicate` in the
+message. Best-effort parsing of a vendor envelope inside the kernel is exactly how a
+trust boundary rots.
+
+**The subject byte form (normative).** The file a consumer presents to
+`gh attestation verify` is **exactly 64 bytes**: the chain head as lowercase hex,
+with **no trailing newline** and nothing else. There is one definition —
+`loop.verdict.subject_bytes`, reached from either side as
+`loop verdict --emit-subject` — so the signer side and the consumer side cannot
+disagree about those bytes. A stray `\n` would change the subject digest, which is
+why the form is pinned by test rather than left to a shell's `echo`. The subject
+file's own digest is `sha256(<the 64 head bytes>)` and is therefore **never** equal
+to the head itself; that inequality is the crispest check that this mechanism, and
+not §23's retired digest form, is what produced an attestation.
+
+**`loop-engineer/anchor@1` — the carry channel.** A tracked JSON document
+(conventionally `loop-anchor.json` at the workspace root) whose required fields are
+`schema` and `chain_head`; `sequence`, `attestation_id`, `run_id` and `recorded_at`
+are optional provenance. It **must be tracked and must not live under `.loop/`** —
+that directory is gitignored here, so an anchor inside the tree it certifies would
+never land in a commit; `read_anchor` refuses a path with a `.loop` component
+outright. Every `pattern` in the schema carries a sibling `maxLength`, because
+jsonschema's `pattern` is `re.search` semantics and a bare anchored pattern accepts a
+trailing newline.
+
+**The inversion that makes the anchor necessary: an attestation can corroborate a
+carried head, but it can never discover one.** `GET
+/repos/{owner}/{repo}/attestations/{subject_digest}` is the only list operation; the
+no-digest route is a 404; there is no `gh attestation list`; GraphQL's `Repository`
+type exposes no attestation fields; and **no ordering guarantee is documented
+anywhere**. You must already know the digest to look anything up. So the head is
+*carried* in a tracked file and the attestation proves that carried head was
+notarized.
+
+**Anchor trust is exactly ordinary write access — no better.** An actor who can edit
+the anchor file re-points it at a head they had attested. That is the same class of
+limit as "the worker can edit the verifier" in §23. The anchor path joins
+CODEOWNERS, and CODEOWNERS is a control only while the repository ruleset enforces
+it.
+
+**Ancestry, not head equality.** `--expect-chain-head` is exact *current-head*
+equality, so it fails **by construction** on any store that legitimately grew:
+appending one event moves the head (measured: `9d388ae5…` at sequence 4 →
+`c336ecdc…` at sequence 5). Feeding run N's head to `--expect-chain-head` at run N+1
+therefore always fails. The meaningful cross-run question is *"was this digest ever
+my head?"*, and `loop doctor --expect-chain-ancestor <sha256>` (or `--anchor <path>`,
+which resolves the digest from an `anchor@1` file) asks it via
+`loop.chain.head_sequence`.
+
+Ancestry is **established by replay, recomputing every hash — never by trusting the
+stored `event_hash` column.** A tamperer who can rewrite the store can also insert a
+row bearing the anchored digest, and only recomputation refuses that row. Sequence
+`0` is a legitimate answer, so callers compare against `None`, never truthiness.
+`--expect-chain-head` and `--expect-chain-ancestor` **compose** — equality and
+ancestry are different questions and both may be asked — while `--anchor` and
+`--expect-chain-ancestor` are **mutually exclusive** at the CLI, because silent
+precedence between an explicit digest and a resolved one is how a gate becomes a
+suggestion. Precedence between the action's `expect-chain-head` and `anchor` inputs is
+resolved in `action.yml`, where the inputs are the surface, and a dropped anchor is
+announced in the step summary rather than silently ignored.
+
+**The five new codes.**
+
+| Code | Meaning |
+|---|---|
+| `chain_anchor_not_ancestor` | The supplied ancestor digest was **never** the head at any sequence of the replayed chain. Also raised — never skipped — when the store is absent, empty or unreadable. |
+| `anchor_file_unreadable` | The `--anchor` path is absent, unreadable, not UTF-8, or not JSON. |
+| `anchor_file_invalid` | It parsed, but is not a conformant `anchor@1`. |
+| `anchor_attestation_contradicted` | The index was reached, an attestation was found, and it does not corroborate the carried head. *I looked and it said no.* |
+| `anchor_attestation_unavailable` | Nothing was found (404), **or** the index could not be reached at all (5xx, timeout, auth), **or** the classifier could not confidently classify what it saw. *I could not look.* |
+
+`chain_anchor_not_ancestor` is deliberately **not** a reuse of
+`chain_anchor_mismatch`. "Your current head is not what I expected" and "the head you
+anchored is not in my history at all" are different facts, and doctor issue codes are
+the population `verdict.doctor.issue_codes` is drawn from — a permanent, public,
+append-only log. One shared code would collapse them there forever.
+
+**The sentence that keeps this a gate.** *Anything short of a verified 200 plus a
+successful `gh attestation verify` is non-promoting, and transport-class failures
+(5xx, timeout, auth) are separately reportable but exactly as non-promoting as a
+clean denial.* The two lookup codes exist for **observability**, never for
+differential trust.
+
+This matters because the anchor is a **deletable dependency**. Attestations can be
+deleted — user- and org-scoped delete, bulk-delete and delete-request endpoints all
+exist, permission-gated — and GitHub's own guidance recommends deleting attestations
+that are no longer needed. **No retention window is documented anywhere**; the
+familiar 90-day and 400-day figures are workflow *artifacts and logs*, not
+attestations, and the roadmap issue tracking expiry records none. So a missing anchor
+attestation must be a typed failure: otherwise an availability attack on the index
+becomes a gate bypass.
+
+**Do not over-read the codes.** A 404 is consistent with never-attested,
+attested-then-deleted, and a transient index fault; HTTP status alone cannot separate
+them. And do not key logic on response *body* text — the no-digest route returns a
+generic `documentation_url` while the digest-present-but-non-matching family returns
+one pointing at the list-attestations reference.
+
+**The signer-trust policy.** `loop.attestation.check_signer_trust` is a pure function
+over an **already-verified** `verificationResult`. It reads only
+`signature.certificate` and `verifiedTimestamps` — per `gh`'s own help, those are the
+only fields the originating workflow cannot manipulate — and treats everything under
+`statement.predicate` as data to compare, never to trust. It **refuses**, loudly and
+typed, when a claim it needs is absent, because a policy that treats a missing claim
+as satisfied is worse than no policy; an unwitnessed attestation (absent or empty
+`verifiedTimestamps`) is likewise refused. Denials are typed codes —
+`signer_workflow_mismatch`, `signer_repository_mismatch`, `self_hosted_runner`,
+`signer_trigger_mismatch` — never booleans, and the returned verdict carries
+`signature_checked: false` too, because it evaluates a conclusion `gh` already
+reached.
+
+**`--signer-digest` is deliberately not required.** It pins the signer-digest
+certificate extension, which is populated from the `job_workflow_sha` claim; for a
+non-reusable top-level workflow that value **equals the triggering commit SHA**. It
+therefore does not merely invalidate on a workflow edit — **it invalidates on every push**.
+That was observed across all three attestations this repository minted before this
+slice, even though none of those commits touched `attest.yml` or `action.yml`.
+`--signer-workflow` (whose value was byte-identical across all three) is the mandatory
+pin; `--signer-digest` is offered only as an optional, human-invoked one-off.
+`check_signer_trust` has no `signer_digest` parameter at all.
+
+**The REST attestations route is deprecated.** Measured on both the 200 and the 404
+route and absent from four control endpoints, so it is route-level:
+`Deprecation: Tue, 10 Mar 2026`, **`Sunset: Fri, 10 Mar 2028`**. The fetch/verify path
+therefore goes through `gh attestation verify`, a GitHub-maintained abstraction that
+will be migrated over whatever replaces the raw route, and the single `gh` call site
+lives in `scripts/action_anchor_resolve.py` so a migration is a one-line change. The
+sunset date is recorded here so a future maintainer meets it as a documented fact
+rather than as an outage.
+
+**The `[0]` selection is an assumption, and is stated as one.** No ordering guarantee
+is documented for the underlying endpoint, so `[0]` means *"some verified attestation
+for this subject"* — never *"the newest"*. It is sound only because every entry has
+already passed the same signer-trust policy over the same subject digest, so two
+entries cannot materially disagree about the head. **If the policy is ever relaxed to
+accept more than one signer, this assumption breaks** and the step must compare every
+entry rather than indexing.
+
+**Public/private asymmetry.** Public repositories sign against the Sigstore Public
+Good instance and its public transparency log. **Private repositories use GitHub's own
+signing instance, which has no transparency log** and federates only with Actions. The
+independent-audit property this design leans on exists for public repositories and does
+**not** exist for private ones. For a public repository the attestations read also
+succeeds unauthenticated, so an `attestations: read` permission is defensive
+future-proofing rather than a requirement.
+
+**Honest limits.**
+
+1. **This repository cannot dogfood cross-run ancestry.** `.github/workflows/attest.yml`
+   seeds an ephemeral `$RUNNER_TEMP` workspace on every run, so its chain head is new
+   by construction and there is no persistent store to anchor. Coverage is therefore
+   (a) synthetic, through a fake `gh` on `PATH`, and (b) a real *within-run* grown-store
+   ancestry exercise. Do not read that CI green as a cross-run proof.
+2. **Detection of an unattested rewrite is at best one run late**, unchanged from §23.
+   An actor who can land a commit lets CI run once, which mints a genuine attestation
+   over the rewritten chain. Opt-in changes operator consent; it does not change that.
+3. **Mode parity is now CI-covered, and was not before.** Every other CI job installs
+   jsonschema, so the structural hand-checks that back `anchor@1` in a jsonschema-less
+   environment ran nowhere in CI: loosening a `fullmatch` to a `match` in `loop/anchor.py`
+   kills four tests in the pyyaml-only leg but only two with jsonschema installed,
+   because the schema layer masks the rest. The `gates-fallback` job closes that class,
+   and asserts jsonschema is genuinely absent so it cannot decay into a duplicate.
+4. **`--source-ref refs/heads/main` is a repo-specific constant, not a placeholder.** An
+   adopter whose default branch differs must change it. It is deliberately **not**
+   parameterized: a `--source-ref` taken from an untrusted input would let a caller widen
+   the pin to any ref and defeat the control.
