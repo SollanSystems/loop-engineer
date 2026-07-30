@@ -454,6 +454,19 @@ def main(argv: list[str] | None = None) -> int:
     if command == "metrics":
         return _run_metrics(argv)
 
+    # Every flag this command accepts has been extracted by now, so a residual
+    # dash-leading token is always a mistake. Without this, an unknown flag AFTER
+    # the target was silently dropped and the command exited 0 — one typo in
+    # `--expect-chain-ancestor` was a green tamper gate for a check that never
+    # ran, and scaffold wrote a contract past a flag it had ignored. The exit 2
+    # an unknown LEADING flag used to produce was an accident of argument order:
+    # the flag name became argv[0] and failed the target-exists check below.
+    stray = [arg for arg in argv if arg.startswith("-")]
+    if stray:
+        print(f"{command}: unknown option: {stray[0]}", file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
+        return 2
+
     if not argv:
         print(f"{command}: missing target argument", file=sys.stderr)
         print(_USAGE, file=sys.stderr)

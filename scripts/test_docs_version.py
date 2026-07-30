@@ -15,9 +15,9 @@ def test_readme_has_no_stale_seven_skills():
     assert "all 9 skills" in readme
 
 
-def test_plugin_version_is_0_10_0():
+def test_plugin_version_is_current():
     plugin = json.loads(_read(".claude-plugin/plugin.json"))
-    assert plugin["version"] == "0.11.0"
+    assert plugin["version"] == "0.12.0"
 
 
 def test_pyproject_version_matches_plugin():
@@ -39,7 +39,11 @@ def test_readme_version_surfaces_match_plugin_version():
 
 def test_changelog_has_current_and_historical_entries():
     changelog = _read("CHANGELOG.md")
+    # Each cut ADDS its heading and keeps the ones below it. The 0.11.0 cut
+    # replaced 0.10.0's line instead, dropping that heading's only cover.
+    assert "## 0.12.0" in changelog
     assert "## 0.11.0" in changelog
+    assert "## 0.10.0" in changelog
     assert "## 0.9.0" in changelog
     assert "## 0.8.0" in changelog
     assert "## 0.7.0" in changelog

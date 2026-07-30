@@ -1166,9 +1166,9 @@ that the declared goalpost moved after the work was verified. A first-class
 error.** `all_required_verified_evidence` is a new enum member, so an **older**
 kernel reading a terminal that declares it reports `invalid_completion_policy`
 and `schema_violation` — it does not degrade to the old bar, it fails. This
-matters concretely for the README's pinned `@v0.10.0` action and for
-`uvx loop-engineer@0.10.0`: a gate pinned to the older release will reject a
-contract written by the newer one. Pin the gate and the writer to the same
+matters concretely for a README-pinned action and for `uvx loop-engineer@0.10.0`:
+a gate pinned to a release older than 0.11.0 will reject a contract written by a
+newer one. Pin the gate and the writer to the same
 release, or keep writing `all_required` until the gate is upgraded.
 
 **3. `os.link` now runs once PER DISPATCH, not once per run.** The
@@ -1645,10 +1645,13 @@ attests correctness — a signed verdict over a weak gate is a signed weak
 gate. A worker with ordinary merge rights can loosen the gate
 (`loop/**`, `schemas/**` — the contract schemas define what doctor accepts —
 `action.yml`, or the workflow) and then mint a perfectly genuine attestation
-for the loosened gate; the control is human review on those paths (ADR 0002
-decision 6), not signing — and CODEOWNERS is that control **only while the
-repository's ruleset requires code-owner review**. A CODEOWNERS file the
-ruleset does not enforce is documentation, not a control. The chain proves order and non-tampering
+for the loosened gate, and signing does not address it. ADR 0002 decision 6 named
+human review on those paths as the control; it is **withdrawn** (ADR 0002,
+amendment 2026-07-30) because a single-maintainer repository cannot supply it —
+GitHub forbids self-approval, so requiring code-owner review would leave
+maintainer-authored pull requests unmergeable while gating only bot-authored ones.
+Read a CODEOWNERS file as a record of which paths are gate-defining, never as a
+control; that is true here permanently, not until some ruleset changes. The chain proves order and non-tampering
 relative to an anchor, not that the events happened when claimed — a history
 fabricated wholesale at authoring time is byte-valid. Detection of an
 unattested rewrite is at best one run late. And an attestation nothing
@@ -1724,9 +1727,10 @@ notarized.
 
 **Anchor trust is exactly ordinary write access — no better.** An actor who can edit
 the anchor file re-points it at a head they had attested. That is the same class of
-limit as "the worker can edit the verifier" in §23. The anchor path joins
-CODEOWNERS, and CODEOWNERS is a control only while the repository ruleset enforces
-it.
+limit as "the worker can edit the verifier" in §23. The anchor path is listed in
+this repository's CODEOWNERS, which records the gate-defining surface and enforces
+nothing: the ruleset requires no code-owner review, and a single-maintainer
+repository cannot require it (ADR 0002, amendment 2026-07-30).
 
 **Ancestry, not head equality.** `--expect-chain-head` is exact *current-head*
 equality, so it fails **by construction** on any store that legitimately grew:
