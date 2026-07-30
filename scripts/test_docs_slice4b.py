@@ -18,10 +18,7 @@ CODEOWNERS = ROOT / ".github" / "CODEOWNERS"
 CHANGELOG = ROOT / "CHANGELOG.md"
 STRUCTURAL = ROOT / "evals" / "cases" / "structural.json"
 
-# The version at c493804, the slice's base. Tasks 1-11 land as one feature PR and every
-# version surface moves only in a separate release cut.
-_BASE_VERSION = "0.11.0"
-_NEW_CODES = ("chain_anchor_not_ancestor", "anchor_file_unreadable", "anchor_file_invalid",
+_NEW_CODES =("chain_anchor_not_ancestor", "anchor_file_unreadable", "anchor_file_invalid",
               "anchor_attestation_contradicted", "anchor_attestation_unavailable")
 
 
@@ -120,31 +117,33 @@ def test_reference_file_count_is_still_eight():
     assert live == sorted(pinned)
 
 
-def test_changelog_has_an_unreleased_slice_4b_entry():
+def test_changelog_has_a_slice_4b_entry():
     text = CHANGELOG.read_text(encoding="utf-8")
-    unreleased = text[text.index("## Unreleased"):text.index("## 0.11.0")]
-    assert "--compare" in unreleased
-    assert "slice 4b" in unreleased.lower()
-    assert "subject-path" in unreleased or "head-bearing file" in unreleased
+    released = text[text.index("## 0.12.0"):text.index("## 0.11.0")]
+    assert "--compare" in released
+    assert "slice 4b" in released.lower()
+    assert "subject-path" in released or "head-bearing file" in released
 
 
 def test_no_shipped_surface_still_advertises_the_retired_subject_form():
     """Fails against the tree as it stood today: the Unreleased section advertised
     `subject-digest: sha256:<chain-head>` as the shipped form and claimed 4b "does not
     ship here". Both became false the moment this slice landed."""
-    unreleased_text = CHANGELOG.read_text(encoding="utf-8")
-    unreleased = unreleased_text[unreleased_text.index("## Unreleased"):
-                                 unreleased_text.index("## 0.11.0")]
-    assert "subject-digest" not in unreleased
-    assert "does not ship here" not in unreleased
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    released = changelog[changelog.index("## 0.12.0"):changelog.index("## 0.11.0")]
+    assert "subject-digest" not in released
+    assert "does not ship here" not in released
     assert "subject-digest" not in (ROOT / "action.yml").read_text(encoding="utf-8")
-    # 4a's code-owner sentence stays TRUE and must be KEPT: the ruleset still requires 0
-    # approvals, so CODEOWNERS is not yet an operative control.
-    assert "in force only once the repository ruleset requires it" in unreleased
 
 
-def test_no_version_bump_in_this_slice():
-    pyproject = re.search(r'(?m)^version\s*=\s*"([^"]+)"',
-                          (ROOT / "pyproject.toml").read_text(encoding="utf-8")).group(1)
-    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    assert pyproject == plugin["version"] == _BASE_VERSION
+def test_changelog_does_not_promise_code_owner_review_as_a_pending_control():
+    """Inverted at the v0.12.0 cut. 4a's sentence said code-owner review was "in force
+    only once the repository ruleset requires it", implying a switch awaiting a flip.
+    It cannot be flipped: one maintainer, no self-approval, no bypass actor — so
+    requiring it would leave maintainer-authored PRs unmergeable while gating only
+    bot-authored ones. ADR 0002 decision 6 is withdrawn, and the shipped prose must
+    not reintroduce the pending framing."""
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    released = changelog[changelog.index("## 0.12.0"):changelog.index("## 0.11.0")]
+    assert "in force only once the repository ruleset requires it" not in released
+    assert "withdrawn, not pending" in released

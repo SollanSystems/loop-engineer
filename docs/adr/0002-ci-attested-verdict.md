@@ -342,3 +342,67 @@ is the dependency constraint this ADR exists to hold). No `verdict@1` field carr
 anchor — adding a field to a permanent public log is a one-way door, and ancestry is a
 doctor concern. No schema for the comparison report: it is a report, like
 `doctor_report`'s, not an interchange artifact.
+
+## Amendment (2026-07-30, decision 6 is unavailable, not deferred)
+
+A third dated section, for the same reason as the last two: this is a decision
+change, not a correction, and it earns its own record. Where this amendment and
+anything above it disagree — including `## Standing limits`' *"Decision 6 is the
+control; signing is not"* and the Slice 4b amendment's closing paragraph, both of
+which describe a control awaiting a ruleset flip — this amendment governs.
+
+**Decision 6 is withdrawn.** Not deferred, not pending: withdrawn. It asked for
+human review on `loop/**`, `action.yml`, `.github/workflows/**` and (per the 4b
+amendment) the anchor path. This repository cannot supply it. Verified against the
+live API on 2026-07-30: `SollanSystems` is the sole collaborator; ruleset
+`main protection` carries `required_approving_review_count: 0`,
+`require_code_owner_review: false`, `bypass_actors: []` and
+`current_user_can_bypass: "never"`; there is no classic branch protection layered
+underneath, so there is no admin-override escape either. GitHub does not permit a
+pull request author to approve their own pull request.
+
+**What flipping it would actually do**, stated precisely, because the earlier
+framing was not: it would not block "every PR". It would leave every
+*maintainer-authored* pull request touching an owned path permanently unmergeable,
+while *bot-authored* ones — dependabot, copilot-swe-agent — became gated and
+approvable. That is close to the inverse of the intent. The hazard decision 6 was
+written against is an agent with ordinary merge rights, and in this harness agent
+work is authored and merged under the maintainer's own account, so it would fall on
+the unmergeable side of that line, not the gated one.
+
+**The escapes are closed, not merely unattractive.** A GitHub App cannot be a code
+owner — `CODEOWNERS` admits only users and teams holding write access — so the
+approval cannot be automated. Per-path `required_reviewers` needs teams, teams need
+an organization, and this repository is user-owned. A second machine *user* account
+would technically satisfy the mechanism while producing a signature from the same
+hand, which is not review. Adding a bypass actor for the maintainer would restore
+mergeability by making the control inert.
+
+**What replaces it: nothing, and that is the finding.** `.github/CODEOWNERS` stays,
+demoted to what it honestly is — a record of which paths are gate-defining, useful
+to a reader and to any future maintainer, and not a review requirement. The residual
+risk is accepted and named: an actor with merge rights can loosen the gate and mint
+a genuine attestation for the loosened result, and no control in this repository
+prevents it. What the design still buys is legibility, one run late — the
+attestation trail records what the gate said at each push under a certificate the
+workflow cannot forge, so a loosening is discoverable afterward by comparing runs.
+It is worth being exact about the limit of that: `--expect-chain-ancestor` binds an
+actor who can rewrite the event store but *not* the repository. Against an actor
+with merge rights it is defeated in the same commit, because the anchor file is
+editable in that same diff (`reference/repo-os-contract.md` §24: anchor trust is
+exactly ordinary write access, no better).
+
+**Reactivation is a fact about the repository, not a task on a list.** If this
+project ever has a second maintainer with write access, decision 6 becomes available
+and should be reconsidered on its merits. Until then it must not appear anywhere as
+pending.
+
+**A ledger-style substitute was considered and rejected.** A required check that
+refuses a diff touching a gate-defining path without a matching entry in a tracked
+ledger is *mechanically* possible — `pull_request_target` evaluates the workflow
+from the base branch's default ref, so the check would not be editable by the pull
+request it judges, and the obvious circularity objection does not hold. It is
+rejected on merit instead: a ledger entry the author writes in their own pull
+request is a self-declaration, not independent review, so it would restate the
+problem in a new file. It is also a new mechanism with its own risk class, which by
+decision 5's own logic earns its own ADR rather than an amendment clause.

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Resolve a carried anchor@1 head against the attestation index, via `gh`.
 
-The ONLY place in this repo that invokes `gh`. It lives in scripts/, not loop/, because
+The ONLY place in this repo that invokes `gh attestation verify` (action.yml also calls
+`gh api` for the advisory PR comment). It lives in scripts/, not loop/, because
 it reads the environment and touches the network — the tool layer, following the
 scripts/action_scorecard.py precedent of an extracted, TESTED script the composite
 action calls.
@@ -27,8 +28,10 @@ Three consequences, all normative:
    `corroborated`.
 3. The 404 branch is driven by a VERBATIM captured fixture
    (scripts/fixtures/gh_attestation_verify/no_attestation_404.txt), not a paraphrase.
-   The DENIAL shape cannot be captured before this ships — no attestation this repo has
-   minted is verifiable yet — so it is captured in the first post-merge run.
+   The DENIAL shape was likewise captured from live `gh`, post-merge in #111
+   (scripts/fixtures/gh_attestation_verify/signer_denied.txt), once this repo had a
+   verifiable attestation to be denied against. The guess it replaced matched nothing
+   and fell through to `unavailable` — reporting "it said no" as "I could not look".
 
 Anything short of a verified 200 plus a successful `gh attestation verify` is
 non-promoting, and transport-class failures are separately reportable but exactly as

@@ -1,4 +1,10 @@
-# Changes to what the gate checks require human review (ADR 0002, decision 6).
+# The paths that define what the gate checks. ADR 0002 decision 6 asked for human
+# review on them; that decision is WITHDRAWN (ADR 0002 amendment, 2026-07-30) —
+# this repository has one maintainer and GitHub forbids approving your own pull
+# request, so requiring code-owner review would leave maintainer-authored pull
+# requests unmergeable while gating only bot-authored ones. Read this file as a
+# record of the gate-defining surface, not as a control: it binds nothing unless a
+# ruleset requires code-owner review, and this repository's does not and cannot.
 # schemas/ is included beyond the ADR's literal list: the contract schemas
 # define what doctor accepts, so they are the same enforcement surface.
 # Everything else in this repo stays autonomous.

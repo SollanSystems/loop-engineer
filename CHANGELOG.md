@@ -14,7 +14,7 @@ All notable changes to `loop-engineer` are documented here.
   `WORKFLOW.md` and `README.md` are reworded to describe the mechanism; the 0.3.4
   history is left intact.
 
-## Unreleased
+## 0.12.0 — 2026-07-30
 
 **A verdict you can hand to a signer (slice 4a of tamper-evident provenance).**
 The kernel gains `loop verdict <workspace>`: a pure projection of a finished
@@ -28,10 +28,13 @@ Statement, and never reads an environment variable — `scripts/test_verdict_pur
 makes each boundary mechanical.
 
 The composite action gains an opt-in `attest` input (default false): it writes
-the predicate to the runner temp dir and hands it to `actions/attest` as a
-`subject-path` — a file whose entire content is the chain head, exactly 64
-lowercase hex bytes with no trailing newline, produced by the single definition
-`loop verdict --emit-subject` — exposing `attestation-url`/`attestation-id`
+the predicate to the runner temp dir and hands it to `actions/attest` as
+`predicate-path`, alongside a *separate* `subject-path` — a file whose entire
+content is the chain head, exactly 64 lowercase hex bytes with no trailing
+newline, produced by the single definition `loop verdict --emit-subject`. The
+predicate bytes are deliberately **not** the subject (§23): `doctor.validation_mode`
+and `tool.version` live inside the predicate, so the same run projects different
+bytes in different environments. The step exposes `attestation-url`/`attestation-id`
 outputs; a legible permission
 precheck replaces the raw OIDC 403, and an empty chain head skips with a
 warning rather than shipping a malformed subject. `.github/workflows/attest.yml`
@@ -43,9 +46,15 @@ What this does not buy: the signature attests context — repo, workflow,
 trigger, time — never correctness, so a signed verdict over a weakened gate is
 just a signed weakened gate. An agent with ordinary merge rights can loosen
 `loop/**`/`schemas/**`/`action.yml`/the workflow and then mint a perfectly
-genuine attestation for the result — the control is code-owner review on those
-paths, which is in force only once the repository ruleset requires it — and an
-unattested chain rewrite is detected at best one run late.
+genuine attestation for the result. ADR 0002 decision 6 named code-owner review
+on those paths as the control; that decision is **withdrawn, not pending**
+(ADR 0002, amendment 2026-07-30). This repository has one maintainer, GitHub
+forbids approving your own pull request, and the ruleset grants no bypass — so
+requiring code-owner review would leave maintainer-authored pull requests
+unmergeable while gating only the bot-authored ones, and agent work here lands
+under the maintainer's account. `.github/CODEOWNERS` records which paths are
+gate-defining; it is not a review requirement. What remains is legibility rather
+than prevention, and an unattested chain rewrite is detected at best one run late.
 
 **A verdict you can check (slice 4b of tamper-evident provenance).** Verification
 ships alongside emission, so this release describes one coherent state rather
@@ -71,12 +80,15 @@ never by trusting the stored `event_hash` column: a tamperer who can rewrite the
 store can also insert a row bearing the anchored digest. `loop/attestation.py`
 adds a pure signer-trust policy over already-verified certificate claims that
 **refuses** when a claim it needs is absent, and `scripts/action_anchor_resolve.py`
-is the single `gh` call site, fail-closed on anything it cannot confidently
-classify. All of it is normative in `reference/repo-os-contract.md` §24.
+is the single `gh attestation verify` call site, fail-closed on anything it
+cannot confidently classify — including a real signer denial, whose exact stderr
+shape is pinned by a fixture captured from live `gh` rather than paraphrased.
+All of it is normative in `reference/repo-os-contract.md` §24.
 
 **Behavioral change:** the attested subject is now a head-bearing file, so the
-three attestations minted before this release carry a different subject form.
-They remain valid records of what they were.
+three attestations minted before slice 4b landed — the pushes through `c493804` —
+carry a different subject form: their subject digest *is* the chain head, with no
+retrievable bytes that hash to it. They remain valid records of what they were.
 
 What this does not buy, beyond the limits above: anchor trust is **exactly
 ordinary write access** to the anchor file — an actor who can edit it re-points it
@@ -86,6 +98,18 @@ without a subject digest. Attestations are deletable and no retention window is
 documented, so a missing one is a typed failure rather than a skip. And the
 independent-audit property holds for **public** repositories: a private repository
 signs against GitHub's own instance, which has no public transparency log.
+
+**Behavioral change: unknown flags are refused instead of ignored.** `loop
+<command> <target> --typo` used to exit 0 with the flag silently dropped — so one
+typo in `--expect-chain-ancestor` was a green tamper gate for a check that never
+ran, and `scaffold <target> --bogus x` wrote a contract past a flag it had
+ignored. The exit 2 an unknown *leading* flag produced was not a guard either: the
+flag name became the positional target and failed the target-exists check, so the
+protection disappeared the moment the flag moved after the path. Every command now
+refuses a residual dash-leading token with exit 2 and names the flag. The three
+per-flag `only valid for …` guards still fire ahead of it, so those messages are
+unchanged. A script passing a flag this CLI never supported will now fail where it
+previously passed quietly — which is the point.
 
 ## 0.11.0 — 2026-07-26
 

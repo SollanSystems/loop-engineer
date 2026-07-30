@@ -1,6 +1,6 @@
 {
   "name": "loop-engineer",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Design, launch, verify, repair, and improve agent loops. A Claude-Code-native architect+operator for long-running, verifiable, self-improving agentic-coding systems.",
   "author": {
     "name": "Sollan Systems",
