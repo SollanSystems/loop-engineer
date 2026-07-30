@@ -231,6 +231,9 @@ def test_mode_is_not_consumed_by_other_commands(tmp_path):
         result = _run(command, "--mode", str(target))
         assert result.returncode != 0
 
+    # Was pinned the other way: scaffold exited 0 and created a directory literally
+    # named "--mode" — the wart the per-flag guards in loop/__main__.py called out
+    # in their own comments. The generic unknown-flag guard refuses it instead.
     result = subprocess.run(
         [sys.executable, "-m", "loop", "scaffold", "--mode", str(target)],
         cwd=tmp_path,
@@ -238,8 +241,9 @@ def test_mode_is_not_consumed_by_other_commands(tmp_path):
         capture_output=True,
         env={**os.environ, "PYTHONPATH": str(ROOT)},
     )
-    assert result.returncode == 0
-    assert (tmp_path / "--mode").is_dir()
+    assert result.returncode == 2
+    assert "unknown option: --mode" in result.stderr
+    assert not (tmp_path / "--mode").exists(), "scaffold created a path named after the flag"
 
 
 def test_help_lists_plan_lint_command():
@@ -299,3 +303,97 @@ def test_plan_lint_accepts_mode_flag_like_doctor():
     assert result.returncode == 2
     assert "usage" in result.stderr.lower()
     assert "Traceback" not in result.stderr
+
+
+# --- generic unknown-flag rejection -----------------------------------------
+#
+# Before this guard existed, an unknown flag placed AFTER the positional target
+# was silently dropped and the command exited 0 — `loop doctor <ws>
+# --expect-chain-ancester <hex>` (one typo) was a green tamper gate for a check
+# that never ran. The exit 2 you got with the flag BEFORE the path was an
+# accident: the flag name became argv[0] and failed the target-exists check.
+
+_HEX64 = "0" * 64
+_CONTRACT = "examples/coverage-repair"
+
+_TRAILING_FLAG_COMMANDS = (
+    "doctor", "validate", "verify", "verdict", "inspect",
+    "plan-lint", "status", "replay", "simulate", "migrate",
+)
+
+
+def test_unknown_trailing_flag_is_rejected_by_every_targeted_command():
+    for command in _TRAILING_FLAG_COMMANDS:
+        result = _run(command, _CONTRACT, "--totally-made-up-flag", "xyz")
+        assert result.returncode == 2, (
+            f"{command} silently accepted an unknown trailing flag "
+            f"(rc={result.returncode}); a gate that ignores a flag reports a pass "
+            f"for a check that never ran"
+        )
+        assert "unknown option: --totally-made-up-flag" in result.stderr
+        assert "Traceback" not in result.stderr
+
+
+def test_unknown_trailing_flag_is_rejected_by_scaffold_and_metrics(tmp_path):
+    scaffold = _run("scaffold", str(tmp_path / "fresh"), "--totally-made-up-flag", "xyz")
+    assert scaffold.returncode == 2, "scaffold must not CREATE a contract past an unknown flag"
+    assert not (tmp_path / "fresh").exists(), "scaffold created a directory despite the bad flag"
+
+    metrics = _run("metrics", _CONTRACT, "--totally-made-up-flag", "xyz")
+    assert metrics.returncode == 2
+    assert "unknown option: --totally-made-up-flag" in metrics.stderr
+
+
+def test_unknown_leading_flag_reports_the_flag_not_a_missing_path():
+    # The old accidental path blamed the target ("target path does not exist:
+    # --totally-made-up-flag"), sending the reader after the wrong input.
+    result = _run("doctor", "--totally-made-up-flag", "xyz", _CONTRACT)
+    assert result.returncode == 2
+    assert "unknown option: --totally-made-up-flag" in result.stderr
+    assert "target path does not exist" not in result.stderr
+
+
+def test_known_flags_still_work_after_the_positional_target():
+    before = _run("doctor", "--expect-chain-ancestor", _HEX64, _CONTRACT)
+    after = _run("doctor", _CONTRACT, "--expect-chain-ancestor", _HEX64)
+    assert before.returncode == after.returncode, "flag position changed the verdict"
+    assert after.returncode != 2, f"a known flag was rejected as unknown: {after.stderr}"
+    assert json.loads(after.stdout)["ok"] is False
+
+
+def test_mode_flag_still_works_in_both_positions():
+    before = _run("doctor", "--mode", "basic", _CONTRACT)
+    after = _run("doctor", _CONTRACT, "--mode", "basic")
+    assert before.returncode == 0, before.stderr
+    assert after.returncode == 0, after.stderr
+    assert json.loads(before.stdout) == json.loads(after.stdout)
+
+
+def test_bare_dash_compare_value_is_not_read_as_an_unknown_flag():
+    # `--compare -` reads the predicate from stdin; the consumed value must never
+    # be mistaken for a residual flag.
+    result = subprocess.run(
+        [sys.executable, "-m", "loop", "verdict", "--compare", "-", _CONTRACT],
+        cwd=ROOT, text=True, capture_output=True, input='{"not": "a predicate"}',
+    )
+    assert "unknown option" not in result.stderr, result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_wrong_command_flag_guards_keep_their_specific_messages(tmp_path):
+    # The generic guard is a BACKSTOP. A known flag on the wrong command keeps its
+    # precise "only valid for ..." message, which is strictly more useful.
+    cases = (
+        (("scaffold", "--expect-chain-head", _HEX64, str(tmp_path / "a")),
+         "--expect-chain-head is only valid for doctor/validate/verify"),
+        (("scaffold", "--anchor", "x", str(tmp_path / "b")),
+         "--anchor is only valid for doctor/validate/verify"),
+        (("scaffold", "--compare", "x", str(tmp_path / "c")),
+         "--compare is only valid for verdict"),
+        (("doctor", "--executor", "x", _CONTRACT),
+         "--executor is only valid for run"),
+    )
+    for args, expected in cases:
+        result = _run(*args)
+        assert result.returncode == 2, args
+        assert expected in result.stderr, f"{args} lost its specific guard message: {result.stderr}"
