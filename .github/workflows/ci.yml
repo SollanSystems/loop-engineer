@@ -189,6 +189,99 @@ jobs:
             echo "::error::the always-run anchor step recorded '$GATE_HEAD', not the observed head"
             exit 1
           fi
+
+      - name: Ancestry survives a grown store where head equality cannot
+        env:
+          ANCHOR_WS: ${{ steps.seed.outputs.workspace }}
+          ANCHOR_HEAD: ${{ steps.seed.outputs.head }}
+        # F3, proven live and within a single run: appending events MOVES the head, so
+        # feeding run N's head to --expect-chain-head at run N+1 fails by construction.
+        # The inverted pair below is the only ancestry coverage this repo can honestly
+        # claim — its attest workspace is ephemeral, so a true cross-run dogfood needs a
+        # persistent store and is out of scope.
+        run: |
+          python -B - "$ANCHOR_WS" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          sys.path.insert(0, ".")
+          from loop.events import SQLiteEventStore
+
+          ws = pathlib.Path(sys.argv[1])
+          store = SQLiteEventStore(ws / ".loop" / "events.db")
+          for iteration_id in (2, 3):
+              store.append("ci-anchor-probe", "iteration_appended",
+                           {"iteration_id": iteration_id, "outcome": "task_passed"},
+                           actor="ci_anchor_probe")
+          state_path = ws / ".loop" / "state.json"
+          state = json.loads(state_path.read_text(encoding="utf-8"))
+          state["iteration_id"] = 3
+          state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+          PY
+          # The anchored head is still an ANCESTOR: exit 0.
+          python -B -m loop doctor --expect-chain-ancestor "$ANCHOR_HEAD" "$ANCHOR_WS"
+          # The same digest as an exact head EXPECTATION now fails: exit 1, with the
+          # equality code and NOT the ancestry code. Inverted so an unexpected pass fails.
+          set +e
+          out="$(python -B -m loop doctor --expect-chain-head "$ANCHOR_HEAD" "$ANCHOR_WS" 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "::error::expect-chain-head exited $status on a grown store; expected 1"
+            echo "$out"
+            exit 1
+          fi
+          case "$out" in
+            *chain_anchor_not_ancestor*)
+              echo "::error::the grown store reported chain_anchor_not_ancestor; the two codes must not collapse"
+              echo "$out"; exit 1 ;;
+          esac
+          case "$out" in
+            *chain_anchor_mismatch*) ;;
+            *) echo "::error::doctor did not report chain_anchor_mismatch"; echo "$out"; exit 1 ;;
+          esac
+
+  gates-fallback:
+    name: gates (structural-fallback leg)
+    runs-on: ubuntu-latest
+    # Every other job installs jsonschema, so the pyyaml-only leg — the one the anchor@1
+    # and verdict@1 structural hand-checks actually run in — had NO CI cover at all. That
+    # was measured: loosening a fullmatch to a match in loop/anchor.py kills 4 tests in
+    # this leg but only 2 with jsonschema installed, because the schema layer masks the
+    # rest, so a drift between _structural_violation and anchor.schema.json would pass CI.
+    # Deliberately a SEPARATE job rather than a matrix leg on `gates`: a matrix would
+    # rename `gates`' check contexts, and this repo's branch ruleset pins its required
+    # contexts by name.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install gate dependencies (no jsonschema)
+        # pyyaml is required even here: scripts/validate_frontmatter.py imports yaml
+        # unconditionally, so a truly bare environment fails collection.
+        run: python -m pip install --upgrade pip pyyaml pytest
+
+      - name: Assert the leg really ran without jsonschema
+        # Without this the job silently becomes a duplicate of `gates` the moment
+        # something adds jsonschema to the install line above.
+        run: |
+          python -B - <<'PY'
+          import importlib.util
+          import sys
+
+          if importlib.util.find_spec("jsonschema") is not None:
+              print("::error::jsonschema is installed: this leg is not the fallback leg")
+              sys.exit(1)
+          print("jsonschema absent: structural-fallback leg confirmed")
+          PY
+
+      - name: Test suite (structural fallback)
+        run: python -B -m pytest -q -p no:cacheprovider scripts
+
   recipe-openhands:
     name: recipe (openhands)
     runs-on: ubuntu-latest

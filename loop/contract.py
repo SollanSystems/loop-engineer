@@ -1101,12 +1101,14 @@ def validate_contract(target: str | Path, *, mode: str | None = None) -> dict[st
 
 
 def doctor_report(target: str | Path, *, mode: str | None = None,
-                  expect_chain_head: str | None = None) -> dict[str, Any]:
+                  expect_chain_head: str | None = None,
+                  expect_chain_ancestor: str | None = None) -> dict[str, Any]:
     report = validate_contract(target, mode=mode)
     from .runtime import event_consistency_issues
 
     event_store, event_issues = event_consistency_issues(
-        target, mode=mode, expect_chain_head=expect_chain_head)
+        target, mode=mode, expect_chain_head=expect_chain_head,
+        expect_chain_ancestor=expect_chain_ancestor)
     issues = report["issues"] + list(event_issues) if event_issues else report["issues"]
     return {**report, "event_store": event_store, "issues": issues,
             "ok": report["ok"] and not event_issues}

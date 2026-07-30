@@ -28,9 +28,11 @@ Statement, and never reads an environment variable — `scripts/test_verdict_pur
 makes each boundary mechanical.
 
 The composite action gains an opt-in `attest` input (default false): it writes
-the predicate to the runner temp dir and hands it to `actions/attest` with
-`subject-name: loop-chain-head` / `subject-digest: sha256:<chain-head>`,
-exposing `attestation-url`/`attestation-id` outputs; a legible permission
+the predicate to the runner temp dir and hands it to `actions/attest` as a
+`subject-path` — a file whose entire content is the chain head, exactly 64
+lowercase hex bytes with no trailing newline, produced by the single definition
+`loop verdict --emit-subject` — exposing `attestation-url`/`attestation-id`
+outputs; a legible permission
 precheck replaces the raw OIDC 403, and an empty chain head skips with a
 warning rather than shipping a malformed subject. `.github/workflows/attest.yml`
 mints a real attestation on every push to main over a workspace seeded through
@@ -43,8 +45,47 @@ just a signed weakened gate. An agent with ordinary merge rights can loosen
 `loop/**`/`schemas/**`/`action.yml`/the workflow and then mint a perfectly
 genuine attestation for the result — the control is code-owner review on those
 paths, which is in force only once the repository ruleset requires it — and an
-unattested chain rewrite is detected at best one run late. Verification (`--compare`, anchor auto-resolution, signer-trust policy)
-is slice 4b and does not ship here.
+unattested chain rewrite is detected at best one run late.
+
+**A verdict you can check (slice 4b of tamper-evident provenance).** Verification
+ships alongside emission, so this release describes one coherent state rather
+than half a mechanism.
+
+`loop verdict --compare <file|-> <workspace>` compares an attested predicate
+against the local projection over four facets — `run_id`, `chain.head`, the whole
+`terminal` object, and the verified-evidence digest set — exiting 0 on agreement,
+1 on disagreement and 2 on refusal. It accepts a **bare** predicate only: an
+in-toto Statement or a `gh --format json` envelope is refused by name with the
+documented jq path to unwrap. `signature_checked` is the literal `false` on every
+path and there is no flag to flip it — authenticity is `gh attestation verify`'s
+job, it runs first, and neither check implies the other. `doctor` and `tool` are
+deliberately not compared: both are environment-coupled, so comparing them would
+make an honest environment difference read as tampering.
+
+`loop doctor --expect-chain-ancestor <sha256>` (or `--anchor <path>`, resolving
+the digest from a tracked `loop-engineer/anchor@1` file) asks the answerable
+cross-run question — *was this digest ever my head?* — because
+`--expect-chain-head` is exact current-head equality and fails by construction
+once a store grows. Ancestry is established by **replay**, recomputing every hash,
+never by trusting the stored `event_hash` column: a tamperer who can rewrite the
+store can also insert a row bearing the anchored digest. `loop/attestation.py`
+adds a pure signer-trust policy over already-verified certificate claims that
+**refuses** when a claim it needs is absent, and `scripts/action_anchor_resolve.py`
+is the single `gh` call site, fail-closed on anything it cannot confidently
+classify. All of it is normative in `reference/repo-os-contract.md` §24.
+
+**Behavioral change:** the attested subject is now a head-bearing file, so the
+three attestations minted before this release carry a different subject form.
+They remain valid records of what they were.
+
+What this does not buy, beyond the limits above: anchor trust is **exactly
+ordinary write access** to the anchor file — an actor who can edit it re-points it
+at a head they had attested. An attestation can corroborate a carried head but can
+never discover one, because GitHub exposes no endpoint that lists attestations
+without a subject digest. Attestations are deletable and no retention window is
+documented, so a missing one is a typed failure rather than a skip. And the
+independent-audit property holds for **public** repositories: a private repository
+signs against GitHub's own instance, which has no public transparency log.
 
 ## 0.11.0 — 2026-07-26
 

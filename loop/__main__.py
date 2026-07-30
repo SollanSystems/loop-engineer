@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from .contract import VALIDATION_MODES, ValidationModeError, doctor_report
+from .contract import VALIDATION_MODES, ContractIssue, ValidationModeError, doctor_report
 from .plan import validate_plan
 from .runtime import RuntimeStoreError, replay_report, status_report
 from .runcontrol import RunControlError
@@ -25,8 +25,10 @@ _HELP = f"""{_PROG} — validate, inspect, and measure a portable repo-OS loop c
 {_USAGE}
        {_PROG} metrics [--baseline] <workspace-or-.loop>
        {_PROG} doctor|validate|verify [--mode basic|strict|release]
-              [--expect-chain-head SHA256] <workspace-or-.loop>
-       {_PROG} verdict [--mode basic|strict|release] <workspace>
+              [--expect-chain-head SHA256]
+              [--expect-chain-ancestor SHA256 | --anchor PATH] <workspace-or-.loop>
+       {_PROG} verdict [--mode basic|strict|release]
+              [--compare FILE|- | --emit-subject] <workspace>
        {_PROG} status [--mode basic|strict|release] <workspace>
        {_PROG} replay [--mode basic|strict|release] <workspace>
        {_PROG} simulate [--mode basic|strict|release] <workspace>
@@ -80,6 +82,30 @@ options:
                 (doctor/validate/verify) fail unless the event store's chain head
                 is exactly this 64-character lowercase hex hash. A missing,
                 unreadable, unchained, or diverged store fails the gate.
+  --expect-chain-ancestor SHA256
+                (doctor/validate/verify) fail unless this digest WAS the chain head
+                at some sequence, established by replaying and recomputing every
+                hash — never by trusting the stored event_hash column. Use this
+                across runs: exact head equality fails by construction once the
+                store grows. Composes with --expect-chain-head.
+  --anchor PATH (doctor/validate/verify) resolve --expect-chain-ancestor from a
+                tracked loop-engineer/anchor@1 file (conventionally
+                loop-anchor.json, and never under .loop/). Mutually exclusive with
+                --expect-chain-ancestor. An unreadable or non-conformant anchor is
+                a typed issue in the report with ok=false, never a skip.
+  --compare FILE|-
+                (verdict) compare an attested loop-engineer/verdict@1 predicate
+                against this workspace's projection and print an agreement report:
+                exit 0 agree, 1 disagree, 2 refusal. Accepts a BARE predicate only —
+                an in-toto Statement or a `gh --format json` envelope is refused with
+                the jq path to unwrap. This never verifies a signature: authenticity
+                is `gh attestation verify`'s job, it runs first, and neither check
+                implies the other (signature_checked is always false).
+  --emit-subject
+                (verdict) write the attested subject's bytes to stdout: exactly the
+                64-character lowercase hex chain head, no trailing newline. One
+                definition of the byte form, so the signer side and the consumer
+                side cannot disagree.
   --executor ID           (run) record this identity as produced_by.executor on the
                           run's evidence records; unset records "unattributed".
   --verifier-identity ID  (run) record this identity as verified_by.by; unset records
@@ -165,6 +191,33 @@ def _extract_value_flag(argv: list[str], flag: str) -> tuple[str | None, list[st
             remaining.append(arg)
             index += 1
     return value, remaining
+
+
+def _read_compare_document(value: str) -> object:
+    """Load the attested document from a path or from stdin.
+
+    ONE reader, so the file branch and the '-' branch cannot diverge in their failure
+    behavior. Every failure is a VerdictError, so the verdict dispatch renders it as
+    `verdict: …` on stderr with exit 2 and no traceback: a bare read_text() here would
+    let OSError escape and give the operator Python's own exit 1, which in this CLI
+    means "a report said not-ok" — an unreadable file would read as a disagreement.
+    """
+    from .verdict import VerdictError
+
+    try:
+        text = sys.stdin.read() if value == "-" else Path(value).read_text(encoding="utf-8")
+    except OSError as exc:                       # missing, a directory, unreadable
+        raise VerdictError(f"--compare could not read {value!r}: {exc}") from exc
+    except UnicodeDecodeError as exc:            # the #107 lesson
+        raise VerdictError(f"--compare input is not valid UTF-8: {exc}") from exc
+    if not text.strip():
+        # Refused explicitly rather than left to json.loads: an empty stdin is the
+        # error a pipeline whose upstream jq produced nothing hits.
+        raise VerdictError(f"--compare input is empty: {value!r}")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise VerdictError(f"--compare input is not JSON: {exc}") from exc
 
 
 def _extract_run_stub_flags(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -273,6 +326,71 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE, file=sys.stderr)
         return 2
 
+    expect_chain_ancestor = anchor = None
+    if command in {"doctor", "validate", "verify"}:
+        try:
+            expect_chain_ancestor, argv = _extract_value_flag(argv, "--expect-chain-ancestor")
+            anchor, argv = _extract_value_flag(argv, "--anchor")
+        except ValueError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if (expect_chain_ancestor is not None
+                and re.fullmatch(r"[0-9a-f]{64}", expect_chain_ancestor) is None):
+            print(f"{command}: --expect-chain-ancestor must be a 64-character lowercase hex sha256",
+                  file=sys.stderr)
+            return 2
+        if anchor is not None and expect_chain_ancestor is not None:
+            # Silent precedence between an explicit digest and a resolved one is how a
+            # gate becomes a suggestion. The action layer, where the inputs are the
+            # surface, is where ADR 0002 decision 5's precedence is honored.
+            print(f"{command}: --anchor and --expect-chain-ancestor are mutually exclusive",
+                  file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+    else:
+        # Same reason as the --expect-chain-head guard above.
+        for flag in ("--expect-chain-ancestor", "--anchor"):
+            if any(a == flag or a.startswith(f"{flag}=") for a in argv):
+                print(f"{command}: {flag} is only valid for doctor/validate/verify",
+                      file=sys.stderr)
+                print(_USAGE, file=sys.stderr)
+                return 2
+
+    compare_path = None
+    emit_subject = False
+    if command == "verdict":
+        try:
+            compare_path, argv = _extract_value_flag(argv, "--compare")
+        except ValueError as exc:
+            print(f"{command}: {exc}", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        if "--emit-subject" in argv:
+            emit_subject = True
+            argv = [a for a in argv if a != "--emit-subject"]
+        if compare_path is not None and emit_subject:
+            print("verdict: --compare and --emit-subject are mutually exclusive",
+                  file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
+            return 2
+        for flag in ("--verify-signature", "--signature", "--signer-workflow", "--signer-digest"):
+            if any(a == flag or a.startswith(f"{flag}=") for a in argv):
+                # D10.1: there is no flag to flip. Authenticity is `gh attestation
+                # verify`'s job and it runs first; this command establishes agreement.
+                print(f"verdict: {flag} is not a verdict option — verdict never verifies a "
+                      "signature", file=sys.stderr)
+                print(_USAGE, file=sys.stderr)
+                return 2
+    else:
+        # Same reason as the --expect-chain-head guard above: there is no generic
+        # unknown-flag guard, so scaffold would CREATE a directory named after the flag.
+        for flag in ("--compare", "--emit-subject"):
+            if any(a == flag or a.startswith(f"{flag}=") for a in argv):
+                print(f"{command}: {flag} is only valid for verdict", file=sys.stderr)
+                print(_USAGE, file=sys.stderr)
+                return 2
+
     executor = verifier_identity = None
     if command == "run":
         for flag, slot in (("--executor", "executor"), ("--verifier-identity", "verifier_identity")):
@@ -365,17 +483,44 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command in {"doctor", "validate", "verify"}:
+        resolved_ancestor = expect_chain_ancestor
+        anchor_issue = None
+        if anchor is not None:
+            from .anchor import AnchorError, read_anchor
+
+            try:
+                resolved_ancestor = read_anchor(anchor)["chain_head"]
+            except AnchorError as exc:
+                # A report, never a bare stderr line: the operator's CI reads the JSON,
+                # and a stderr line loses the code. resolved_ancestor stays None so the
+                # ancestry gate is not ALSO asked a question it has no digest for —
+                # one failure, one code.
+                resolved_ancestor = None
+                anchor_issue = ContractIssue(exc.code, str(exc), Path(anchor))
         try:
-            return _print_json(doctor_report(target, mode=mode, expect_chain_head=expect_chain_head))
+            report = doctor_report(target, mode=mode, expect_chain_head=expect_chain_head,
+                                   expect_chain_ancestor=resolved_ancestor)
         except ValidationModeError as exc:
             print(f"{command}: {exc}", file=sys.stderr)
             return 2
+        if anchor_issue is not None:
+            report = {**report, "issues": [*report["issues"], anchor_issue], "ok": False}
+        return _print_json(report)
 
     if command == "verdict":
-        from .verdict import VerdictError, build_verdict
+        from .verdict import VerdictError, build_verdict, compare_verdict, subject_bytes
         from .chain import ChainHashError, canonical_json
 
         try:
+            if emit_subject:
+                # buffer.write, never print: a trailing newline would change the subject
+                # digest, and the 64-byte form is normative.
+                sys.stdout.buffer.write(
+                    subject_bytes(build_verdict(target, mode=mode)["chain"]["head"]))
+                return 0
+            if compare_path is not None:
+                return _print_json(compare_verdict(
+                    _read_compare_document(compare_path), target, mode=mode))
             print(canonical_json(build_verdict(target, mode=mode)))
             return 0
         except (VerdictError, ChainHashError) as exc:

@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable, Iterator, TypeVar
 
+from .chain import head_sequence
 from .completion import CompletionPolicyError, criteria_satisfy_completion
 from .contract import ContractIssue
 from .events import (
@@ -279,8 +280,30 @@ def _anchor_mismatch(message: str) -> dict[str, Any]:
     return ContractIssue("chain_anchor_mismatch", message)
 
 
+def _not_ancestor(message: str) -> dict[str, Any]:
+    """Deliberately NOT a reuse of chain_anchor_mismatch (D3).
+
+    "your current head is not what I expected" and "the head you anchored is not in
+    my history at all" are different facts, and doctor issue codes are the population
+    verdict.doctor.issue_codes is drawn from — a permanent, public log. One shared
+    code would collapse them there forever.
+    """
+    return ContractIssue("chain_anchor_not_ancestor", message)
+
+
+def _ancestry(target: str | Path, mode: str | None, expect_chain_ancestor: str) -> int | None:
+    """Sequence at which the anchored head was the head, by replay.
+
+    A fourth read-only fold of the store, in the same tradition as
+    _bound_evidence_issues (repo-os-contract.md #22).
+    """
+    _, _run_id, events, _validation = _events(target, mode)
+    return head_sequence(events, expect_chain_ancestor)
+
+
 def event_consistency_issues(
-    target: str | Path, *, mode: str | None = None, expect_chain_head: str | None = None
+    target: str | Path, *, mode: str | None = None, expect_chain_head: str | None = None,
+    expect_chain_ancestor: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Return event-store health and the existing status/replay findings."""
     path = _store_path(target)
@@ -295,6 +318,11 @@ def event_consistency_issues(
         if expect_chain_head is not None:
             absent_issues.append(_anchor_mismatch(
                 "an anchored chain head was supplied but no event store is present"))
+        if expect_chain_ancestor is not None:
+            # D5: an absent store with an ancestor supplied FAILS. It never skips —
+            # otherwise deleting the store is a gate bypass.
+            absent_issues.append(_not_ancestor(
+                "an anchored chain ancestor was supplied but no event store is present"))
         if absent_issues:
             return {"present": False, "sidecar_residue": bool(residue)}, absent_issues
         return {"present": False}, []
@@ -306,11 +334,19 @@ def event_consistency_issues(
         # store that becomes unreadable between reads must surface as a typed finding
         # rather than an untyped traceback out of doctor_report (R007).
         bound_issues = _bound_evidence_issues(target, mode)
+        # Inside the same guard, for the same R007 reason: the ancestry replay is a
+        # FOURTH independent read, and a store that becomes unreadable between reads
+        # must surface as a typed finding rather than a traceback out of doctor_report.
+        ancestor_sequence = (_ancestry(target, mode, expect_chain_ancestor)
+                             if expect_chain_ancestor is not None else None)
     except RuntimeStoreError as exc:
         unreadable_issues = [ContractIssue(exc.code, str(exc))]
         if expect_chain_head is not None:
             unreadable_issues.append(_anchor_mismatch(
                 "an anchored chain head was supplied but the event store cannot be read"))
+        if expect_chain_ancestor is not None:
+            unreadable_issues.append(_not_ancestor(
+                "an anchored chain ancestor was supplied but the event store cannot be read"))
         return {"present": True, "readable": False, "error_code": exc.code}, unreadable_issues
     issues = list(status["divergence"]) + list(replay["findings"])
     issues.extend(bound_issues)
@@ -325,7 +361,12 @@ def event_consistency_issues(
         if actual != expect_chain_head:
             issues.append(_anchor_mismatch(
                 f"chain head {actual!r} does not match expected {expect_chain_head!r}"))
-    return {
+    if expect_chain_ancestor is not None and ancestor_sequence is None:
+        issues.append(_not_ancestor(
+            f"anchored chain head {expect_chain_ancestor!r} was never the head of this "
+            "chain at any sequence — established by replay, so a row bearing the "
+            "anchored digest without a matching recomputed hash does not satisfy it"))
+    report = {
         "present": True,
         "readable": True,
         "run_id": status["run_id"],
@@ -334,7 +375,12 @@ def event_consistency_issues(
         "deterministic": replay["deterministic"],
         "legal_sequence": replay["legal_sequence"],
         "chain": {"head": status["chain_head"], "unchained_prefix": status["unchained_prefix"]},
-    }, issues
+    }
+    if expect_chain_ancestor is not None:
+        # Only when asked: with no ancestor supplied the report stays byte-identical
+        # to the pre-4b shape (the #22 habit).
+        report["anchor"] = {"expected": expect_chain_ancestor, "sequence": ancestor_sequence}
+    return report, issues
 
 
 def _bound_evidence_issues(target: str | Path, mode: str | None) -> list[dict[str, Any]]:
