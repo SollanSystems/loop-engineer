@@ -71,9 +71,17 @@ _UNAVAILABLE_MARKERS = (
     "temporary failure", "cancelled", "canceled",
 )
 # Only these reach `contradicted`: an attestation WAS found and did not survive.
+#
+# `verifying with issuer` is the REAL shape, captured from live gh against this repo's
+# first verifiable attestation with a deliberately wrong --signer-workflow
+# (scripts/fixtures/gh_attestation_verify/signer_denied.txt). The rest of this tuple was
+# a pre-merge guess, and the guess did not match: without this marker the most common
+# denial fell through to the fail-closed default and was reported as `unavailable`, which
+# is non-promoting either way but loses D5's observability distinction — "it said no" read
+# as "I could not look". The fixture is why that was caught rather than assumed.
 _CONTRADICTED_MARKERS = (
-    "verification failed", "failed to verify", "signature", "does not match",
-    "not signed by", "unable to verify", "policy", "mismatch",
+    "verifying with issuer", "verification failed", "failed to verify", "signature",
+    "does not match", "not signed by", "unable to verify", "policy", "mismatch",
 )
 
 
