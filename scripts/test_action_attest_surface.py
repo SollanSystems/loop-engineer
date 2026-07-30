@@ -123,6 +123,24 @@ def test_resolve_step_and_downstream_checks_have_no_continue_on_error(steps, nam
     assert body.strip(), "the step must still actually run something"
 
 
+def test_compare_is_guarded_on_head_equality_while_ancestry_is_unconditional(steps):
+    """Found by whole-branch review: `--compare` treats an ancestor head as a
+    DISAGREEMENT (a verdict projects one run), so running it against an older attested
+    predicate on a store that legitimately grew fails every time — which would make the
+    `anchor` input unusable for the cross-run detection it exists for. Ancestry is the
+    cross-run gate and must be unconditional; agreement is a same-run question and must
+    be guarded on head equality, with the skip announced."""
+    body = steps["compare the attested verdict"]["run"]
+    ancestry, _, remainder = body.partition("loop doctor --expect-chain-ancestor")
+    assert remainder, "the ancestry gate must be present"
+    assert "loop verdict --compare" not in ancestry, "ancestry must run FIRST, unguarded"
+    assert 'if [ "$ANCHOR_HEAD" = "$CURRENT_HEAD" ]' in remainder
+    assert "loop verdict --compare" in remainder
+    assert "GITHUB_STEP_SUMMARY" in remainder, "a skipped compare must be announced"
+    env = steps["compare the attested verdict"]["env"]
+    assert env["CURRENT_HEAD"] == "${{ steps.chain-head.outputs.chain-head }}"
+
+
 def test_no_gating_step_is_marked_if_always(steps):
     """always() runs a step after an upstream failure and is the standard way a gate's
     red goes unseen. The pre-existing `if: always()` on "chain head (anchor surface)" is

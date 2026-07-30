@@ -40,7 +40,9 @@ inputs:
       chain. An attestation can only corroborate a head, never discover one —
       GitHub exposes no endpoint that lists attestations without a subject
       digest. Requires signer-workflow. Empty performs no anchor resolution.
-      Anchor trust is exactly ordinary write access to the anchor file.
+      Anchor trust is exactly ordinary write access to the anchor file. On a
+      PRIVATE repository the index read needs credentials, so pass
+      github-token as well; on a public repository it succeeds unauthenticated.
     required: false
     default: ""
   signer-workflow:
@@ -238,12 +240,30 @@ runs:
       shell: bash
       env:
         LOOP_PATH: "${{ inputs.path }}"
+        ANCHOR_HEAD: "${{ steps.anchor.outputs.anchor-head }}"
+        CURRENT_HEAD: "${{ steps.chain-head.outputs.chain-head }}"
+        PREDICATE: "${{ steps.anchor.outputs.predicate-path }}"
       run: |
         # Authenticity first (gh attestation verify, inside the resolve step above), then
-        # agreement, then ancestry. Neither implies the other. No error suppression:
-        # both calls are gating.
-        loop verdict --compare "${{ steps.anchor.outputs.predicate-path }}" "$LOOP_PATH"
-        loop doctor --expect-chain-ancestor "${{ steps.anchor.outputs.anchor-head }}" "$LOOP_PATH"
+        # ancestry, then agreement where agreement is a meaningful question. No error
+        # suppression: every call here is gating.
+        #
+        # ANCESTRY IS THE CROSS-RUN GATE and runs unconditionally.
+        loop doctor --expect-chain-ancestor "$ANCHOR_HEAD" "$LOOP_PATH"
+        # AGREEMENT IS A SAME-RUN QUESTION. A verdict projects ONE run, so an attested
+        # head that is merely an ancestor of the current head is a different run's
+        # verdict — a disagreement by design (reference §24). Running --compare against
+        # an older attested predicate on a store that legitimately grew would therefore
+        # fail every time, which would make this input unusable for the cross-run
+        # detection it exists for. So compare only when the anchored head IS the current
+        # head, and say out loud when it was skipped.
+        if [ "$ANCHOR_HEAD" = "$CURRENT_HEAD" ]; then
+          loop verdict --compare "$PREDICATE" "$LOOP_PATH"
+        else
+          echo "**loop-engineer anchor:** corroborated, and still an ancestor of this run's chain." \
+               "\`--compare\` was not run: the anchored head \`$ANCHOR_HEAD\` is an earlier run's," \
+               "and a verdict projects one run (reference §24)." >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - name: anchor resolution skipped (explicit head wins)
       if: ${{ inputs.anchor != '' && inputs.expect-chain-head != '' }}
