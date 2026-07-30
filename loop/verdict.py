@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ._resources import schemas_dir
-from .contract import _strict_evidence_failure, doctor_report
+from .contract import ContractIssue, _strict_evidence_failure, doctor_report
 from .paths import LoopPaths, resolve_loop_paths
 from .runtime import RuntimeStoreError, bound_artifact_digests
 
@@ -137,6 +137,134 @@ def _verified_evidence(
             projected, key=lambda item: (item[0], item[1] or "", item[2] or "")
         )
     ]
+
+
+COMPARISON_CODES = (
+    "verdict_run_id_disagreement",
+    "verdict_head_disagreement",
+    "verdict_terminal_disagreement",
+    "verdict_evidence_disagreement",
+)
+
+_UNWRAP_HINT = (
+    "compare accepts a BARE loop-engineer/verdict@1 predicate; extract it with "
+    "`jq '.[0].verificationResult.statement.predicate'`"
+)
+_STATEMENT_KEYS = ("_type", "subject", "predicateType", "predicate")
+_ENVELOPE_KEYS = ("verificationResult", "attestation")
+
+
+def _refuse_unless_bare_predicate(attested: object) -> dict[str, Any]:
+    """Typed refusals, before any comparison, so an operator who piped a `gh` envelope
+    is told to unwrap rather than told their heads disagree.
+
+    Best-effort unwrapping of a vendor envelope here is exactly how a trust boundary
+    rots: the kernel would start depending on the shape of another tool's output.
+    """
+    if isinstance(attested, list):
+        raise VerdictError(
+            f"attested document is a top-level array — this is a `gh --format json` "
+            f"envelope, not a predicate. {_UNWRAP_HINT}")
+    if not isinstance(attested, dict):
+        raise VerdictError(
+            f"attested document is not a JSON object (found {type(attested).__name__}). "
+            f"{_UNWRAP_HINT}")
+    found = [key for key in _STATEMENT_KEYS if key in attested]
+    if found:
+        raise VerdictError(
+            f"attested document carries {', '.join(found)} — this is an in-toto Statement, "
+            f"not a predicate. {_UNWRAP_HINT}")
+    wrapper = [key for key in _ENVELOPE_KEYS if key in attested]
+    if wrapper:
+        raise VerdictError(
+            f"attested document carries {', '.join(wrapper)} — this is a `gh --format json` "
+            f"envelope, not a predicate. {_UNWRAP_HINT}")
+    if attested.get("schema") != VERDICT_SCHEMA_ID:
+        raise VerdictError(
+            f"attested document is not a {VERDICT_SCHEMA_ID} (schema is "
+            f"{attested.get('schema')!r}). {_UNWRAP_HINT}")
+    return attested
+
+
+def _evidence_set(entries: object) -> frozenset[tuple[Any, Any, Any]] | None:
+    """The comparable evidence identity: the de-duplicated three-tuple set.
+
+    None for a malformed evidence field, which can never agree with a projection.
+    """
+    if not isinstance(entries, list):
+        return None
+    return frozenset(
+        (entry.get("digest"), entry.get("code_digest"), entry.get("policy_digest"))
+        if isinstance(entry, dict) else ("<non-object>", json.dumps(entry, default=str), None)
+        for entry in entries
+    )
+
+
+def _evidence_view(entries: object) -> list[dict[str, Any]]:
+    """Digest-only projection of an evidence list for the report's compared block."""
+    items = _evidence_set(entries)
+    if items is None:
+        return []
+    return [{"digest": digest, "code_digest": code, "policy_digest": policy}
+            for digest, code, policy in sorted(items, key=lambda i: (str(i[0]), str(i[1]), str(i[2])))]
+
+
+def compare_verdict(attested: object, target: str | Path, *,
+                    mode: str | None = None) -> dict[str, Any]:
+    """Compare an attested ``verdict@1`` predicate against this workspace's projection.
+
+    This establishes AGREEMENT. ``gh attestation verify`` establishes AUTHENTICITY, it
+    runs first, and neither implies the other — so ``signature_checked`` is the literal
+    ``False`` on every path and no flag changes it. Four facets are compared: ``run_id``,
+    ``chain.head``, the whole ``terminal`` object, and the ``evidence`` digest set.
+
+    ``doctor`` and ``tool`` are deliberately NOT compared: both live inside the
+    predicate and are environment-coupled (the same run projects a different
+    ``doctor.validation_mode`` with and without jsonschema), so comparing them would
+    make an honest environment difference read as tampering. Whether an attested
+    ``doctor.ok`` should GATE is a policy question, not an agreement question.
+
+    Refuses (``VerdictError``) anything that is not a bare predicate; the local side
+    comes from :func:`build_verdict`, so its no-terminal-record refusal is inherited.
+    """
+    document = _refuse_unless_bare_predicate(attested)
+    local = build_verdict(target, mode=mode)
+
+    attested_chain = document.get("chain") if isinstance(document.get("chain"), dict) else {}
+    attested_terminal = (document.get("terminal")
+                         if isinstance(document.get("terminal"), dict) else {})
+    terminal_facet = ("state", "completion_policy", "false_completion")
+
+    compared = {
+        "run_id": {"attested": document.get("run_id"), "local": local["run_id"]},
+        "head": {"attested": attested_chain.get("head"), "local": local["chain"]["head"]},
+        "terminal": {
+            "attested": {key: attested_terminal.get(key) for key in terminal_facet},
+            "local": {key: local["terminal"][key] for key in terminal_facet},
+        },
+        "evidence": {"attested": _evidence_view(document.get("evidence")),
+                     "local": _evidence_view(local["evidence"])},
+    }
+    agreement = {
+        "run_id": document.get("run_id") == local["run_id"],
+        "head": attested_chain.get("head") == local["chain"]["head"],
+        "terminal": compared["terminal"]["attested"] == compared["terminal"]["local"],
+        "evidence": _evidence_set(document.get("evidence")) == _evidence_set(local["evidence"]),
+    }
+    for facet, agrees in agreement.items():
+        compared[facet]["agrees"] = agrees
+
+    issues: list[dict[str, Any]] = []
+    for facet, code in (("run_id", "verdict_run_id_disagreement"),
+                        ("head", "verdict_head_disagreement"),
+                        ("terminal", "verdict_terminal_disagreement"),
+                        ("evidence", "verdict_evidence_disagreement")):
+        if not agreement[facet]:
+            issues.append(ContractIssue(
+                code,
+                f"attested {facet} {compared[facet]['attested']!r} does not agree with the "
+                f"local projection {compared[facet]['local']!r}"))
+    return {"ok": not issues, "signature_checked": False, "compared": compared, "issues": issues}
 
 
 def build_verdict(target: str | Path, *, mode: str | None = None) -> dict[str, Any]:
