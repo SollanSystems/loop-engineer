@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -21,10 +22,36 @@ from .runtime import RuntimeStoreError, bound_artifact_digests
 
 VERDICT_SCHEMA_ID = "loop-engineer/verdict@1"
 PREDICATE_TYPE = "urn:loop-engineer:verdict:1"
+SUBJECT_NAME = "loop-chain-head"
+
+_HEAD_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 class VerdictError(ValueError):
     """A verdict cannot be projected from this workspace."""
+
+
+def subject_bytes(head: object) -> bytes:
+    """The attested subject's bytes: exactly the 64-hex chain head, nothing else.
+
+    ONE definition, so the signer side and the consumer side cannot disagree about
+    64 bytes. The signer hands this file to ``actions/attest`` as ``subject-path``;
+    a consumer regenerates byte-identical content from the head alone and hands it
+    to ``gh attestation verify``. That is what makes verification runnable at all:
+    the chain head is a SHA-256 over a synthesized event preimage, so no retrievable
+    bytes hash to it, and ``gh attestation verify`` accepts only a file path or an
+    OCI URI and hashes that file's *content* — so an attestation whose subject digest
+    IS the head can never be presented an artifact.
+
+    No trailing newline. The byte form is normative: a stray ``\\n`` would change the
+    subject digest, so it is pinned by test rather than left to a shell's ``echo``.
+    """
+    if not isinstance(head, str) or _HEAD_PATTERN.fullmatch(head) is None:
+        raise VerdictError(
+            "subject requires a 64-character lowercase hex chain head; "
+            f"refusing {head!r} (a store-less workspace has no subject to attest)"
+        )
+    return head.encode("ascii")
 
 
 def _load_verdict_schema() -> dict[str, Any]:

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-engineer/anchor@1",
+  "title": "Loop Engineer Anchor @1",
+  "description": "A tracked carry channel for a previously attested chain head. Nothing here is trusted: the anchor is a carried claim whose only function is to give an attestation lookup a digest to ask about, because GitHub exposes no endpoint that lists attestations without one. Anchor trust is exactly ordinary write access to this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "chain_head"],
+  "properties": {
+    "schema": { "const": "loop-engineer/anchor@1" },
+    "chain_head": { "type": "string", "pattern": "^[0-9a-f]{64}$", "maxLength": 64 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "attestation_id": { "type": "string", "maxLength": 64 },
+    "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "recorded_at": { "type": "string", "maxLength": 64 }
+  }
+}
